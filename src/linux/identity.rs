@@ -31,36 +31,64 @@ fn collect_identity() -> (LinuxIdentity, Vec<ComponentOutcome>) {
     let mut identity = LinuxIdentity::default();
     let mut outcomes = Vec::with_capacity(4);
 
+    let started_at_utc = now_utc();
     match collect_uname() {
         Ok(value) => {
+            let observed_at_utc = now_utc();
             identity.kernel = Some(value);
-            outcomes.push(ComponentOutcome::collected(UNAME_SOURCE, now_utc()));
+            outcomes.push(ComponentOutcome::collected(
+                UNAME_SOURCE,
+                started_at_utc,
+                now_utc(),
+                observed_at_utc,
+            ));
         }
-        Err(error) => outcomes.push(error),
+        Err(error) => outcomes.push(error.with_timing(started_at_utc, now_utc())),
     }
 
+    let started_at_utc = now_utc();
     match collect_distribution() {
         Ok(value) => {
+            let observed_at_utc = now_utc();
             identity.distribution = Some(value);
-            outcomes.push(ComponentOutcome::collected(OS_RELEASE_SOURCE, now_utc()));
+            outcomes.push(ComponentOutcome::collected(
+                OS_RELEASE_SOURCE,
+                started_at_utc,
+                now_utc(),
+                observed_at_utc,
+            ));
         }
-        Err(error) => outcomes.push(error),
+        Err(error) => outcomes.push(error.with_timing(started_at_utc, now_utc())),
     }
 
+    let started_at_utc = now_utc();
     match collect_clock_parameters() {
         Ok(value) => {
+            let observed_at_utc = now_utc();
             identity.clock = Some(value);
-            outcomes.push(ComponentOutcome::collected(CLOCK_SOURCE, now_utc()));
+            outcomes.push(ComponentOutcome::collected(
+                CLOCK_SOURCE,
+                started_at_utc,
+                now_utc(),
+                observed_at_utc,
+            ));
         }
-        Err(error) => outcomes.push(error),
+        Err(error) => outcomes.push(error.with_timing(started_at_utc, now_utc())),
     }
 
+    let started_at_utc = now_utc();
     match collect_uptime(Path::new("/proc/uptime")) {
         Ok(value) => {
+            let observed_at_utc = now_utc();
             identity.uptime_microseconds = Some(value);
-            outcomes.push(ComponentOutcome::collected(UPTIME_SOURCE, now_utc()));
+            outcomes.push(ComponentOutcome::collected(
+                UPTIME_SOURCE,
+                started_at_utc,
+                now_utc(),
+                observed_at_utc,
+            ));
         }
-        Err(error) => outcomes.push(error),
+        Err(error) => outcomes.push(error.with_timing(started_at_utc, now_utc())),
     }
 
     (identity, outcomes)

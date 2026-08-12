@@ -50,6 +50,8 @@ impl CollectionStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComponentOutcome {
     pub source: &'static str,
+    pub started_at_utc: DateTime<Utc>,
+    pub finished_at_utc: DateTime<Utc>,
     pub status: CollectionStatus,
     pub error_code: Option<&'static str>,
     pub os_error_code: Option<i32>,
@@ -57,9 +59,16 @@ pub struct ComponentOutcome {
 }
 
 impl ComponentOutcome {
-    pub fn collected(source: &'static str, observed_at_utc: DateTime<Utc>) -> Self {
+    pub fn collected(
+        source: &'static str,
+        started_at_utc: DateTime<Utc>,
+        finished_at_utc: DateTime<Utc>,
+        observed_at_utc: DateTime<Utc>,
+    ) -> Self {
         Self {
             source,
+            started_at_utc,
+            finished_at_utc,
             status: CollectionStatus::Collected,
             error_code: None,
             os_error_code: None,
@@ -73,13 +82,26 @@ impl ComponentOutcome {
         error_code: &'static str,
         os_error_code: Option<i32>,
     ) -> Self {
+        let timestamp = now_utc();
         Self {
             source,
+            started_at_utc: timestamp,
+            finished_at_utc: timestamp,
             status,
             error_code: Some(error_code),
             os_error_code,
             observed_at_utc: None,
         }
+    }
+
+    pub fn with_timing(
+        mut self,
+        started_at_utc: DateTime<Utc>,
+        finished_at_utc: DateTime<Utc>,
+    ) -> Self {
+        self.started_at_utc = started_at_utc;
+        self.finished_at_utc = finished_at_utc;
+        self
     }
 }
 

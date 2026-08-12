@@ -59,6 +59,20 @@ fn snapshot_command_publishes_a_valid_minimum_artifact() {
             .unwrap(),
         4
     );
+    assert_eq!(
+        connection
+            .query_row(
+                "SELECT count(*) FROM collector_outcome
+                 WHERE started_at_utc > finished_at_utc
+                    OR (observed_at_utc IS NOT NULL
+                        AND (observed_at_utc < started_at_utc
+                             OR observed_at_utc > finished_at_utc))",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        0
+    );
     let hostname: String = connection
         .query_row("SELECT hostname FROM linux_identity", [], |row| row.get(0))
         .unwrap();

@@ -119,6 +119,8 @@ impl SqliteWriter {
                 CREATE TABLE collector_outcome (
                     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
                     source TEXT NOT NULL,
+                    started_at_utc TEXT NOT NULL,
+                    finished_at_utc TEXT NOT NULL,
                     status TEXT NOT NULL CHECK (
                         status IN (
                             'collected',
@@ -191,9 +193,10 @@ impl SqliteWriter {
             let mut statement = transaction
                 .prepare(
                     "INSERT INTO collector_outcome (
-                        snapshot_id, source, status, error_code, os_error_code,
-                        observed_at_utc, collector_name, collector_version
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                        snapshot_id, source, started_at_utc, finished_at_utc,
+                        status, error_code, os_error_code, observed_at_utc,
+                        collector_name, collector_version
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 )
                 .map_err(ArtifactError::Sqlite)?;
             for outcome in &snapshot.outcomes {
@@ -201,6 +204,8 @@ impl SqliteWriter {
                     .execute(params![
                         snapshot.snapshot_id.to_string(),
                         outcome.source,
+                        format_timestamp(outcome.started_at_utc),
+                        format_timestamp(outcome.finished_at_utc),
                         outcome.status.as_str(),
                         outcome.error_code,
                         outcome.os_error_code,
