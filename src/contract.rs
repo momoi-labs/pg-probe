@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use chrono::{DateTime, SecondsFormat, Utc};
 use uuid::Uuid;
 
@@ -174,8 +176,13 @@ impl Snapshot {
 }
 
 pub fn now_utc() -> DateTime<Utc> {
-    DateTime::from_timestamp_micros(Utc::now().timestamp_micros())
-        .expect("the current UTC timestamp is representable")
+    let micros = match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(elapsed) => i64::try_from(elapsed.as_micros()).unwrap_or(i64::MAX),
+        Err(before_epoch) => {
+            i64::try_from(before_epoch.duration().as_micros()).map_or(i64::MIN, |micros| -micros)
+        }
+    };
+    DateTime::from_timestamp_micros(micros).unwrap_or(DateTime::UNIX_EPOCH)
 }
 
 pub fn format_timestamp(timestamp: DateTime<Utc>) -> String {
