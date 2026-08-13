@@ -188,9 +188,35 @@ impl Snapshot {
         target_inventory: PostgresTargetInventory,
         outcomes: Vec<ComponentOutcome>,
     ) -> Self {
-        let status = if outcomes
-            .iter()
-            .any(|outcome| outcome.status.makes_snapshot_partial())
+        Self::with_completeness(
+            snapshot_id,
+            started_at_utc,
+            finished_at_utc,
+            identity,
+            compute_memory,
+            storage_limits,
+            target_inventory,
+            outcomes,
+            false,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_completeness(
+        snapshot_id: Uuid,
+        started_at_utc: DateTime<Utc>,
+        finished_at_utc: DateTime<Utc>,
+        identity: LinuxIdentity,
+        compute_memory: LinuxComputeMemory,
+        storage_limits: LinuxStorageLimits,
+        target_inventory: PostgresTargetInventory,
+        outcomes: Vec<ComponentOutcome>,
+        interrupted: bool,
+    ) -> Self {
+        let status = if interrupted
+            || outcomes
+                .iter()
+                .any(|outcome| outcome.status.makes_snapshot_partial())
         {
             SnapshotStatus::Partial
         } else {
@@ -268,6 +294,24 @@ mod tests {
                 "invalid_uptime",
                 None,
             )],
+        );
+
+        assert_eq!(snapshot.status, SnapshotStatus::Partial);
+    }
+
+    #[test]
+    fn interruption_makes_an_otherwise_clean_snapshot_partial() {
+        let now = now_utc();
+        let snapshot = Snapshot::with_completeness(
+            Uuid::new_v4(),
+            now,
+            now,
+            LinuxIdentity::default(),
+            LinuxComputeMemory::default(),
+            LinuxStorageLimits::default(),
+            PostgresTargetInventory::default(),
+            Vec::new(),
+            true,
         );
 
         assert_eq!(snapshot.status, SnapshotStatus::Partial);

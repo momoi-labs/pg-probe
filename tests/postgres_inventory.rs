@@ -18,14 +18,13 @@ fn black_box_postgres_collection_publishes_target_settings_and_extensions() {
         None => return,
     };
     let directory = tempdir().unwrap();
-    let artifact = directory.path().join("snapshot.sqlite.gz");
     let sqlite = directory.path().join("snapshot.sqlite");
 
     let dsn = cluster.admin_connection_string();
     let assert = cargo_bin_cmd!("pg-probe")
-        .args(["snapshot", "--output"])
-        .arg(&artifact)
-        .args(["-d"])
+        .arg("--data-directory")
+        .arg(directory.path())
+        .arg("--database")
         .arg(&dsn)
         .env("PGPASSWORD", CANARY)
         .assert();
@@ -42,6 +41,10 @@ fn black_box_postgres_collection_publishes_target_settings_and_extensions() {
     if !output.status.success() {
         panic!("pg-probe exited with status {:?}", output.status);
     }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let artifact = directory.path().join(stdout.trim());
+    assert!(artifact.exists(), "artifact {:?} does not exist", artifact);
 
     let mut decoder = GzDecoder::new(fs::File::open(&artifact).unwrap());
     let mut bytes = Vec::new();
@@ -144,11 +147,10 @@ fn black_box_postgres_collection_publishes_target_settings_and_extensions() {
 #[test]
 fn black_box_postgres_collection_recovers_from_connection_failure() {
     let directory = tempdir().unwrap();
-    let artifact = directory.path().join("snapshot.sqlite.gz");
     cargo_bin_cmd!("pg-probe")
-        .args(["snapshot", "--output"])
-        .arg(&artifact)
-        .args(["-d"])
+        .arg("--data-directory")
+        .arg(directory.path())
+        .arg("--database")
         .arg("host=127.0.0.1 port=1 user=postgres dbname=postgres connect_timeout=1")
         .assert()
         .failure();
@@ -161,12 +163,11 @@ fn black_box_postgres_collection_handles_permission_denied_collector() {
         None => return,
     };
     let directory = tempdir().unwrap();
-    let artifact = directory.path().join("snapshot.sqlite.gz");
     let dsn = cluster.reader_connection_string();
     cargo_bin_cmd!("pg-probe")
-        .args(["snapshot", "--output"])
-        .arg(&artifact)
-        .args(["-d"])
+        .arg("--data-directory")
+        .arg(directory.path())
+        .arg("--database")
         .arg(&dsn)
         .assert()
         .failure();
@@ -179,12 +180,11 @@ fn black_box_postgres_collection_handles_unavailable_database() {
         None => return,
     };
     let directory = tempdir().unwrap();
-    let artifact = directory.path().join("snapshot.sqlite.gz");
     let dsn = cluster.unavailable_connection_string();
     cargo_bin_cmd!("pg-probe")
-        .args(["snapshot", "--output"])
-        .arg(&artifact)
-        .args(["-d"])
+        .arg("--data-directory")
+        .arg(directory.path())
+        .arg("--database")
         .arg(&dsn)
         .assert()
         .failure();
@@ -193,12 +193,11 @@ fn black_box_postgres_collection_handles_unavailable_database() {
 #[test]
 fn black_box_postgres_collection_does_not_echo_dsn_password() {
     let directory = tempdir().unwrap();
-    let artifact = directory.path().join("snapshot.sqlite.gz");
     let dsn = "host=127.0.0.1 port=1 user=postgres password=probe-secret-secret dbname=postgres connect_timeout=1";
     cargo_bin_cmd!("pg-probe")
-        .args(["snapshot", "--output"])
-        .arg(&artifact)
-        .args(["-d"])
+        .arg("--data-directory")
+        .arg(directory.path())
+        .arg("--database")
         .arg(dsn)
         .assert()
         .failure()

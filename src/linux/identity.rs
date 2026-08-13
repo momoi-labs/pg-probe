@@ -13,6 +13,22 @@ const OS_RELEASE_SOURCE: &str = "linux.os_release";
 const CLOCK_SOURCE: &str = "linux.clock";
 const UPTIME_SOURCE: &str = "proc.uptime";
 
+/// Returns the collector hostname (uname nodename) for artifact filename
+/// generation. Falls back to `"unknown"` on any failure.
+pub fn collector_hostname() -> String {
+    let mut value: libc::utsname = unsafe { std::mem::zeroed() };
+    if unsafe { libc::uname(&mut value) } != 0 {
+        return String::from("unknown");
+    }
+    let bytes: Vec<u8> = value
+        .nodename
+        .iter()
+        .map(|c| *c as u8)
+        .take_while(|c| *c != 0)
+        .collect();
+    String::from_utf8(bytes).unwrap_or_else(|_| String::from("unknown"))
+}
+
 pub fn collect_identity_isolated() -> (LinuxIdentity, Vec<ComponentOutcome>) {
     catch_unwind(AssertUnwindSafe(collect_identity)).unwrap_or_else(|_| {
         (

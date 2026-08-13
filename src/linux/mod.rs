@@ -15,7 +15,7 @@ pub use cpu::{
     collect_compute_isolated, ComputeObservations, CpuSet, CpuTimeEntry, CpuTopologyEntry,
     LoadAverages, NumaNode, SchedulerCounters,
 };
-pub use identity::{collect_identity_isolated, read_bounded};
+pub use identity::{collect_identity_isolated, collector_hostname, read_bounded};
 pub use kernel::{
     collect_kernel_isolated, KernelIpcEntry, KernelObservations, KernelVmEntry, ThpEntry,
 };
