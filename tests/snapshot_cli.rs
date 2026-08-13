@@ -326,6 +326,11 @@ fn filename_uses_sanitized_hostname_and_utc_timestamp() {
     );
 }
 
+#[test]
+fn filename_matcher_accepts_hostname_ending_in_digits() {
+    assert!(regex_like_matches("runnervma9114-2026-08-13-03h40m20s"));
+}
+
 fn regex_like_matches(s: &str) -> bool {
     let ts_start = find_timestamp_start(s);
     if ts_start.is_none() {
@@ -368,14 +373,5 @@ fn regex_like_matches(s: &str) -> bool {
 }
 
 fn find_timestamp_start(s: &str) -> Option<usize> {
-    let bytes = s.as_bytes();
-    if bytes.len() < 20 {
-        return None;
-    }
-    for i in 0..=bytes.len() - 20 {
-        if bytes[i..i + 4].iter().all(|b| b.is_ascii_digit()) && bytes.get(i + 4) == Some(&b'-') {
-            return Some(i);
-        }
-    }
-    None
+    s.len().checked_sub(20)
 }
