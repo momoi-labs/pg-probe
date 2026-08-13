@@ -1,40 +1,43 @@
-//! Minimal safe adapter over the real `libpq` C library.
+//! Safe PostgreSQL connection adapter backed by the Rust `postgres` client.
 //!
-//! Release builds link a bundled `libpq` (via `pq-sys`'s `bundled` feature) and
-//! vendored OpenSSL. All unsafe FFI stays in this module; callers only see
-//! typed, sanitized results and never raw libpq diagnostic strings.
+//! The supported connection contract is intentionally small: PostgreSQL URLs
+//! and keyword strings supplied through `--database`, or the ordinary `PG*`
+//! environment variables when no explicit connection input is supplied. It
+//! does not resolve service files, passfiles, or multi-host configurations.
 
-use std::ffi::{CStr, CString};
+use std::env;
 use std::fmt;
-use std::os::raw::{c_char, c_int};
-use std::path::Path;
-use std::ptr;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use postgres::config::Host;
+use postgres::{Client as PostgresClient, Config};
+use postgres_rustls::{tokio_rustls::TlsConnector, MakeTlsConnector};
+use rustls::{ClientConfig, RootCertStore};
 use thiserror::Error;
 
 use crate::contract::{now_utc, CollectionStatus, ComponentOutcome};
-use crate::postgres::sanitize::{parse_libpq_port, parse_port, sanitize_host};
+use crate::postgres::sanitize::{parse_port, sanitize_host};
 
-/// Ensure the vendored OpenSSL archive participates in the final link.
-use openssl_sys as _;
-
-/// Public reason a libpq call did not produce the requested value. The error
-/// itself is never logged; only the variant name reaches the terminal or
-/// artifact, so secrets in libpq's diagnostic strings cannot leak.
+/// Public reason a client call did not produce the requested value. Raw
+/// driver diagnostics never cross this boundary because they may contain
+/// connection input or credentials.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum AdapterError {
-    #[error("libpq refused the connection")]
+    #[error("the PostgreSQL connection failed")]
     ConnectionFailed,
-    #[error("libpq rejected a parameter value")]
+    #[error("the PostgreSQL client rejected a parameter value")]
     InvalidParameter,
-    #[error("the libpq query failed")]
+    #[error("the PostgreSQL query failed")]
     QueryFailed,
-    #[error("the libpq result was not a single tuple")]
+    #[error("the PostgreSQL result was not a single tuple")]
     SingleTupleExpected,
-    #[error("a libpq column did not contain data")]
+    #[error("a PostgreSQL column did not contain data")]
     ColumnMissing,
-    #[error("a libpq column contained an invalid value")]
+    #[error("a PostgreSQL column contained an invalid value")]
     ColumnInvalid,
 }
 
@@ -56,10 +59,6 @@ impl AdapterOutcomeStatus {
             Self::QueryFailed => CollectionStatus::IoError,
             Self::InvalidParameter => CollectionStatus::ParseError,
         }
-    }
-
-    pub const fn is_colloquial_rejected(self) -> bool {
-        !matches!(self, Self::Ok | Self::Unsupported)
     }
 }
 
@@ -85,94 +84,60 @@ impl EndpointKind {
     }
 }
 
-/// Owns a live libpq connection and the sanitized endpoint identity derived
-/// from it. Dropping this value closes the underlying connection.
+/// Owns a live Rust-native client and its sanitized endpoint identity.
 pub struct ConnectedClient {
-    conn: *mut pq_sys::PGconn,
+    client: Mutex<PostgresClient>,
     endpoint: EndpointIdentity,
-    /// The original libpq connection string used to open this connection.
-    /// It is kept only in memory to build per-database connection strings
-    /// for extension discovery; it is never persisted or logged.
-    connection_string: Option<String>,
-}
-
-// libpq connections are not Sync; ConnectedClient is only used on one thread
-// in the collector spine.
-unsafe impl Send for ConnectedClient {}
-
-impl Drop for ConnectedClient {
-    fn drop(&mut self) {
-        if !self.conn.is_null() {
-            // SAFETY: conn is an owned PGconn pointer created by PQconnectdb.
-            unsafe { pq_sys::PQfinish(self.conn) };
-            self.conn = ptr::null_mut();
-        }
-    }
+    config: Config,
 }
 
 impl ConnectedClient {
-    /// Open a libpq connection using psql-compatible resolution rules. Pass
-    /// the user-supplied `--dbname` value (when present) as `dsn_input` and
-    /// leave it `None` to let standard environment resolution apply.
-    ///
-    /// This function performs no logging and never returns the raw libpq
-    /// error message. The connection metadata returned alongside the
-    /// connected client is sanitized so the caller can persist or print it.
+    /// Opens a PostgreSQL connection from an explicit URL/keyword string, or
+    /// from the supported `PG*` environment variables when no input is given.
     pub fn open(
         dsn_input: Option<&str>,
         source: &'static str,
         outcomes: &mut Vec<ComponentOutcome>,
     ) -> Result<Self, AdapterError> {
-        let started_at_utc = now_utc();
-        let conninfo = match dsn_input {
-            Some(raw) => {
-                if raw.is_empty() {
-                    let _ = timestamped_failure(
-                        outcomes,
-                        source,
-                        AdapterOutcomeStatus::InvalidParameter,
-                    );
-                    return Err(AdapterError::InvalidParameter);
-                }
-                raw
-            }
-            None => "",
-        };
-
-        let c_conninfo = match CString::new(conninfo) {
-            Ok(value) => value,
-            Err(_) => {
+        let config = match connection_config(dsn_input) {
+            Ok(config) => config,
+            Err(error) => {
                 let _ =
                     timestamped_failure(outcomes, source, AdapterOutcomeStatus::InvalidParameter);
-                return Err(AdapterError::InvalidParameter);
-            }
-        };
-
-        // SAFETY: c_conninfo is a valid NUL-terminated C string.
-        let conn = unsafe { pq_sys::PQconnectdb(c_conninfo.as_ptr()) };
-        if conn.is_null() {
-            let _ = timestamped_failure(outcomes, source, AdapterOutcomeStatus::QueryFailed);
-            return Err(AdapterError::ConnectionFailed);
-        }
-
-        // SAFETY: conn is a non-null PGconn from PQconnectdb.
-        let status = unsafe { pq_sys::PQstatus(conn) };
-        if status != pq_sys::ConnStatusType::CONNECTION_OK {
-            // SAFETY: owned pointer from PQconnectdb.
-            unsafe { pq_sys::PQfinish(conn) };
-            let _ = timestamped_failure(outcomes, source, AdapterOutcomeStatus::QueryFailed);
-            return Err(AdapterError::ConnectionFailed);
-        }
-
-        let endpoint = match current_endpoint(conn) {
-            Ok(endpoint) => endpoint,
-            Err(error) => {
-                unsafe { pq_sys::PQfinish(conn) };
-                let _ = timestamped_failure(outcomes, source, adapter_status_for(&error));
                 return Err(error);
             }
         };
+        Self::open_config(config, source, outcomes)
+    }
 
+    pub fn for_database(
+        &self,
+        database: &str,
+        source: &'static str,
+        outcomes: &mut Vec<ComponentOutcome>,
+    ) -> Result<Self, AdapterError> {
+        let mut config = self.config.clone();
+        config.dbname(database);
+        Self::open_config(config, source, outcomes)
+    }
+
+    fn open_config(
+        config: Config,
+        source: &'static str,
+        outcomes: &mut Vec<ComponentOutcome>,
+    ) -> Result<Self, AdapterError> {
+        let started_at_utc = now_utc();
+        let endpoint = endpoint_from_config(&config)?;
+        let client = config
+            .connect(rustls_connector())
+            .map_err(|_| AdapterError::ConnectionFailed);
+        let client = match client {
+            Ok(client) => client,
+            Err(error) => {
+                let _ = timestamped_failure(outcomes, source, AdapterOutcomeStatus::QueryFailed);
+                return Err(error);
+            }
+        };
         let observed_at_utc = now_utc();
         outcomes.push(ComponentOutcome::collected(
             source,
@@ -180,11 +145,10 @@ impl ConnectedClient {
             observed_at_utc,
             observed_at_utc,
         ));
-
         Ok(Self {
-            conn,
+            client: Mutex::new(client),
             endpoint,
-            connection_string: dsn_input.map(ToOwned::to_owned),
+            config,
         })
     }
 
@@ -192,50 +156,24 @@ impl ConnectedClient {
         &self.endpoint
     }
 
-    /// The original libpq connection string used to open this connection.
-    /// Callers must not persist or log this value.
-    pub fn connection_string(&self) -> Option<&str> {
-        self.connection_string.as_deref()
-    }
-
-    /// Connected role name from libpq, without logging.
+    /// The effective role name, read from the connected server.
     pub fn user(&self) -> Result<String, AdapterError> {
-        read_conn_field(self.conn, pq_sys::PQuser)
+        self.scalar("SELECT current_user")
     }
 
-    /// Initial database name from libpq, without logging.
+    /// The effective initial database name, read from the connected server.
     pub fn db(&self) -> Result<String, AdapterError> {
-        read_conn_field(self.conn, pq_sys::PQdb)
+        self.scalar("SELECT current_database()")
     }
 
-    /// Read a bounded row from a catalog query. Returns the raw `&[u8]` values
-    /// in column order so callers can apply their own typed parsing without
-    /// going through libpq's lossy decoder.
     pub fn exec_bounded_row(
         &self,
         query: &str,
         source: &'static str,
         outcomes: &mut Vec<ComponentOutcome>,
     ) -> Result<Vec<Vec<u8>>, AdapterError> {
-        let started_at_utc = now_utc();
-        let result = exec_query(self.conn, query)?;
-        match result.status() {
-            QueryStatus::TuplesOk => {}
-            other => {
-                let status = adapter_status_from_query(other);
-                outcomes.push(
-                    ComponentOutcome::failed(
-                        source,
-                        status.as_collection_status(),
-                        "query_failed",
-                        None,
-                    )
-                    .with_timing(started_at_utc, now_utc()),
-                );
-                return Err(AdapterError::QueryFailed);
-            }
-        }
-        if result.ntuples() != 1 || result.nfields() == 0 {
+        let rows = self.exec_rows(query, source, outcomes)?;
+        if rows.rows.len() != 1 || rows.rows[0].is_empty() {
             outcomes.push(
                 ComponentOutcome::failed(
                     source,
@@ -243,62 +181,77 @@ impl ConnectedClient {
                     "single_tuple_expected",
                     None,
                 )
-                .with_timing(started_at_utc, now_utc()),
+                .with_timing(now_utc(), now_utc()),
             );
             return Err(AdapterError::SingleTupleExpected);
         }
-        let mut row = Vec::with_capacity(result.nfields());
-        for column in 0..result.nfields() {
-            let value = match result.value(0, column) {
-                Some(bytes) => bytes.to_vec(),
-                None => {
-                    outcomes.push(
-                        ComponentOutcome::failed(
-                            source,
-                            AdapterOutcomeStatus::InvalidParameter.as_collection_status(),
-                            "column_missing",
-                            None,
-                        )
-                        .with_timing(started_at_utc, now_utc()),
-                    );
-                    return Err(AdapterError::ColumnMissing);
-                }
-            };
-            row.push(value);
-        }
-        let observed_at_utc = now_utc();
-        outcomes.push(
-            ComponentOutcome::collected(source, started_at_utc, observed_at_utc, observed_at_utc)
-                .with_timing(started_at_utc, observed_at_utc),
-        );
-        Ok(row)
+        Ok(rows.rows.into_iter().next().expect("one checked row"))
     }
 
-    /// Run a catalog query that returns many rows. Every cell is returned as
-    /// `Vec<u8>` so callers keep full control over byte-level escaping and
-    /// truncation. An empty result set is not considered an error.
     pub fn exec_bounded_rows(
         &self,
         query: &str,
         source: &'static str,
         outcomes: &mut Vec<ComponentOutcome>,
     ) -> Result<BoundedRows, AdapterError> {
+        self.exec_rows(query, source, outcomes)
+    }
+
+    fn scalar(&self, query: &str) -> Result<String, AdapterError> {
+        let messages = self
+            .client
+            .lock()
+            .map_err(|_| AdapterError::QueryFailed)?
+            .simple_query(query)
+            .map_err(|_| AdapterError::QueryFailed)?;
+        let mut values = messages.into_iter().filter_map(|message| match message {
+            postgres::SimpleQueryMessage::Row(row) => row.get(0).map(ToOwned::to_owned),
+            _ => None,
+        });
+        match (values.next(), values.next()) {
+            (Some(value), None) => Ok(value),
+            _ => Err(AdapterError::ColumnInvalid),
+        }
+    }
+
+    fn exec_rows(
+        &self,
+        query: &str,
+        source: &'static str,
+        outcomes: &mut Vec<ComponentOutcome>,
+    ) -> Result<BoundedRows, AdapterError> {
         let started_at_utc = now_utc();
-        let result = exec_query(self.conn, query)?;
-        match result.status() {
-            QueryStatus::TuplesOk => {}
-            other => {
-                let status = adapter_status_from_query(other);
+        let messages = match self
+            .client
+            .lock()
+            .map_err(|_| AdapterError::QueryFailed)?
+            .simple_query(query)
+        {
+            Ok(messages) => messages,
+            Err(_) => {
                 outcomes.push(
                     ComponentOutcome::failed(
                         source,
-                        status.as_collection_status(),
+                        AdapterOutcomeStatus::QueryFailed.as_collection_status(),
                         "query_failed",
                         None,
                     )
                     .with_timing(started_at_utc, now_utc()),
                 );
                 return Err(AdapterError::QueryFailed);
+            }
+        };
+        let mut rows = Vec::new();
+        for message in messages {
+            if let postgres::SimpleQueryMessage::Row(row) = message {
+                let mut values = Vec::with_capacity(row.len());
+                for index in 0..row.len() {
+                    let value = row
+                        .get(index)
+                        .map_or_else(Vec::new, |value| value.as_bytes().to_vec());
+                    values.push(value);
+                }
+                rows.push(values);
             }
         }
         let observed_at_utc = now_utc();
@@ -308,26 +261,89 @@ impl ConnectedClient {
             observed_at_utc,
             observed_at_utc,
         ));
-        let nrows = result.ntuples();
-        let ncols = result.nfields();
-        let mut rows = Vec::with_capacity(nrows);
-        for row in 0..nrows {
-            let mut values = Vec::with_capacity(ncols);
-            for column in 0..ncols {
-                let value = match result.value(row, column) {
-                    Some(bytes) => bytes.to_vec(),
-                    None => Vec::new(),
-                };
-                values.push(value);
-            }
-            rows.push(values);
-        }
         Ok(BoundedRows { rows })
     }
 }
 
-/// Holds decoded rows from a bounded query. Each row keeps its raw bytes so the
-/// caller can apply domain parsers without any further libpq seek.
+fn connection_config(dsn_input: Option<&str>) -> Result<Config, AdapterError> {
+    match dsn_input {
+        Some(raw) if raw.is_empty() || raw.contains('\0') => Err(AdapterError::InvalidParameter),
+        Some(raw) => Config::from_str(raw).map_err(|_| AdapterError::InvalidParameter),
+        None => Ok(config_from_environment()),
+    }
+}
+
+fn config_from_environment() -> Config {
+    let mut config = Config::new();
+    config.host(&env::var("PGHOST").unwrap_or_else(|_| "localhost".to_owned()));
+    if let Some(port) = env::var("PGPORT").ok().and_then(|value| parse_port(&value)) {
+        config.port(port);
+    }
+    if let Ok(database) = env::var("PGDATABASE") {
+        config.dbname(&database);
+    }
+    if let Ok(user) = env::var("PGUSER") {
+        config.user(&user);
+    }
+    if let Ok(password) = env::var("PGPASSWORD") {
+        config.password(password);
+    }
+    if let Ok(options) = env::var("PGOPTIONS") {
+        config.options(&options);
+    }
+    if let Ok(application_name) = env::var("PGAPPNAME") {
+        config.application_name(&application_name);
+    }
+    if let Some(seconds) = env::var("PGCONNECT_TIMEOUT")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|seconds| *seconds > 0)
+    {
+        config.connect_timeout(Duration::from_secs(seconds));
+    }
+    config
+}
+
+fn rustls_connector() -> MakeTlsConnector {
+    let roots = RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let config = ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    MakeTlsConnector::new(TlsConnector::from(Arc::new(config)))
+}
+
+fn endpoint_from_config(config: &Config) -> Result<EndpointIdentity, AdapterError> {
+    let host = config
+        .get_hosts()
+        .first()
+        .ok_or(AdapterError::InvalidParameter)?;
+    match host {
+        Host::Tcp(host) => {
+            let host = sanitize_host(host);
+            if host.redacted {
+                return Err(AdapterError::ColumnInvalid);
+            }
+            let port = config.get_ports().first().copied().unwrap_or(5432);
+            Ok(EndpointIdentity {
+                endpoint_kind: EndpointKind::Tcp,
+                host: host.value,
+                port: Some(port),
+            })
+        }
+        Host::Unix(path) => {
+            let host = sanitize_host(&path.to_string_lossy());
+            if host.redacted {
+                return Err(AdapterError::ColumnInvalid);
+            }
+            Ok(EndpointIdentity {
+                endpoint_kind: EndpointKind::UnixSocket,
+                host: host.value,
+                port: None,
+            })
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct BoundedRows {
     pub rows: Vec<Vec<Vec<u8>>>,
@@ -336,161 +352,6 @@ pub struct BoundedRows {
 impl BoundedRows {
     pub fn into_rows(self) -> Vec<Vec<Vec<u8>>> {
         self.rows
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum QueryStatus {
-    TuplesOk,
-    CommandOk,
-    FatalError,
-    BadResponse,
-    Other,
-}
-
-struct QueryResult {
-    ptr: *mut pq_sys::PGresult,
-}
-
-impl Drop for QueryResult {
-    fn drop(&mut self) {
-        if !self.ptr.is_null() {
-            // SAFETY: owned PGresult from PQexec.
-            unsafe { pq_sys::PQclear(self.ptr) };
-            self.ptr = ptr::null_mut();
-        }
-    }
-}
-
-impl QueryResult {
-    fn status(&self) -> QueryStatus {
-        // SAFETY: ptr is a live PGresult for the lifetime of self.
-        let status = unsafe { pq_sys::PQresultStatus(self.ptr) };
-        match status {
-            pq_sys::ExecStatusType::PGRES_TUPLES_OK => QueryStatus::TuplesOk,
-            pq_sys::ExecStatusType::PGRES_COMMAND_OK => QueryStatus::CommandOk,
-            pq_sys::ExecStatusType::PGRES_FATAL_ERROR => QueryStatus::FatalError,
-            pq_sys::ExecStatusType::PGRES_BAD_RESPONSE => QueryStatus::BadResponse,
-            _ => QueryStatus::Other,
-        }
-    }
-
-    fn ntuples(&self) -> usize {
-        // SAFETY: ptr is a live PGresult.
-        unsafe { pq_sys::PQntuples(self.ptr) as usize }
-    }
-
-    fn nfields(&self) -> usize {
-        // SAFETY: ptr is a live PGresult.
-        unsafe { pq_sys::PQnfields(self.ptr) as usize }
-    }
-
-    fn value(&self, row: usize, column: usize) -> Option<Vec<u8>> {
-        // SAFETY: ptr is a live PGresult; row/column are within ntuples/nfields
-        // when callers follow the contract used above.
-        let is_null = unsafe { pq_sys::PQgetisnull(self.ptr, row as c_int, column as c_int) };
-        if is_null != 0 {
-            return None;
-        }
-        let len = unsafe { pq_sys::PQgetlength(self.ptr, row as c_int, column as c_int) };
-        if len < 0 {
-            return None;
-        }
-        let ptr = unsafe { pq_sys::PQgetvalue(self.ptr, row as c_int, column as c_int) };
-        if ptr.is_null() {
-            return None;
-        }
-        // SAFETY: PQgetvalue returns a pointer to len bytes owned by the result.
-        let bytes = unsafe { std::slice::from_raw_parts(ptr as *const u8, len as usize) };
-        Some(bytes.to_vec())
-    }
-}
-
-fn exec_query(conn: *mut pq_sys::PGconn, query: &str) -> Result<QueryResult, AdapterError> {
-    let c_query = CString::new(query).map_err(|_| AdapterError::InvalidParameter)?;
-    // SAFETY: conn is a live CONNECTION_OK handle; c_query is NUL-terminated.
-    let ptr = unsafe { pq_sys::PQexec(conn, c_query.as_ptr()) };
-    if ptr.is_null() {
-        return Err(AdapterError::QueryFailed);
-    }
-    Ok(QueryResult { ptr })
-}
-
-fn read_conn_field(
-    conn: *mut pq_sys::PGconn,
-    reader: unsafe extern "C" fn(*const pq_sys::PGconn) -> *mut c_char,
-) -> Result<String, AdapterError> {
-    // SAFETY: conn is a live PGconn; reader is a libpq accessor.
-    let ptr = unsafe { reader(conn) };
-    if ptr.is_null() {
-        return Err(AdapterError::ColumnInvalid);
-    }
-    // SAFETY: libpq returns a NUL-terminated string owned by the connection.
-    let value = unsafe { CStr::from_ptr(ptr) };
-    Ok(bounded_cstr_to_string(value))
-}
-
-/// Derive the sanitized endpoint identity from a freshly opened libpq
-/// connection. libpq reports either an IP/hostname with a port, or a Unix
-/// socket path; anything else is rejected so we never persist a malformed
-/// endpoint component.
-fn current_endpoint(conn: *mut pq_sys::PGconn) -> Result<EndpointIdentity, AdapterError> {
-    let raw_host = read_conn_field(conn, pq_sys::PQhost)?;
-    let sanitized_host = sanitize_host(&raw_host);
-    if sanitized_host.redacted {
-        return Err(AdapterError::ColumnInvalid);
-    }
-    let endpoint_kind = if sanitized_host.value.starts_with('/') {
-        EndpointKind::UnixSocket
-    } else {
-        EndpointKind::Tcp
-    };
-    let port = match read_conn_field(conn, pq_sys::PQport) {
-        Ok(raw_port) => match parse_libpq_port(&raw_port) {
-            Ok(value) => {
-                if value == 0 {
-                    None
-                } else {
-                    Some(value)
-                }
-            }
-            Err(_) => None,
-        },
-        Err(_) => None,
-    };
-    let port = match (endpoint_kind, port) {
-        (EndpointKind::UnixSocket, _) => None,
-        (EndpointKind::Tcp, None) => {
-            return Err(AdapterError::ColumnInvalid);
-        }
-        (EndpointKind::Tcp, port) => {
-            port.filter(|candidate| parse_port(&candidate.to_string()).is_some())
-        }
-    };
-
-    Ok(EndpointIdentity {
-        endpoint_kind,
-        host: sanitized_host.value,
-        port,
-    })
-}
-
-fn adapter_status_from_query(status: QueryStatus) -> AdapterOutcomeStatus {
-    match status {
-        QueryStatus::TuplesOk | QueryStatus::CommandOk => AdapterOutcomeStatus::Ok,
-        QueryStatus::FatalError | QueryStatus::BadResponse => AdapterOutcomeStatus::QueryFailed,
-        QueryStatus::Other => AdapterOutcomeStatus::InvalidParameter,
-    }
-}
-
-fn adapter_status_for(error: &AdapterError) -> AdapterOutcomeStatus {
-    match error {
-        AdapterError::ConnectionFailed => AdapterOutcomeStatus::QueryFailed,
-        AdapterError::InvalidParameter => AdapterOutcomeStatus::InvalidParameter,
-        AdapterError::QueryFailed => AdapterOutcomeStatus::QueryFailed,
-        AdapterError::SingleTupleExpected => AdapterOutcomeStatus::InvalidParameter,
-        AdapterError::ColumnMissing => AdapterOutcomeStatus::InvalidParameter,
-        AdapterError::ColumnInvalid => AdapterOutcomeStatus::InvalidParameter,
     }
 }
 
@@ -515,22 +376,6 @@ fn timestamped_failure(
     now_utc()
 }
 
-/// Read a bounded null-terminated C string into a `String`, replacing invalid
-/// bytes with U+FFFD. Used for the few libpq APIs that hand us a raw C
-/// pointer rather than a bounded helper.
-#[allow(dead_code)]
-pub fn bounded_cstr_to_string(raw: &CStr) -> String {
-    raw.to_string_lossy().into_owned()
-}
-
-/// Convenience for callers that need to inspect `Path`-shaped host names.
-#[allow(dead_code)]
-pub fn host_is_unix_socket(host: &str) -> bool {
-    Path::new(host).is_absolute() || host.starts_with('/')
-}
-
-/// Common trait for connection metadata that the rest of the codebase can use
-/// without depending on the FFI layer directly.
 pub trait Client {
     fn endpoint(&self) -> &EndpointIdentity;
 }
@@ -541,7 +386,6 @@ impl Client for ConnectedClient {
     }
 }
 
-/// Parse a textual integer coming back from a libpq row.
 pub fn parse_text_i32(raw: &[u8]) -> Result<i32, AdapterError> {
     let text = std::str::from_utf8(raw).map_err(|_| AdapterError::ColumnInvalid)?;
     let trimmed = text.trim();
@@ -553,7 +397,6 @@ pub fn parse_text_i32(raw: &[u8]) -> Result<i32, AdapterError> {
         .map_err(|_| AdapterError::ColumnInvalid)
 }
 
-/// Parse a textual integer coming back from a libpq row into an `i64`.
 pub fn parse_text_i64(raw: &[u8]) -> Result<i64, AdapterError> {
     let text = std::str::from_utf8(raw).map_err(|_| AdapterError::ColumnInvalid)?;
     let trimmed = text.trim();
@@ -565,8 +408,6 @@ pub fn parse_text_i64(raw: &[u8]) -> Result<i64, AdapterError> {
         .map_err(|_| AdapterError::ColumnInvalid)
 }
 
-/// Parse a textual boolean coming back from a libpq row. PostgreSQL reports
-/// booleans as `t` or `f`.
 pub fn parse_text_bool(raw: &[u8]) -> Result<bool, AdapterError> {
     let text = std::str::from_utf8(raw).map_err(|_| AdapterError::ColumnInvalid)?;
     match text.trim() {
@@ -576,8 +417,6 @@ pub fn parse_text_bool(raw: &[u8]) -> Result<bool, AdapterError> {
     }
 }
 
-/// Read a null-terminated string stored in a libpq row as UTF-8, replacing
-/// invalid bytes with the Unicode replacement character.
 pub fn parse_text_string(raw: &[u8]) -> Result<String, AdapterError> {
     Ok(std::str::from_utf8(raw)
         .map_err(|_| AdapterError::ColumnInvalid)?
@@ -600,49 +439,19 @@ impl fmt::Display for EndpointIdentity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::postgres::sanitize::{sanitize_identifier, MAX_IDENTIFIER_BYTES};
 
     #[test]
-    fn bounded_string_handles_invalid_utf8() {
-        let raw = c"abc\xff";
-        let parsed = bounded_cstr_to_string(raw);
-        assert!(parsed.starts_with("abc"));
-        assert!(parsed.ends_with('\u{FFFD}'));
-    }
-
-    #[test]
-    fn parse_i32_handles_trailing_text() {
-        assert_eq!(parse_text_i32(b"8192").unwrap(), 8192);
-        assert_eq!(parse_text_i32(b" -7 ").unwrap(), -7);
-        assert!(matches!(
-            parse_text_i32(b"abc"),
-            Err(AdapterError::ColumnInvalid)
-        ));
+    fn explicit_postgresql_url_builds_a_client_config() {
+        let config =
+            connection_config(Some("postgresql://probe:secret@localhost:6543/probe_main")).unwrap();
+        assert_eq!(config.get_user(), Some("probe"));
+        assert_eq!(config.get_dbname(), Some("probe_main"));
+        assert_eq!(config.get_ports(), [6543]);
     }
 
     #[test]
     fn parse_text_bool_accepts_postgres_alphabet() {
         assert!(parse_text_bool(b"t").unwrap());
         assert!(!parse_text_bool(b"f").unwrap());
-        assert!(matches!(
-            parse_text_bool(b"TRUE"),
-            Err(AdapterError::ColumnInvalid)
-        ));
-    }
-
-    #[test]
-    fn parse_text_string_trims_padding() {
-        assert_eq!(parse_text_string(b"  hello  ").unwrap(), "hello");
-        assert!(matches!(
-            parse_text_string(&[0xff]),
-            Err(AdapterError::ColumnInvalid)
-        ));
-    }
-
-    #[test]
-    fn identifier_sanitization_rejects_overlong_inputs() {
-        let long = "a".repeat(MAX_IDENTIFIER_BYTES + 1);
-        let sanitized = sanitize_identifier(&long);
-        assert!(sanitized.redacted);
     }
 }

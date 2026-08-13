@@ -30,8 +30,8 @@ impl fmt::Display for ExtensionEntry {
     }
 }
 
-/// Connect to the given database name (using all of the existing libpq
-/// resolution rules via a new connection) and collect its extensions.
+/// Connect to the given database name using the initial connection settings
+/// and collect its extensions.
 pub fn collect_extensions_for_database(
     initial_client: &ConnectedClient,
     database: &str,
@@ -40,8 +40,7 @@ pub fn collect_extensions_for_database(
     let sanitized = sanitize_identifier(database);
     if !sanitized.redacted && sanitized.value == database {
         let source = "postgres.extensions.visit";
-        let dsn = build_per_database_dsn(initial_client, database);
-        let secondary_client = ConnectedClient::open(Some(&dsn), source, outcomes)?;
+        let secondary_client = initial_client.for_database(database, source, outcomes)?;
         collect_extensions(
             &secondary_client,
             database,
@@ -56,27 +55,6 @@ pub fn collect_extensions_for_database(
             None,
         ));
         Err(AdapterError::ColumnInvalid)
-    }
-}
-
-fn build_per_database_dsn(initial: &ConnectedClient, database: &str) -> String {
-    let mut dsn = String::new();
-    if let Some(initial_dsn) = initial.connection_string() {
-        dsn.push_str(initial_dsn);
-        dsn.push(' ');
-    }
-    dsn.push_str("dbname=");
-    dsn.push_str(&escape_dsn_value(database));
-    dsn
-}
-
-fn escape_dsn_value(value: &str) -> String {
-    if value.chars().all(|character| {
-        character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-' | '/' | ':')
-    }) {
-        value.to_owned()
-    } else {
-        format!("'{}'", value.replace('\'', "''").replace('\\', "\\\\"))
     }
 }
 
@@ -139,25 +117,5 @@ pub fn visit_database(
             mark_connection_failed(database);
             None
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn escape_dsn_value_passes_through_safe_inputs() {
-        assert_eq!(escape_dsn_value("localhost"), "localhost");
-        assert_eq!(escape_dsn_value("/tmp"), "/tmp");
-        assert_eq!(escape_dsn_value("127.0.0.1"), "127.0.0.1");
-    }
-
-    #[test]
-    fn escape_dsn_value_quotes_special_characters() {
-        let escaped = escape_dsn_value("a b");
-        assert_eq!(escaped, "'a b'");
-        let escaped = escape_dsn_value("a'b");
-        assert_eq!(escaped, "'a''b'");
     }
 }

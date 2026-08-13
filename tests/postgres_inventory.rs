@@ -144,6 +144,49 @@ fn black_box_postgres_collection_publishes_target_settings_and_extensions() {
 }
 
 #[test]
+fn black_box_postgres_collection_uses_standard_pg_environment() {
+    let cluster = match common::pg::cluster() {
+        Some(cluster) => cluster,
+        None => return,
+    };
+    let directory = tempdir().unwrap();
+
+    let output = cargo_bin_cmd!("pg-probe")
+        .arg("--data-directory")
+        .arg(directory.path())
+        .env("PGHOST", &cluster.host)
+        .env("PGPORT", cluster.port.to_string())
+        .env("PGDATABASE", &cluster.admin_database)
+        .env("PGUSER", &cluster.admin_role)
+        .env("PGPASSWORD", &cluster.bootstrap_password)
+        .assert()
+        .success()
+        .get_output()
+        .clone();
+
+    let artifact = directory
+        .path()
+        .join(String::from_utf8_lossy(&output.stdout).trim());
+    let mut decoder = GzDecoder::new(fs::File::open(artifact).unwrap());
+    let mut bytes = Vec::new();
+    decoder.read_to_end(&mut bytes).unwrap();
+    let sqlite = directory.path().join("snapshot.sqlite");
+    fs::write(&sqlite, bytes).unwrap();
+
+    let connection =
+        Connection::open_with_flags(&sqlite, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    let target: (String, String) = connection
+        .query_row(
+            "SELECT connected_user, initial_database FROM postgres_target",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(target.0, "probe_admin");
+    assert_eq!(target.1, "probe_main");
+}
+
+#[test]
 fn black_box_postgres_collection_recovers_from_connection_failure() {
     let directory = tempdir().unwrap();
     cargo_bin_cmd!("pg-probe")

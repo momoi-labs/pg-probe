@@ -1,5 +1,4 @@
 use std::fmt;
-use std::num::ParseIntError;
 
 /// Maximum length accepted for a single sanitized identifier. PostgreSQL caps
 /// most identifiers at 63 bytes (NAMEDATALEN minus one) by default; anything
@@ -120,13 +119,6 @@ pub fn parse_port(input: &str) -> Option<u16> {
         Ok(port) if port > 0 => Some(port),
         _ => None,
     }
-}
-
-/// Convert a string port reported by libpq into an integer with the same
-/// `ParseIntError` shape std uses, so callers do not have to distinguish the
-/// two paths when reporting the failure to the caller.
-pub fn parse_libpq_port(input: &str) -> Result<u16, ParseIntError> {
-    input.trim().parse::<u16>()
 }
 
 #[cfg(test)]
