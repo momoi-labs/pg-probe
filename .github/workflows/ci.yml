@@ -13,10 +13,6 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # cross git revision (also documented in Cross.toml)
-  CROSS_GIT_REV: 55f847251389c5406df85579191c0eac412fab3a
-
 jobs:
   test:
     name: Test (${{ matrix.runner }})
@@ -49,8 +45,8 @@ jobs:
       - name: Build release binary
         run: cargo build --release --locked
 
-  cross-build:
-    name: Cross build musl (${{ matrix.target }})
+  musl-build:
+    name: Musl build (${{ matrix.target }})
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -71,12 +67,17 @@ jobs:
           components: clippy, rustfmt
           targets: ${{ matrix.target }}
 
-      - name: Install cross
-        run: |
-          cargo install --locked --git https://github.com/cross-rs/cross --rev "${CROSS_GIT_REV}" cross
+      - name: Install Zig
+        # mlugg/setup-zig@v2.0.5
+        uses: mlugg/setup-zig@8d6198c65fb0feaa111df26e6b467fea8345e46f
+        with:
+          version: 0.15.2
 
-      - name: Cross build release target
-        run: cross build --locked --release --target "${{ matrix.target }}"
+      - name: Install cargo-zigbuild
+        run: cargo install --locked --version 0.23.0 cargo-zigbuild
+
+      - name: Build static musl release target
+        run: cargo zigbuild --locked --release --target "${{ matrix.target }}"
 
   package-scripts:
     name: Package script and GoReleaser checks

@@ -15,8 +15,8 @@ portable SQLite file.
 
 ## Install (release binaries)
 
-Protected `vMAJOR.MINOR.PATCH` tags publish self-contained musl archives with
-bundled libpq and vendored OpenSSL:
+Protected `vMAJOR.MINOR.PATCH` tags publish self-contained static musl archives
+that use the Rust-native PostgreSQL client and rustls:
 
 - `pg-probe-v<VERSION>-x86_64-unknown-linux-musl.tar.gz`
 - `pg-probe-v<VERSION>-aarch64-unknown-linux-musl.tar.gz`
@@ -42,9 +42,8 @@ cargo build --release
 ```
 
 The executable is produced at `target/release/pg-probe`. Release automation
-uses GoReleaser's Rust builder (`builder: rust` with `cross`) and pinned
-toolchain/container inputs; see `.goreleaser.yaml`, `.github/workflows/release.yml`,
-and `Cross.toml`.
+uses GoReleaser's Rust builder with `cargo-zigbuild` and pinned toolchain
+inputs; see `.goreleaser.yaml` and `.github/workflows/release.yml`.
 
 ## Usage
 
@@ -54,6 +53,13 @@ directory (or an existing `--data-directory`):
 ```bash
 pg-probe --domain all
 ```
+
+To select a PostgreSQL target, pass a `postgresql://` URL or a PostgreSQL
+keyword string with `--database`. Without `--database`, pg-probe reads the
+ordinary connection environment variables: `PGHOST`, `PGPORT`, `PGDATABASE`,
+`PGUSER`, `PGPASSWORD`, `PGOPTIONS`, `PGAPPNAME`, and `PGCONNECT_TIMEOUT`.
+Service files, passfiles, and multi-host resolution are intentionally outside
+this CLI contract.
 
 Stdout prints only the final artifact path. The process never overwrites an
 existing artifact; collisions get numeric suffixes. On success the artifact is
@@ -98,7 +104,7 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo test --all-targets --locked
 ```
 
-CI also cross-builds both musl release targets and exercises the packaging
+CI also builds both static musl release targets and exercises the packaging
 scripts. Creating a protected `vMAJOR.MINOR.PATCH` tag whose version matches
 `Cargo.toml` runs the attested release workflow.
 

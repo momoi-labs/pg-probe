@@ -1,5 +1,5 @@
 # GoReleaser configuration for pg-probe musl Linux releases.
-# Builds use the Rust builder with cargo-cross; Cross.toml pins container images.
+# Builds use cargo-zigbuild; Zig provides the musl cross toolchain directly.
 # Publication (draft → attest → publish) stays in .github/workflows/release.yml so
 # native smoke gates run against the exact archives before any GitHub Release.
 version: 2
@@ -10,8 +10,8 @@ builds:
   - id: pg-probe
     builder: rust
     binary: pg-probe
-    tool: cross
-    command: build
+    tool: cargo
+    command: zigbuild
     flags:
       - --release
       - --locked

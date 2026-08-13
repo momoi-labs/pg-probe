@@ -1,7 +1,7 @@
 name: Release
 
 # Protected SemVer tags (vMAJOR.MINOR.PATCH) trigger this workflow.
-# Builds use GoReleaser's Rust builder (cargo-cross). No pull_request /
+# Builds use GoReleaser's Rust builder (cargo-zigbuild). No pull_request /
 # pull_request_target triggers. No repository secrets are required.
 
 on:
@@ -16,8 +16,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # cross git revision used by GoReleaser's rust builder (also in Cross.toml)
-  CROSS_GIT_REV: 55f847251389c5406df85579191c0eac412fab3a
   # goreleaser/goreleaser v2.17.1
   GORELEASER_VERSION: v2.17.1
 
@@ -112,9 +110,14 @@ jobs:
           components: clippy, rustfmt
           targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
 
-      - name: Install cross
-        run: |
-          cargo install --locked --git https://github.com/cross-rs/cross --rev "${CROSS_GIT_REV}" cross
+      - name: Install Zig
+        # mlugg/setup-zig@v2.0.5
+        uses: mlugg/setup-zig@8d6198c65fb0feaa111df26e6b467fea8345e46f
+        with:
+          version: 0.15.2
+
+      - name: Install cargo-zigbuild
+        run: cargo install --locked --version 0.23.0 cargo-zigbuild
 
       - name: Install GoReleaser
         # goreleaser/goreleaser-action@v7.2.3
