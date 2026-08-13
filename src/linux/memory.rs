@@ -94,12 +94,7 @@ const VMSTAT_EXACT_KEYS: &[&str] = &[
     "oom_kill",
 ];
 
-const VMSTAT_PREFIX_KEYS: &[&str] = &[
-    "allocstall_",
-    "pgscan_",
-    "pgsteal_",
-    "compact_",
-];
+const VMSTAT_PREFIX_KEYS: &[&str] = &["allocstall_", "pgscan_", "pgsteal_", "compact_"];
 
 pub fn collect_memory_isolated() -> (MemoryObservations, Vec<ComponentOutcome>) {
     catch_unwind(AssertUnwindSafe(collect_memory)).unwrap_or_else(|_| {
@@ -313,7 +308,10 @@ fn find_vmstat_unit(key: &str) -> Option<VmEventUnit> {
         } else {
             Some(VmEventUnit::Events)
         }
-    } else if VMSTAT_PREFIX_KEYS.iter().any(|prefix| key.starts_with(prefix)) {
+    } else if VMSTAT_PREFIX_KEYS
+        .iter()
+        .any(|prefix| key.starts_with(prefix))
+    {
         Some(VmEventUnit::Events)
     } else {
         None

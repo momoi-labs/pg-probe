@@ -74,9 +74,24 @@ fn collect_pressure() -> (PressureObservations, Vec<ComponentOutcome>) {
     let mut observations = PressureObservations::default();
     let mut outcomes = Vec::new();
 
-    collect_psi_resource(PsiResource::Cpu, PSI_CPU_SOURCE, &mut observations, &mut outcomes);
-    collect_psi_resource(PsiResource::Memory, PSI_MEMORY_SOURCE, &mut observations, &mut outcomes);
-    collect_psi_resource(PsiResource::Io, PSI_IO_SOURCE, &mut observations, &mut outcomes);
+    collect_psi_resource(
+        PsiResource::Cpu,
+        PSI_CPU_SOURCE,
+        &mut observations,
+        &mut outcomes,
+    );
+    collect_psi_resource(
+        PsiResource::Memory,
+        PSI_MEMORY_SOURCE,
+        &mut observations,
+        &mut outcomes,
+    );
+    collect_psi_resource(
+        PsiResource::Io,
+        PSI_IO_SOURCE,
+        &mut observations,
+        &mut outcomes,
+    );
 
     (observations, outcomes)
 }

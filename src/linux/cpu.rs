@@ -135,12 +135,15 @@ fn collect_cpu_sets(observations: &mut ComputeObservations, outcomes: &mut Vec<C
                     ));
                 }
                 Err(error_code) => {
-                    outcomes.push(ComponentOutcome::failed(
-                        source,
-                        CollectionStatus::ParseError,
-                        error_code,
-                        None,
-                    ).with_timing(started_at_utc, now_utc()));
+                    outcomes.push(
+                        ComponentOutcome::failed(
+                            source,
+                            CollectionStatus::ParseError,
+                            error_code,
+                            None,
+                        )
+                        .with_timing(started_at_utc, now_utc()),
+                    );
                 }
             },
             Err(error) => {
@@ -151,20 +154,26 @@ fn collect_cpu_sets(observations: &mut ComputeObservations, outcomes: &mut Vec<C
                 } else {
                     CollectionStatus::IoError
                 };
-                outcomes.push(ComponentOutcome::failed(
-                    source,
-                    status,
-                    "cpu_set_read_failed",
-                    error.raw_os_error(),
-                ).with_timing(started_at_utc, now_utc()));
+                outcomes.push(
+                    ComponentOutcome::failed(
+                        source,
+                        status,
+                        "cpu_set_read_failed",
+                        error.raw_os_error(),
+                    )
+                    .with_timing(started_at_utc, now_utc()),
+                );
             }
         }
     }
 }
 
-fn collect_cpu_affinity(observations: &mut ComputeObservations, outcomes: &mut Vec<ComponentOutcome>) {
+fn collect_cpu_affinity(
+    observations: &mut ComputeObservations,
+    outcomes: &mut Vec<ComponentOutcome>,
+) {
     let started_at_utc = now_utc();
-    
+
     let content = match read_bounded(Path::new("/proc/self/status")) {
         Ok(content) => content,
         Err(error) => {
@@ -173,17 +182,21 @@ fn collect_cpu_affinity(observations: &mut ComputeObservations, outcomes: &mut V
                 io::ErrorKind::PermissionDenied => CollectionStatus::PermissionDenied,
                 _ => CollectionStatus::IoError,
             };
-            outcomes.push(ComponentOutcome::failed(
-                CPU_AFFINITY_SOURCE,
-                status,
-                "proc_self_status_read_failed",
-                error.raw_os_error(),
-            ).with_timing(started_at_utc, now_utc()));
+            outcomes.push(
+                ComponentOutcome::failed(
+                    CPU_AFFINITY_SOURCE,
+                    status,
+                    "proc_self_status_read_failed",
+                    error.raw_os_error(),
+                )
+                .with_timing(started_at_utc, now_utc()),
+            );
             return;
         }
     };
 
-    let cpus_allowed_list = content.lines()
+    let cpus_allowed_list = content
+        .lines()
         .find(|line| line.starts_with("Cpus_allowed_list:"))
         .and_then(|line| line.split(':').nth(1))
         .map(|s| s.trim());
@@ -201,37 +214,49 @@ fn collect_cpu_affinity(observations: &mut ComputeObservations, outcomes: &mut V
                 ));
             }
             Err(error_code) => {
-                outcomes.push(ComponentOutcome::failed(
-                    CPU_AFFINITY_SOURCE,
-                    CollectionStatus::ParseError,
-                    error_code,
-                    None,
-                ).with_timing(started_at_utc, now_utc()));
+                outcomes.push(
+                    ComponentOutcome::failed(
+                        CPU_AFFINITY_SOURCE,
+                        CollectionStatus::ParseError,
+                        error_code,
+                        None,
+                    )
+                    .with_timing(started_at_utc, now_utc()),
+                );
             }
         },
         None => {
-            outcomes.push(ComponentOutcome::failed(
-                CPU_AFFINITY_SOURCE,
-                CollectionStatus::ParseError,
-                "cpus_allowed_list_not_found",
-                None,
-            ).with_timing(started_at_utc, now_utc()));
+            outcomes.push(
+                ComponentOutcome::failed(
+                    CPU_AFFINITY_SOURCE,
+                    CollectionStatus::ParseError,
+                    "cpus_allowed_list_not_found",
+                    None,
+                )
+                .with_timing(started_at_utc, now_utc()),
+            );
         }
     }
 }
 
-fn collect_cpu_topology(observations: &mut ComputeObservations, outcomes: &mut Vec<ComponentOutcome>) {
+fn collect_cpu_topology(
+    observations: &mut ComputeObservations,
+    outcomes: &mut Vec<ComponentOutcome>,
+) {
     let started_at_utc = now_utc();
-    
+
     let cpu_online = match observations.online.as_ref() {
         Some(set) => set.cpus.clone(),
         None => {
-            outcomes.push(ComponentOutcome::failed(
-                CPU_TOPOLOGY_SOURCE,
-                CollectionStatus::Unsupported,
-                "cpu_online_unavailable",
-                None,
-            ).with_timing(started_at_utc, now_utc()));
+            outcomes.push(
+                ComponentOutcome::failed(
+                    CPU_TOPOLOGY_SOURCE,
+                    CollectionStatus::Unsupported,
+                    "cpu_online_unavailable",
+                    None,
+                )
+                .with_timing(started_at_utc, now_utc()),
+            );
             return;
         }
     };
@@ -241,17 +266,22 @@ fn collect_cpu_topology(observations: &mut ComputeObservations, outcomes: &mut V
 
     for cpu_id in cpu_online {
         let base_path = format!("/sys/devices/system/cpu/cpu{cpu_id}/topology");
-        
+
         let package_id = read_sysfs_u32(&format!("{base_path}/physical_package_id"));
         let die_id = read_sysfs_u32(&format!("{base_path}/die_id"));
         let core_id = read_sysfs_u32(&format!("{base_path}/core_id"));
-        
-        let thread_siblings = match read_bounded(Path::new(&format!("{base_path}/thread_siblings_list"))) {
-            Ok(content) => parse_cpu_set(content.trim()).ok(),
-            Err(_) => None,
-        };
 
-        if package_id.is_none() && die_id.is_none() && core_id.is_none() && thread_siblings.is_none() {
+        let thread_siblings =
+            match read_bounded(Path::new(&format!("{base_path}/thread_siblings_list"))) {
+                Ok(content) => parse_cpu_set(content.trim()).ok(),
+                Err(_) => None,
+            };
+
+        if package_id.is_none()
+            && die_id.is_none()
+            && core_id.is_none()
+            && thread_siblings.is_none()
+        {
             had_error = true;
             break;
         }
@@ -266,12 +296,15 @@ fn collect_cpu_topology(observations: &mut ComputeObservations, outcomes: &mut V
     }
 
     if had_error || topology.is_empty() {
-        outcomes.push(ComponentOutcome::failed(
-            CPU_TOPOLOGY_SOURCE,
-            CollectionStatus::IoError,
-            "topology_read_failed",
-            None,
-        ).with_timing(started_at_utc, now_utc()));
+        outcomes.push(
+            ComponentOutcome::failed(
+                CPU_TOPOLOGY_SOURCE,
+                CollectionStatus::IoError,
+                "topology_read_failed",
+                None,
+            )
+            .with_timing(started_at_utc, now_utc()),
+        );
         return;
     }
 
@@ -285,9 +318,12 @@ fn collect_cpu_topology(observations: &mut ComputeObservations, outcomes: &mut V
     ));
 }
 
-fn collect_numa_topology(observations: &mut ComputeObservations, outcomes: &mut Vec<ComponentOutcome>) {
+fn collect_numa_topology(
+    observations: &mut ComputeObservations,
+    outcomes: &mut Vec<ComponentOutcome>,
+) {
     let started_at_utc = now_utc();
-    
+
     let online_content = match read_bounded(Path::new("/sys/devices/system/node/online")) {
         Ok(content) => content,
         Err(error) => {
@@ -296,12 +332,15 @@ fn collect_numa_topology(observations: &mut ComputeObservations, outcomes: &mut 
             } else {
                 CollectionStatus::IoError
             };
-            outcomes.push(ComponentOutcome::failed(
-                NUMA_TOPOLOGY_SOURCE,
-                status,
-                "numa_online_read_failed",
-                error.raw_os_error(),
-            ).with_timing(started_at_utc, now_utc()));
+            outcomes.push(
+                ComponentOutcome::failed(
+                    NUMA_TOPOLOGY_SOURCE,
+                    status,
+                    "numa_online_read_failed",
+                    error.raw_os_error(),
+                )
+                .with_timing(started_at_utc, now_utc()),
+            );
             return;
         }
     };
@@ -309,12 +348,15 @@ fn collect_numa_topology(observations: &mut ComputeObservations, outcomes: &mut 
     let node_ids = match parse_cpu_set(online_content.trim()) {
         Ok(set) => set.cpus,
         Err(_) => {
-            outcomes.push(ComponentOutcome::failed(
-                NUMA_TOPOLOGY_SOURCE,
-                CollectionStatus::ParseError,
-                "invalid_numa_online",
-                None,
-            ).with_timing(started_at_utc, now_utc()));
+            outcomes.push(
+                ComponentOutcome::failed(
+                    NUMA_TOPOLOGY_SOURCE,
+                    CollectionStatus::ParseError,
+                    "invalid_numa_online",
+                    None,
+                )
+                .with_timing(started_at_utc, now_utc()),
+            );
             return;
         }
     };
@@ -326,22 +368,28 @@ fn collect_numa_topology(observations: &mut ComputeObservations, outcomes: &mut 
             Ok(content) => match parse_cpu_set(content.trim()) {
                 Ok(cpus) => nodes.push(NumaNode { node_id, cpus }),
                 Err(_) => {
-                    outcomes.push(ComponentOutcome::failed(
-                        NUMA_TOPOLOGY_SOURCE,
-                        CollectionStatus::ParseError,
-                        "invalid_numa_cpulist",
-                        None,
-                    ).with_timing(started_at_utc, now_utc()));
+                    outcomes.push(
+                        ComponentOutcome::failed(
+                            NUMA_TOPOLOGY_SOURCE,
+                            CollectionStatus::ParseError,
+                            "invalid_numa_cpulist",
+                            None,
+                        )
+                        .with_timing(started_at_utc, now_utc()),
+                    );
                     return;
                 }
             },
             Err(_) => {
-                outcomes.push(ComponentOutcome::failed(
-                    NUMA_TOPOLOGY_SOURCE,
-                    CollectionStatus::IoError,
-                    "numa_cpulist_read_failed",
-                    None,
-                ).with_timing(started_at_utc, now_utc()));
+                outcomes.push(
+                    ComponentOutcome::failed(
+                        NUMA_TOPOLOGY_SOURCE,
+                        CollectionStatus::IoError,
+                        "numa_cpulist_read_failed",
+                        None,
+                    )
+                    .with_timing(started_at_utc, now_utc()),
+                );
                 return;
             }
         }
@@ -359,7 +407,7 @@ fn collect_numa_topology(observations: &mut ComputeObservations, outcomes: &mut 
 
 fn collect_cpu_times(observations: &mut ComputeObservations, outcomes: &mut Vec<ComponentOutcome>) {
     let started_at_utc = now_utc();
-    
+
     let content = match read_bounded(Path::new("/proc/stat")) {
         Ok(content) => content,
         Err(error) => {
@@ -368,12 +416,15 @@ fn collect_cpu_times(observations: &mut ComputeObservations, outcomes: &mut Vec<
                 io::ErrorKind::PermissionDenied => CollectionStatus::PermissionDenied,
                 _ => CollectionStatus::IoError,
             };
-            outcomes.push(ComponentOutcome::failed(
-                CPU_TIME_SOURCE,
-                status,
-                "proc_stat_read_failed",
-                error.raw_os_error(),
-            ).with_timing(started_at_utc, now_utc()));
+            outcomes.push(
+                ComponentOutcome::failed(
+                    CPU_TIME_SOURCE,
+                    status,
+                    "proc_stat_read_failed",
+                    error.raw_os_error(),
+                )
+                .with_timing(started_at_utc, now_utc()),
+            );
             return;
         }
     };
@@ -387,24 +438,30 @@ fn collect_cpu_times(observations: &mut ComputeObservations, outcomes: &mut Vec<
         match parse_cpu_time_line(line) {
             Some(entry) => cpu_times.push(entry),
             None => {
-                outcomes.push(ComponentOutcome::failed(
-                    CPU_TIME_SOURCE,
-                    CollectionStatus::ParseError,
-                    "invalid_cpu_time_line",
-                    None,
-                ).with_timing(started_at_utc, now_utc()));
+                outcomes.push(
+                    ComponentOutcome::failed(
+                        CPU_TIME_SOURCE,
+                        CollectionStatus::ParseError,
+                        "invalid_cpu_time_line",
+                        None,
+                    )
+                    .with_timing(started_at_utc, now_utc()),
+                );
                 return;
             }
         }
     }
 
     if cpu_times.is_empty() {
-        outcomes.push(ComponentOutcome::failed(
-            CPU_TIME_SOURCE,
-            CollectionStatus::ParseError,
-            "no_cpu_time_entries",
-            None,
-        ).with_timing(started_at_utc, now_utc()));
+        outcomes.push(
+            ComponentOutcome::failed(
+                CPU_TIME_SOURCE,
+                CollectionStatus::ParseError,
+                "no_cpu_time_entries",
+                None,
+            )
+            .with_timing(started_at_utc, now_utc()),
+        );
         return;
     }
 
@@ -420,7 +477,7 @@ fn collect_cpu_times(observations: &mut ComputeObservations, outcomes: &mut Vec<
 
 fn collect_scheduler(observations: &mut ComputeObservations, outcomes: &mut Vec<ComponentOutcome>) {
     let started_at_utc = now_utc();
-    
+
     let content = match read_bounded(Path::new("/proc/stat")) {
         Ok(content) => content,
         Err(error) => {
@@ -429,12 +486,15 @@ fn collect_scheduler(observations: &mut ComputeObservations, outcomes: &mut Vec<
                 io::ErrorKind::PermissionDenied => CollectionStatus::PermissionDenied,
                 _ => CollectionStatus::IoError,
             };
-            outcomes.push(ComponentOutcome::failed(
-                SCHEDULER_SOURCE,
-                status,
-                "proc_stat_read_failed",
-                error.raw_os_error(),
-            ).with_timing(started_at_utc, now_utc()));
+            outcomes.push(
+                ComponentOutcome::failed(
+                    SCHEDULER_SOURCE,
+                    status,
+                    "proc_stat_read_failed",
+                    error.raw_os_error(),
+                )
+                .with_timing(started_at_utc, now_utc()),
+            );
             return;
         }
     };
@@ -482,19 +542,25 @@ fn collect_scheduler(observations: &mut ComputeObservations, outcomes: &mut Vec<
             ));
         }
         _ => {
-            outcomes.push(ComponentOutcome::failed(
-                SCHEDULER_SOURCE,
-                CollectionStatus::ParseError,
-                "missing_scheduler_fields",
-                None,
-            ).with_timing(started_at_utc, now_utc()));
+            outcomes.push(
+                ComponentOutcome::failed(
+                    SCHEDULER_SOURCE,
+                    CollectionStatus::ParseError,
+                    "missing_scheduler_fields",
+                    None,
+                )
+                .with_timing(started_at_utc, now_utc()),
+            );
         }
     }
 }
 
-fn collect_load_averages(observations: &mut ComputeObservations, outcomes: &mut Vec<ComponentOutcome>) {
+fn collect_load_averages(
+    observations: &mut ComputeObservations,
+    outcomes: &mut Vec<ComponentOutcome>,
+) {
     let started_at_utc = now_utc();
-    
+
     let content = match read_bounded(Path::new("/proc/loadavg")) {
         Ok(content) => content,
         Err(error) => {
@@ -503,12 +569,15 @@ fn collect_load_averages(observations: &mut ComputeObservations, outcomes: &mut 
                 io::ErrorKind::PermissionDenied => CollectionStatus::PermissionDenied,
                 _ => CollectionStatus::IoError,
             };
-            outcomes.push(ComponentOutcome::failed(
-                LOAD_AVG_SOURCE,
-                status,
-                "loadavg_read_failed",
-                error.raw_os_error(),
-            ).with_timing(started_at_utc, now_utc()));
+            outcomes.push(
+                ComponentOutcome::failed(
+                    LOAD_AVG_SOURCE,
+                    status,
+                    "loadavg_read_failed",
+                    error.raw_os_error(),
+                )
+                .with_timing(started_at_utc, now_utc()),
+            );
             return;
         }
     };
@@ -525,12 +594,15 @@ fn collect_load_averages(observations: &mut ComputeObservations, outcomes: &mut 
             ));
         }
         None => {
-            outcomes.push(ComponentOutcome::failed(
-                LOAD_AVG_SOURCE,
-                CollectionStatus::ParseError,
-                "invalid_loadavg",
-                None,
-            ).with_timing(started_at_utc, now_utc()));
+            outcomes.push(
+                ComponentOutcome::failed(
+                    LOAD_AVG_SOURCE,
+                    CollectionStatus::ParseError,
+                    "invalid_loadavg",
+                    None,
+                )
+                .with_timing(started_at_utc, now_utc()),
+            );
         }
     }
 }

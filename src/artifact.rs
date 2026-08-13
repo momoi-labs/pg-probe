@@ -476,8 +476,8 @@ impl SqliteWriter {
             ];
 
             for (state_name, ticks_value) in states {
-                let ticks = i64::try_from(ticks_value)
-                    .map_err(|_| ArtifactError::ValueOutOfRange)?;
+                let ticks =
+                    i64::try_from(ticks_value).map_err(|_| ArtifactError::ValueOutOfRange)?;
                 let cpu_id = entry.cpu_id.map(i64::from).unwrap_or(-1);
                 statement
                     .execute(params![
@@ -505,12 +505,30 @@ impl SqliteWriter {
             return Ok(());
         }
 
-        let procs_running = scheduler.map(|s| i64::try_from(s.procs_running)).transpose().map_err(|_| ArtifactError::ValueOutOfRange)?;
-        let procs_blocked = scheduler.map(|s| i64::try_from(s.procs_blocked)).transpose().map_err(|_| ArtifactError::ValueOutOfRange)?;
-        let ctxt = scheduler.map(|s| i64::try_from(s.ctxt)).transpose().map_err(|_| ArtifactError::ValueOutOfRange)?;
-        let processes = scheduler.map(|s| i64::try_from(s.processes)).transpose().map_err(|_| ArtifactError::ValueOutOfRange)?;
-        let intr = scheduler.map(|s| i64::try_from(s.intr)).transpose().map_err(|_| ArtifactError::ValueOutOfRange)?;
-        let softirq = scheduler.map(|s| i64::try_from(s.softirq)).transpose().map_err(|_| ArtifactError::ValueOutOfRange)?;
+        let procs_running = scheduler
+            .map(|s| i64::try_from(s.procs_running))
+            .transpose()
+            .map_err(|_| ArtifactError::ValueOutOfRange)?;
+        let procs_blocked = scheduler
+            .map(|s| i64::try_from(s.procs_blocked))
+            .transpose()
+            .map_err(|_| ArtifactError::ValueOutOfRange)?;
+        let ctxt = scheduler
+            .map(|s| i64::try_from(s.ctxt))
+            .transpose()
+            .map_err(|_| ArtifactError::ValueOutOfRange)?;
+        let processes = scheduler
+            .map(|s| i64::try_from(s.processes))
+            .transpose()
+            .map_err(|_| ArtifactError::ValueOutOfRange)?;
+        let intr = scheduler
+            .map(|s| i64::try_from(s.intr))
+            .transpose()
+            .map_err(|_| ArtifactError::ValueOutOfRange)?;
+        let softirq = scheduler
+            .map(|s| i64::try_from(s.softirq))
+            .transpose()
+            .map_err(|_| ArtifactError::ValueOutOfRange)?;
         let runnable_tasks = load_avg.map(|l| i64::from(l.runnable_tasks));
         let total_tasks = load_avg.map(|l| i64::from(l.total_tasks));
 
@@ -608,7 +626,8 @@ impl SqliteWriter {
             .map_err(ArtifactError::Sqlite)?;
 
         for entry in &snapshot.compute_memory.pressure.psi {
-            let total_us = i64::try_from(entry.total_us).map_err(|_| ArtifactError::ValueOutOfRange)?;
+            let total_us =
+                i64::try_from(entry.total_us).map_err(|_| ArtifactError::ValueOutOfRange)?;
             statement
                 .execute(params![
                     snapshot.snapshot_id.to_string(),
