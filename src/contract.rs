@@ -137,6 +137,13 @@ pub struct LinuxIdentity {
     pub uptime_microseconds: Option<u64>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LinuxComputeMemory {
+    pub compute: crate::linux::ComputeObservations,
+    pub memory: crate::linux::MemoryObservations,
+    pub pressure: crate::linux::PressureObservations,
+}
+
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub snapshot_id: Uuid,
@@ -144,6 +151,7 @@ pub struct Snapshot {
     pub finished_at_utc: DateTime<Utc>,
     pub status: SnapshotStatus,
     pub identity: LinuxIdentity,
+    pub compute_memory: LinuxComputeMemory,
     pub outcomes: Vec<ComponentOutcome>,
 }
 
@@ -153,6 +161,7 @@ impl Snapshot {
         started_at_utc: DateTime<Utc>,
         finished_at_utc: DateTime<Utc>,
         identity: LinuxIdentity,
+        compute_memory: LinuxComputeMemory,
         outcomes: Vec<ComponentOutcome>,
     ) -> Self {
         let status = if outcomes
@@ -170,6 +179,7 @@ impl Snapshot {
             finished_at_utc,
             status,
             identity,
+            compute_memory,
             outcomes,
         }
     }
@@ -201,6 +211,7 @@ mod tests {
             now,
             now,
             LinuxIdentity::default(),
+            LinuxComputeMemory::default(),
             vec![ComponentOutcome::failed(
                 "linux.optional",
                 CollectionStatus::Unsupported,
@@ -220,6 +231,7 @@ mod tests {
             now,
             now,
             LinuxIdentity::default(),
+            LinuxComputeMemory::default(),
             vec![ComponentOutcome::failed(
                 "proc.uptime",
                 CollectionStatus::ParseError,

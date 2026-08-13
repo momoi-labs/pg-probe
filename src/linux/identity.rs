@@ -292,7 +292,7 @@ fn parse_decimal_microseconds(value: &str) -> Option<u64> {
     seconds.checked_mul(1_000_000)?.checked_add(micros)
 }
 
-fn read_bounded(path: &Path) -> io::Result<String> {
+pub fn read_bounded(path: &Path) -> io::Result<String> {
     const MAX_SOURCE_BYTES: u64 = 1024 * 1024;
     let file = fs::File::open(path)?;
     let metadata = file.metadata()?;
@@ -321,6 +321,7 @@ fn io_outcome(
     error: &io::Error,
 ) -> ComponentOutcome {
     let status = match error.kind() {
+        io::ErrorKind::NotFound => CollectionStatus::Unsupported,
         io::ErrorKind::PermissionDenied => CollectionStatus::PermissionDenied,
         _ => CollectionStatus::IoError,
     };

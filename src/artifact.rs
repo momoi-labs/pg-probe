@@ -157,6 +157,80 @@ impl SqliteWriter {
                     ticks_per_second INTEGER,
                     uptime_microseconds INTEGER
                 ) STRICT;
+                CREATE TABLE linux_cpu_set (
+                    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    set_kind TEXT NOT NULL CHECK (set_kind IN ('online', 'present', 'possible', 'affinity')),
+                    cpu_id INTEGER NOT NULL,
+                    PRIMARY KEY (snapshot_id, set_kind, cpu_id)
+                ) STRICT;
+                CREATE TABLE linux_cpu_topology (
+                    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    cpu_id INTEGER NOT NULL,
+                    package_id INTEGER,
+                    die_id INTEGER,
+                    core_id INTEGER,
+                    sibling_set TEXT,
+                    PRIMARY KEY (snapshot_id, cpu_id)
+                ) STRICT;
+                CREATE TABLE linux_numa_node (
+                    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    node_id INTEGER NOT NULL,
+                    cpu_set TEXT NOT NULL,
+                    PRIMARY KEY (snapshot_id, node_id)
+                ) STRICT;
+                CREATE TABLE linux_cpu_time (
+                    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    cpu_id INTEGER,
+                    state TEXT NOT NULL,
+                    ticks INTEGER NOT NULL,
+                    PRIMARY KEY (snapshot_id, cpu_id, state)
+                ) STRICT;
+                CREATE TABLE linux_scheduler (
+                    snapshot_id TEXT PRIMARY KEY NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    procs_running INTEGER,
+                    procs_blocked INTEGER,
+                    ctxt INTEGER,
+                    processes INTEGER,
+                    intr INTEGER,
+                    softirq INTEGER,
+                    load_avg_1m REAL,
+                    load_avg_5m REAL,
+                    load_avg_15m REAL,
+                    runnable_tasks INTEGER,
+                    total_tasks INTEGER
+                ) STRICT;
+                CREATE TABLE linux_memory (
+                    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    value_bytes INTEGER,
+                    unit TEXT NOT NULL CHECK (unit IN ('bytes', 'pages')),
+                    PRIMARY KEY (snapshot_id, key)
+                ) STRICT;
+                CREATE TABLE linux_vm_event (
+                    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    value INTEGER NOT NULL,
+                    unit TEXT NOT NULL CHECK (unit IN ('events', 'KiB')),
+                    PRIMARY KEY (snapshot_id, key)
+                ) STRICT;
+                CREATE TABLE linux_psi (
+                    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    resource TEXT NOT NULL CHECK (resource IN ('cpu', 'memory', 'io')),
+                    scope TEXT NOT NULL CHECK (scope IN ('some', 'full')),
+                    avg10 REAL NOT NULL,
+                    avg60 REAL NOT NULL,
+                    avg300 REAL NOT NULL,
+                    total_us INTEGER NOT NULL,
+                    PRIMARY KEY (snapshot_id, resource, scope)
+                ) STRICT;
                 "
             ))
             .map_err(ArtifactError::Sqlite)?;
@@ -259,6 +333,25 @@ impl SqliteWriter {
             )
             .map_err(ArtifactError::Sqlite)?;
 
+        let collected_at = format_timestamp(snapshot.finished_at_utc);
+        Self::write_cpu_sets(&transaction, snapshot, &collected_at)?;
+        Self::write_cpu_topology(&transaction, snapshot, &collected_at)?;
+        Self::write_numa_nodes(&transaction, snapshot, &collected_at)?;
+        Self::write_cpu_times(&transaction, snapshot, &collected_at)?;
+        Self::write_scheduler(&transaction, snapshot, &collected_at)?;
+        Self::write_memory(&transaction, snapshot, &collected_at)?;
+        Self::write_vm_events(&transaction, snapshot, &collected_at)?;
+        Self::write_psi(&transaction, snapshot, &collected_at)?;
+
+        Self::write_cpu_sets(&transaction, snapshot, &collected_at)?;
+        Self::write_cpu_topology(&transaction, snapshot, &collected_at)?;
+        Self::write_numa_nodes(&transaction, snapshot, &collected_at)?;
+        Self::write_cpu_times(&transaction, snapshot, &collected_at)?;
+        Self::write_scheduler(&transaction, snapshot, &collected_at)?;
+        Self::write_memory(&transaction, snapshot, &collected_at)?;
+        Self::write_vm_events(&transaction, snapshot, &collected_at)?;
+        Self::write_psi(&transaction, snapshot, &collected_at)?;
+
         transaction.commit().map_err(ArtifactError::Sqlite)?;
         self.connection
             .execute_batch("PRAGMA optimize;")
@@ -270,4 +363,311 @@ impl SqliteWriter {
             .and_then(|file| file.sync_all())
             .map_err(ArtifactError::Io)
     }
+
+    fn write_cpu_sets(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let mut statement = transaction
+            .prepare(
+                "INSERT INTO linux_cpu_set (snapshot_id, collected_at, set_kind, cpu_id)
+                 VALUES (?1, ?2, ?3, ?4)",
+            )
+            .map_err(ArtifactError::Sqlite)?;
+
+        let sets = [
+            ("online", &snapshot.compute_memory.compute.online),
+            ("present", &snapshot.compute_memory.compute.present),
+            ("possible", &snapshot.compute_memory.compute.possible),
+            ("affinity", &snapshot.compute_memory.compute.affinity),
+        ];
+
+        for (kind, set_opt) in sets {
+            if let Some(set) = set_opt {
+                for cpu_id in &set.cpus {
+                    statement
+                        .execute(params![
+                            snapshot.snapshot_id.to_string(),
+                            collected_at,
+                            kind,
+                            i64::from(*cpu_id),
+                        ])
+                        .map_err(ArtifactError::Sqlite)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn write_cpu_topology(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let mut statement = transaction
+            .prepare(
+                "INSERT INTO linux_cpu_topology (
+                    snapshot_id, collected_at, cpu_id, package_id, die_id, core_id, sibling_set
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            )
+            .map_err(ArtifactError::Sqlite)?;
+
+        for entry in &snapshot.compute_memory.compute.topology {
+            let sibling_set = entry
+                .thread_siblings
+                .as_ref()
+                .map(|set| format_cpu_set(&set.cpus));
+            statement
+                .execute(params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    i64::from(entry.cpu_id),
+                    entry.package_id.map(i64::from),
+                    entry.die_id.map(i64::from),
+                    entry.core_id.map(i64::from),
+                    sibling_set,
+                ])
+                .map_err(ArtifactError::Sqlite)?;
+        }
+        Ok(())
+    }
+
+    fn write_numa_nodes(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let mut statement = transaction
+            .prepare(
+                "INSERT INTO linux_numa_node (snapshot_id, collected_at, node_id, cpu_set)
+                 VALUES (?1, ?2, ?3, ?4)",
+            )
+            .map_err(ArtifactError::Sqlite)?;
+
+        for node in &snapshot.compute_memory.compute.numa_nodes {
+            statement
+                .execute(params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    i64::from(node.node_id),
+                    format_cpu_set(&node.cpus.cpus),
+                ])
+                .map_err(ArtifactError::Sqlite)?;
+        }
+        Ok(())
+    }
+
+    fn write_cpu_times(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let mut statement = transaction
+            .prepare(
+                "INSERT INTO linux_cpu_time (snapshot_id, collected_at, cpu_id, state, ticks)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )
+            .map_err(ArtifactError::Sqlite)?;
+
+        for entry in &snapshot.compute_memory.compute.cpu_times {
+            let states = [
+                ("user", entry.user),
+                ("nice", entry.nice),
+                ("system", entry.system),
+                ("idle", entry.idle),
+                ("iowait", entry.iowait),
+                ("irq", entry.irq),
+                ("softirq", entry.softirq),
+                ("steal", entry.steal),
+                ("guest", entry.guest),
+                ("guest_nice", entry.guest_nice),
+            ];
+
+            for (state_name, ticks_value) in states {
+                let ticks = i64::try_from(ticks_value)
+                    .map_err(|_| ArtifactError::ValueOutOfRange)?;
+                statement
+                    .execute(params![
+                        snapshot.snapshot_id.to_string(),
+                        collected_at,
+                        entry.cpu_id.map(i64::from),
+                        state_name,
+                        ticks,
+                    ])
+                    .map_err(ArtifactError::Sqlite)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn write_scheduler(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let scheduler = snapshot.compute_memory.compute.scheduler.as_ref();
+        let load_avg = snapshot.compute_memory.compute.load_averages.as_ref();
+
+        if scheduler.is_none() && load_avg.is_none() {
+            return Ok(());
+        }
+
+        let procs_running = scheduler.map(|s| i64::try_from(s.procs_running)).transpose().map_err(|_| ArtifactError::ValueOutOfRange)?;
+        let procs_blocked = scheduler.map(|s| i64::try_from(s.procs_blocked)).transpose().map_err(|_| ArtifactError::ValueOutOfRange)?;
+        let ctxt = scheduler.map(|s| i64::try_from(s.ctxt)).transpose().map_err(|_| ArtifactError::ValueOutOfRange)?;
+        let processes = scheduler.map(|s| i64::try_from(s.processes)).transpose().map_err(|_| ArtifactError::ValueOutOfRange)?;
+        let intr = scheduler.map(|s| i64::try_from(s.intr)).transpose().map_err(|_| ArtifactError::ValueOutOfRange)?;
+        let softirq = scheduler.map(|s| i64::try_from(s.softirq)).transpose().map_err(|_| ArtifactError::ValueOutOfRange)?;
+        let runnable_tasks = load_avg.map(|l| i64::from(l.runnable_tasks));
+        let total_tasks = load_avg.map(|l| i64::from(l.total_tasks));
+
+        transaction
+            .execute(
+                "INSERT INTO linux_scheduler (
+                    snapshot_id, collected_at, procs_running, procs_blocked, ctxt, processes,
+                    intr, softirq, load_avg_1m, load_avg_5m, load_avg_15m, runnable_tasks, total_tasks
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    procs_running,
+                    procs_blocked,
+                    ctxt,
+                    processes,
+                    intr,
+                    softirq,
+                    load_avg.map(|l| l.load_1m),
+                    load_avg.map(|l| l.load_5m),
+                    load_avg.map(|l| l.load_15m),
+                    runnable_tasks,
+                    total_tasks,
+                ],
+            )
+            .map_err(ArtifactError::Sqlite)?;
+        Ok(())
+    }
+
+    fn write_memory(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let mut statement = transaction
+            .prepare(
+                "INSERT INTO linux_memory (snapshot_id, collected_at, key, value_bytes, unit)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )
+            .map_err(ArtifactError::Sqlite)?;
+
+        for entry in &snapshot.compute_memory.memory.memory {
+            let value = i64::try_from(entry.value).map_err(|_| ArtifactError::ValueOutOfRange)?;
+            statement
+                .execute(params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    entry.key,
+                    value,
+                    entry.unit.as_str(),
+                ])
+                .map_err(ArtifactError::Sqlite)?;
+        }
+        Ok(())
+    }
+
+    fn write_vm_events(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let mut statement = transaction
+            .prepare(
+                "INSERT INTO linux_vm_event (snapshot_id, collected_at, key, value, unit)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )
+            .map_err(ArtifactError::Sqlite)?;
+
+        for entry in &snapshot.compute_memory.memory.vm_events {
+            let value = i64::try_from(entry.value).map_err(|_| ArtifactError::ValueOutOfRange)?;
+            statement
+                .execute(params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    entry.key,
+                    value,
+                    entry.unit.as_str(),
+                ])
+                .map_err(ArtifactError::Sqlite)?;
+        }
+        Ok(())
+    }
+
+    fn write_psi(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let mut statement = transaction
+            .prepare(
+                "INSERT INTO linux_psi (
+                    snapshot_id, collected_at, resource, scope, avg10, avg60, avg300, total_us
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            )
+            .map_err(ArtifactError::Sqlite)?;
+
+        for entry in &snapshot.compute_memory.pressure.psi {
+            let total_us = i64::try_from(entry.total_us).map_err(|_| ArtifactError::ValueOutOfRange)?;
+            statement
+                .execute(params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    entry.resource.as_str(),
+                    entry.scope.as_str(),
+                    entry.avg10,
+                    entry.avg60,
+                    entry.avg300,
+                    total_us,
+                ])
+                .map_err(ArtifactError::Sqlite)?;
+        }
+        Ok(())
+    }
+}
+
+fn format_cpu_set(cpus: &[u32]) -> String {
+    if cpus.is_empty() {
+        return String::new();
+    }
+
+    let mut result = String::new();
+    let mut start = cpus[0];
+    let mut end = cpus[0];
+
+    for &cpu in &cpus[1..] {
+        if cpu == end + 1 {
+            end = cpu;
+        } else {
+            if !result.is_empty() {
+                result.push(',');
+            }
+            if start == end {
+                result.push_str(&start.to_string());
+            } else {
+                result.push_str(&format!("{start}-{end}"));
+            }
+            start = cpu;
+            end = cpu;
+        }
+    }
+
+    if !result.is_empty() {
+        result.push(',');
+    }
+    if start == end {
+        result.push_str(&start.to_string());
+    } else {
+        result.push_str(&format!("{start}-{end}"));
+    }
+
+    result
 }

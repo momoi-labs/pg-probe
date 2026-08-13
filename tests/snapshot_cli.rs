@@ -57,7 +57,7 @@ fn snapshot_command_publishes_a_valid_minimum_artifact() {
                 row.get::<_, i64>(0)
             })
             .unwrap(),
-        4
+        18
     );
     assert_eq!(
         connection
