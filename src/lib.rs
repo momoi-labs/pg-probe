@@ -17,11 +17,25 @@ pub fn capture(output: &Path) -> Result<SnapshotStatus, artifact::ArtifactError>
     outcomes.extend(memory_outcomes);
     let (pressure, pressure_outcomes) = linux::collect_pressure_isolated();
     outcomes.extend(pressure_outcomes);
+    let (storage, storage_outcomes) = linux::collect_storage_isolated();
+    outcomes.extend(storage_outcomes);
+    let (limits, limits_outcomes) = linux::collect_limits_isolated();
+    outcomes.extend(limits_outcomes);
+    let (cgroups, cgroups_outcomes) = linux::collect_cgroups_isolated();
+    outcomes.extend(cgroups_outcomes);
+    let (kernel, kernel_outcomes) = linux::collect_kernel_isolated();
+    outcomes.extend(kernel_outcomes);
     let finished_at_utc = now_utc();
     let compute_memory = contract::LinuxComputeMemory {
         compute,
         memory,
         pressure,
+    };
+    let storage_limits = contract::LinuxStorageLimits {
+        storage,
+        limits,
+        cgroups,
+        kernel,
     };
     let snapshot = Snapshot::new(
         snapshot_id,
@@ -29,6 +43,7 @@ pub fn capture(output: &Path) -> Result<SnapshotStatus, artifact::ArtifactError>
         finished_at_utc,
         identity,
         compute_memory,
+        storage_limits,
         outcomes,
     );
     let status = snapshot.status;

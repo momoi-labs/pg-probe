@@ -144,6 +144,14 @@ pub struct LinuxComputeMemory {
     pub pressure: crate::linux::PressureObservations,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LinuxStorageLimits {
+    pub storage: crate::linux::StorageObservations,
+    pub limits: crate::linux::LimitsObservations,
+    pub cgroups: crate::linux::CgroupObservations,
+    pub kernel: crate::linux::KernelObservations,
+}
+
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub snapshot_id: Uuid,
@@ -152,6 +160,7 @@ pub struct Snapshot {
     pub status: SnapshotStatus,
     pub identity: LinuxIdentity,
     pub compute_memory: LinuxComputeMemory,
+    pub storage_limits: LinuxStorageLimits,
     pub outcomes: Vec<ComponentOutcome>,
 }
 
@@ -162,6 +171,7 @@ impl Snapshot {
         finished_at_utc: DateTime<Utc>,
         identity: LinuxIdentity,
         compute_memory: LinuxComputeMemory,
+        storage_limits: LinuxStorageLimits,
         outcomes: Vec<ComponentOutcome>,
     ) -> Self {
         let status = if outcomes
@@ -180,6 +190,7 @@ impl Snapshot {
             status,
             identity,
             compute_memory,
+            storage_limits,
             outcomes,
         }
     }
@@ -212,6 +223,7 @@ mod tests {
             now,
             LinuxIdentity::default(),
             LinuxComputeMemory::default(),
+            LinuxStorageLimits::default(),
             vec![ComponentOutcome::failed(
                 "linux.optional",
                 CollectionStatus::Unsupported,
@@ -232,6 +244,7 @@ mod tests {
             now,
             LinuxIdentity::default(),
             LinuxComputeMemory::default(),
+            LinuxStorageLimits::default(),
             vec![ComponentOutcome::failed(
                 "proc.uptime",
                 CollectionStatus::ParseError,

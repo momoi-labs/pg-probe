@@ -4,7 +4,7 @@ use std::io::Read;
 use assert_cmd::cargo::cargo_bin_cmd;
 use flate2::read::GzDecoder;
 use predicates::prelude::*;
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 use tempfile::tempdir;
 
 #[test]
@@ -57,7 +57,7 @@ fn snapshot_command_publishes_a_valid_minimum_artifact() {
                 row.get::<_, i64>(0)
             })
             .unwrap(),
-        18
+        28
     );
     assert_eq!(
         connection
@@ -77,6 +77,40 @@ fn snapshot_command_publishes_a_valid_minimum_artifact() {
         .query_row("SELECT hostname FROM linux_identity", [], |row| row.get(0))
         .unwrap();
     assert!(!hostname.is_empty());
+
+    // New storage-limits tables exist and are queryable
+    let table_count: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM sqlite_master
+             WHERE type = 'table'
+             AND name IN (
+                 'linux_mount', 'linux_block_device', 'linux_block_io',
+                 'linux_resource_limit', 'linux_cgroup', 'linux_cgroup_event',
+                 'linux_cgroup_io', 'linux_kernel_vm', 'linux_kernel_ipc', 'linux_thp'
+             )",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(table_count, 10);
+
+    // Resource limits are always collected via getrlimit
+    let rlimit_count: i64 = connection
+        .query_row("SELECT count(*) FROM linux_resource_limit", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert!(rlimit_count > 0);
+
+    // No sensitive canary in any SQLite table
+    let canary_in_db: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM collector_outcome WHERE error_code LIKE '%' || ?1 || '%'",
+            params![canary],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+    assert_eq!(canary_in_db, 0);
 }
 
 #[test]

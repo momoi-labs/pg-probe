@@ -231,6 +231,157 @@ impl SqliteWriter {
                     total_us INTEGER NOT NULL,
                     PRIMARY KEY (snapshot_id, resource, scope)
                 ) STRICT;
+                CREATE TABLE linux_mount (
+                    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    mount_id INTEGER NOT NULL,
+                    parent_mount_id INTEGER NOT NULL,
+                    device_major INTEGER NOT NULL,
+                    device_minor INTEGER NOT NULL,
+                    filesystem_type TEXT NOT NULL,
+                    is_read_only INTEGER NOT NULL CHECK (is_read_only IN (0, 1)),
+                    total_bytes INTEGER,
+                    available_bytes INTEGER,
+                    total_inodes INTEGER,
+                    available_inodes INTEGER,
+                    PRIMARY KEY (snapshot_id, mount_id)
+                ) STRICT;
+                CREATE TABLE linux_block_device (
+                    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    device_major INTEGER NOT NULL,
+                    device_minor INTEGER NOT NULL,
+                    kernel_name TEXT,
+                    logical_block_size_bytes INTEGER,
+                    physical_block_size_bytes INTEGER,
+                    minimum_io_size_bytes INTEGER,
+                    optimal_io_size_bytes INTEGER,
+                    read_ahead_kibibytes INTEGER,
+                    request_queue_depth INTEGER,
+                    is_rotational INTEGER CHECK (is_rotational IN (0, 1)),
+                    scheduler TEXT,
+                    PRIMARY KEY (snapshot_id, device_major, device_minor)
+                ) STRICT;
+                CREATE TABLE linux_block_io (
+                    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    device_major INTEGER NOT NULL,
+                    device_minor INTEGER NOT NULL,
+                    reads_completed INTEGER NOT NULL,
+                    reads_merged INTEGER NOT NULL,
+                    sectors_read INTEGER NOT NULL,
+                    read_milliseconds INTEGER NOT NULL,
+                    writes_completed INTEGER NOT NULL,
+                    writes_merged INTEGER NOT NULL,
+                    sectors_written INTEGER NOT NULL,
+                    write_milliseconds INTEGER NOT NULL,
+                    io_in_progress INTEGER NOT NULL,
+                    io_milliseconds INTEGER NOT NULL,
+                    weighted_io_milliseconds INTEGER NOT NULL,
+                    discards_completed INTEGER,
+                    discard_sectors INTEGER,
+                    discard_milliseconds INTEGER,
+                    flushes_completed INTEGER,
+                    flush_milliseconds INTEGER,
+                    PRIMARY KEY (snapshot_id, device_major, device_minor)
+                ) STRICT;
+                CREATE TABLE linux_resource_limit (
+                    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    resource TEXT NOT NULL CHECK (resource IN (
+                        'nofile', 'nproc', 'memlock', 'address_space', 'core', 'file_size', 'stack'
+                    )),
+                    soft_value INTEGER,
+                    hard_value INTEGER,
+                    soft_unlimited INTEGER NOT NULL CHECK (soft_unlimited IN (0, 1)),
+                    hard_unlimited INTEGER NOT NULL CHECK (hard_unlimited IN (0, 1)),
+                    unit TEXT NOT NULL CHECK (unit IN ('bytes', 'count')),
+                    PRIMARY KEY (snapshot_id, resource)
+                ) STRICT;
+                CREATE TABLE linux_cgroup (
+                    snapshot_id TEXT PRIMARY KEY NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    version TEXT NOT NULL CHECK (version IN ('v1', 'v2')),
+                    cpu_quota_microseconds INTEGER,
+                    cpu_period_microseconds INTEGER,
+                    cpu_quota_unlimited INTEGER CHECK (cpu_quota_unlimited IN (0, 1)),
+                    cpu_weight INTEGER,
+                    memory_current_bytes INTEGER,
+                    memory_min_bytes INTEGER,
+                    memory_low_bytes INTEGER,
+                    memory_high_bytes INTEGER,
+                    memory_high_unlimited INTEGER CHECK (memory_high_unlimited IN (0, 1)),
+                    memory_max_bytes INTEGER,
+                    memory_max_unlimited INTEGER CHECK (memory_max_unlimited IN (0, 1)),
+                    swap_current_bytes INTEGER,
+                    swap_max_bytes INTEGER,
+                    swap_max_unlimited INTEGER CHECK (swap_max_unlimited IN (0, 1)),
+                    pids_current INTEGER,
+                    pids_max INTEGER,
+                    pids_max_unlimited INTEGER CHECK (pids_max_unlimited IN (0, 1))
+                ) STRICT;
+                CREATE TABLE linux_cgroup_event (
+                    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    controller TEXT NOT NULL CHECK (controller IN ('cpu', 'memory', 'pids')),
+                    event_name TEXT NOT NULL,
+                    cumulative_value INTEGER NOT NULL,
+                    unit TEXT NOT NULL CHECK (unit IN ('count', 'microseconds')),
+                    PRIMARY KEY (snapshot_id, controller, event_name)
+                ) STRICT;
+                CREATE TABLE linux_cgroup_io (
+                    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    device_major INTEGER NOT NULL,
+                    device_minor INTEGER NOT NULL,
+                    read_bytes INTEGER,
+                    write_bytes INTEGER,
+                    discard_bytes INTEGER,
+                    read_operations INTEGER,
+                    write_operations INTEGER,
+                    discard_operations INTEGER,
+                    PRIMARY KEY (snapshot_id, device_major, device_minor)
+                ) STRICT;
+                CREATE TABLE linux_kernel_vm (
+                    snapshot_id TEXT PRIMARY KEY NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    overcommit_mode INTEGER,
+                    overcommit_ratio_percent INTEGER,
+                    overcommit_kbytes_source INTEGER,
+                    overcommit_bytes INTEGER,
+                    max_map_count INTEGER,
+                    swappiness INTEGER,
+                    zone_reclaim_mode INTEGER,
+                    min_free_kbytes_source INTEGER,
+                    min_free_bytes INTEGER,
+                    dirty_background_bytes INTEGER,
+                    dirty_background_ratio_percent INTEGER,
+                    dirty_bytes INTEGER,
+                    dirty_ratio_percent INTEGER,
+                    dirty_expire_microseconds INTEGER,
+                    dirty_writeback_microseconds INTEGER
+                ) STRICT;
+                CREATE TABLE linux_kernel_ipc (
+                    snapshot_id TEXT PRIMARY KEY NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    shmmax_bytes INTEGER,
+                    shmall_pages INTEGER,
+                    shmall_bytes INTEGER,
+                    shmmni INTEGER,
+                    semmsl INTEGER,
+                    semmns INTEGER,
+                    semopm INTEGER,
+                    semmni INTEGER,
+                    file_max INTEGER,
+                    nr_open INTEGER
+                ) STRICT;
+                CREATE TABLE linux_thp (
+                    snapshot_id TEXT PRIMARY KEY NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    enabled_policy TEXT,
+                    defrag_policy TEXT,
+                    khugepaged_defrag INTEGER CHECK (khugepaged_defrag IN (0, 1))
+                ) STRICT;
                 "
             ))
             .map_err(ArtifactError::Sqlite)?;
@@ -342,6 +493,16 @@ impl SqliteWriter {
         Self::write_memory(&transaction, snapshot, &collected_at)?;
         Self::write_vm_events(&transaction, snapshot, &collected_at)?;
         Self::write_psi(&transaction, snapshot, &collected_at)?;
+        Self::write_mounts(&transaction, snapshot, &collected_at)?;
+        Self::write_block_devices(&transaction, snapshot, &collected_at)?;
+        Self::write_block_io(&transaction, snapshot, &collected_at)?;
+        Self::write_resource_limits(&transaction, snapshot, &collected_at)?;
+        Self::write_cgroups(&transaction, snapshot, &collected_at)?;
+        Self::write_cgroup_events(&transaction, snapshot, &collected_at)?;
+        Self::write_cgroup_io(&transaction, snapshot, &collected_at)?;
+        Self::write_kernel_vm(&transaction, snapshot, &collected_at)?;
+        Self::write_kernel_ipc(&transaction, snapshot, &collected_at)?;
+        Self::write_thp(&transaction, snapshot, &collected_at)?;
 
         transaction.commit().map_err(ArtifactError::Sqlite)?;
         self.connection
@@ -641,6 +802,455 @@ impl SqliteWriter {
                 ])
                 .map_err(ArtifactError::Sqlite)?;
         }
+        Ok(())
+    }
+
+    fn write_mounts(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let mut statement = transaction
+            .prepare(
+                "INSERT OR IGNORE INTO linux_mount (
+                    snapshot_id, collected_at, mount_id, parent_mount_id,
+                    device_major, device_minor, filesystem_type, is_read_only,
+                    total_bytes, available_bytes, total_inodes, available_inodes
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            )
+            .map_err(ArtifactError::Sqlite)?;
+
+        for entry in &snapshot.storage_limits.storage.mounts {
+            let total_bytes = entry
+                .total_bytes
+                .map(i64::try_from)
+                .transpose()
+                .map_err(|_| ArtifactError::ValueOutOfRange)?;
+            let available_bytes = entry
+                .available_bytes
+                .map(i64::try_from)
+                .transpose()
+                .map_err(|_| ArtifactError::ValueOutOfRange)?;
+            let total_inodes = entry
+                .total_inodes
+                .map(i64::try_from)
+                .transpose()
+                .map_err(|_| ArtifactError::ValueOutOfRange)?;
+            let available_inodes = entry
+                .available_inodes
+                .map(i64::try_from)
+                .transpose()
+                .map_err(|_| ArtifactError::ValueOutOfRange)?;
+            statement
+                .execute(params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    i64::from(entry.mount_id),
+                    i64::from(entry.parent_mount_id),
+                    i64::from(entry.device_major),
+                    i64::from(entry.device_minor),
+                    entry.filesystem_type.as_str(),
+                    entry.is_read_only as i64,
+                    total_bytes,
+                    available_bytes,
+                    total_inodes,
+                    available_inodes,
+                ])
+                .map_err(ArtifactError::Sqlite)?;
+        }
+        Ok(())
+    }
+
+    fn write_block_devices(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let mut statement = transaction
+            .prepare(
+                "INSERT OR IGNORE INTO linux_block_device (
+                    snapshot_id, collected_at, device_major, device_minor,
+                    kernel_name, logical_block_size_bytes, physical_block_size_bytes,
+                    minimum_io_size_bytes, optimal_io_size_bytes, read_ahead_kibibytes,
+                    request_queue_depth, is_rotational, scheduler
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            )
+            .map_err(ArtifactError::Sqlite)?;
+
+        for entry in &snapshot.storage_limits.storage.block_devices {
+            let logical = entry
+                .logical_block_size_bytes
+                .map(i64::try_from)
+                .transpose()
+                .map_err(|_| ArtifactError::ValueOutOfRange)?;
+            let physical = entry
+                .physical_block_size_bytes
+                .map(i64::try_from)
+                .transpose()
+                .map_err(|_| ArtifactError::ValueOutOfRange)?;
+            let min_io = entry
+                .minimum_io_size_bytes
+                .map(i64::try_from)
+                .transpose()
+                .map_err(|_| ArtifactError::ValueOutOfRange)?;
+            let opt_io = entry
+                .optimal_io_size_bytes
+                .map(i64::try_from)
+                .transpose()
+                .map_err(|_| ArtifactError::ValueOutOfRange)?;
+            let read_ahead = entry
+                .read_ahead_kibibytes
+                .map(i64::try_from)
+                .transpose()
+                .map_err(|_| ArtifactError::ValueOutOfRange)?;
+            let queue_depth = entry
+                .request_queue_depth
+                .map(i64::try_from)
+                .transpose()
+                .map_err(|_| ArtifactError::ValueOutOfRange)?;
+
+            statement
+                .execute(params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    i64::from(entry.device_major),
+                    i64::from(entry.device_minor),
+                    entry.kernel_name.as_deref(),
+                    logical,
+                    physical,
+                    min_io,
+                    opt_io,
+                    read_ahead,
+                    queue_depth,
+                    entry.is_rotational.map(|b| b as i64),
+                    entry.scheduler.as_deref(),
+                ])
+                .map_err(ArtifactError::Sqlite)?;
+        }
+        Ok(())
+    }
+
+    fn write_block_io(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let mut statement = transaction
+            .prepare(
+                "INSERT OR IGNORE INTO linux_block_io (
+                    snapshot_id, collected_at, device_major, device_minor,
+                    reads_completed, reads_merged, sectors_read, read_milliseconds,
+                    writes_completed, writes_merged, sectors_written, write_milliseconds,
+                    io_in_progress, io_milliseconds, weighted_io_milliseconds,
+                    discards_completed, discard_sectors, discard_milliseconds,
+                    flushes_completed, flush_milliseconds
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+            )
+            .map_err(ArtifactError::Sqlite)?;
+
+        for entry in &snapshot.storage_limits.storage.block_io {
+            let to_i64 = |v: u64| i64::try_from(v).map_err(|_| ArtifactError::ValueOutOfRange);
+            let opt_to_i64 = |v: Option<u64>| {
+                v.map(i64::try_from)
+                    .transpose()
+                    .map_err(|_| ArtifactError::ValueOutOfRange)
+            };
+
+            statement
+                .execute(params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    i64::from(entry.device_major),
+                    i64::from(entry.device_minor),
+                    to_i64(entry.reads_completed)?,
+                    to_i64(entry.reads_merged)?,
+                    to_i64(entry.sectors_read)?,
+                    to_i64(entry.read_milliseconds)?,
+                    to_i64(entry.writes_completed)?,
+                    to_i64(entry.writes_merged)?,
+                    to_i64(entry.sectors_written)?,
+                    to_i64(entry.write_milliseconds)?,
+                    to_i64(entry.io_in_progress)?,
+                    to_i64(entry.io_milliseconds)?,
+                    to_i64(entry.weighted_io_milliseconds)?,
+                    opt_to_i64(entry.discards_completed)?,
+                    opt_to_i64(entry.discard_sectors)?,
+                    opt_to_i64(entry.discard_milliseconds)?,
+                    opt_to_i64(entry.flushes_completed)?,
+                    opt_to_i64(entry.flush_milliseconds)?,
+                ])
+                .map_err(ArtifactError::Sqlite)?;
+        }
+        Ok(())
+    }
+
+    fn write_resource_limits(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let mut statement = transaction
+            .prepare(
+                "INSERT OR IGNORE INTO linux_resource_limit (
+                    snapshot_id, collected_at, resource, soft_value, hard_value,
+                    soft_unlimited, hard_unlimited, unit
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            )
+            .map_err(ArtifactError::Sqlite)?;
+
+        for entry in &snapshot.storage_limits.limits.limits {
+            let soft = entry
+                .soft
+                .map(i64::try_from)
+                .transpose()
+                .map_err(|_| ArtifactError::ValueOutOfRange)?;
+            let hard = entry
+                .hard
+                .map(i64::try_from)
+                .transpose()
+                .map_err(|_| ArtifactError::ValueOutOfRange)?;
+
+            statement
+                .execute(params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    entry.resource.as_str(),
+                    soft,
+                    hard,
+                    entry.soft_unlimited as i64,
+                    entry.hard_unlimited as i64,
+                    entry.unit,
+                ])
+                .map_err(ArtifactError::Sqlite)?;
+        }
+        Ok(())
+    }
+
+    fn write_cgroups(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let limits = &snapshot.storage_limits.cgroups.limits;
+        let Some(version) = limits.version else {
+            return Ok(());
+        };
+        let version_str = version.as_str();
+
+        let opt_u64 = |v: Option<u64>| {
+            v.map(i64::try_from)
+                .transpose()
+                .map_err(|_| ArtifactError::ValueOutOfRange)
+        };
+
+        transaction
+            .execute(
+                "INSERT OR IGNORE INTO linux_cgroup (
+                    snapshot_id, collected_at, version,
+                    cpu_quota_microseconds, cpu_period_microseconds, cpu_quota_unlimited,
+                    cpu_weight, memory_current_bytes, memory_min_bytes, memory_low_bytes,
+                    memory_high_bytes, memory_high_unlimited, memory_max_bytes,
+                    memory_max_unlimited, swap_current_bytes, swap_max_bytes,
+                    swap_max_unlimited, pids_current, pids_max, pids_max_unlimited
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    version_str,
+                    limits.cpu_quota_microseconds,
+                    limits.cpu_period_microseconds,
+                    limits.cpu_quota_unlimited.map(|b| b as i64),
+                    opt_u64(limits.cpu_weight)?,
+                    opt_u64(limits.memory_current_bytes)?,
+                    opt_u64(limits.memory_min_bytes)?,
+                    opt_u64(limits.memory_low_bytes)?,
+                    opt_u64(limits.memory_high_bytes)?,
+                    limits.memory_high_unlimited.map(|b| b as i64),
+                    opt_u64(limits.memory_max_bytes)?,
+                    limits.memory_max_unlimited.map(|b| b as i64),
+                    opt_u64(limits.swap_current_bytes)?,
+                    opt_u64(limits.swap_max_bytes)?,
+                    limits.swap_max_unlimited.map(|b| b as i64),
+                    opt_u64(limits.pids_current)?,
+                    limits.pids_max,
+                    limits.pids_max_unlimited.map(|b| b as i64),
+                ],
+            )
+            .map_err(ArtifactError::Sqlite)?;
+        Ok(())
+    }
+
+    fn write_cgroup_events(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let mut statement = transaction
+            .prepare(
+                "INSERT OR IGNORE INTO linux_cgroup_event (
+                    snapshot_id, collected_at, controller, event_name,
+                    cumulative_value, unit
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )
+            .map_err(ArtifactError::Sqlite)?;
+
+        for entry in &snapshot.storage_limits.cgroups.events {
+            let value = i64::try_from(entry.cumulative_value)
+                .map_err(|_| ArtifactError::ValueOutOfRange)?;
+            statement
+                .execute(params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    entry.controller.as_str(),
+                    entry.event_name.as_str(),
+                    value,
+                    entry.unit.as_str(),
+                ])
+                .map_err(ArtifactError::Sqlite)?;
+        }
+        Ok(())
+    }
+
+    fn write_cgroup_io(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let mut statement = transaction
+            .prepare(
+                "INSERT OR IGNORE INTO linux_cgroup_io (
+                    snapshot_id, collected_at, device_major, device_minor,
+                    read_bytes, write_bytes, discard_bytes,
+                    read_operations, write_operations, discard_operations
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            )
+            .map_err(ArtifactError::Sqlite)?;
+
+        let opt_to_i64 = |v: Option<u64>| {
+            v.map(i64::try_from)
+                .transpose()
+                .map_err(|_| ArtifactError::ValueOutOfRange)
+        };
+
+        for entry in &snapshot.storage_limits.cgroups.io {
+            statement
+                .execute(params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    i64::from(entry.device_major),
+                    i64::from(entry.device_minor),
+                    opt_to_i64(entry.read_bytes)?,
+                    opt_to_i64(entry.write_bytes)?,
+                    opt_to_i64(entry.discard_bytes)?,
+                    opt_to_i64(entry.read_operations)?,
+                    opt_to_i64(entry.write_operations)?,
+                    opt_to_i64(entry.discard_operations)?,
+                ])
+                .map_err(ArtifactError::Sqlite)?;
+        }
+        Ok(())
+    }
+
+    fn write_kernel_vm(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let Some(entry) = &snapshot.storage_limits.kernel.vm else {
+            return Ok(());
+        };
+
+        transaction
+            .execute(
+                "INSERT OR IGNORE INTO linux_kernel_vm (
+                    snapshot_id, collected_at, overcommit_mode, overcommit_ratio_percent,
+                    overcommit_kbytes_source, overcommit_bytes, max_map_count, swappiness,
+                    zone_reclaim_mode, min_free_kbytes_source, min_free_bytes,
+                    dirty_background_bytes, dirty_background_ratio_percent, dirty_bytes,
+                    dirty_ratio_percent, dirty_expire_microseconds, dirty_writeback_microseconds
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    entry.overcommit_mode,
+                    entry.overcommit_ratio_percent,
+                    entry.overcommit_kbytes_source,
+                    entry.overcommit_bytes,
+                    entry.max_map_count,
+                    entry.swappiness,
+                    entry.zone_reclaim_mode,
+                    entry.min_free_kbytes_source,
+                    entry.min_free_bytes,
+                    entry.dirty_background_bytes,
+                    entry.dirty_background_ratio_percent,
+                    entry.dirty_bytes,
+                    entry.dirty_ratio_percent,
+                    entry.dirty_expire_microseconds,
+                    entry.dirty_writeback_microseconds,
+                ],
+            )
+            .map_err(ArtifactError::Sqlite)?;
+        Ok(())
+    }
+
+    fn write_kernel_ipc(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let Some(entry) = &snapshot.storage_limits.kernel.ipc else {
+            return Ok(());
+        };
+
+        transaction
+            .execute(
+                "INSERT OR IGNORE INTO linux_kernel_ipc (
+                    snapshot_id, collected_at, shmmax_bytes, shmall_pages, shmall_bytes,
+                    shmmni, semmsl, semmns, semopm, semmni, file_max, nr_open
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    entry.shmmax_bytes,
+                    entry.shmall_pages,
+                    entry.shmall_bytes,
+                    entry.shmmni,
+                    entry.semmsl,
+                    entry.semmns,
+                    entry.semopm,
+                    entry.semmni,
+                    entry.file_max,
+                    entry.nr_open,
+                ],
+            )
+            .map_err(ArtifactError::Sqlite)?;
+        Ok(())
+    }
+
+    fn write_thp(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let Some(entry) = &snapshot.storage_limits.kernel.thp else {
+            return Ok(());
+        };
+
+        transaction
+            .execute(
+                "INSERT OR IGNORE INTO linux_thp (
+                    snapshot_id, collected_at, enabled_policy, defrag_policy,
+                    khugepaged_defrag
+                 ) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    entry.enabled_policy.as_deref(),
+                    entry.defrag_policy.as_deref(),
+                    entry.khugepaged_defrag.map(|b| b as i64),
+                ],
+            )
+            .map_err(ArtifactError::Sqlite)?;
         Ok(())
     }
 }
