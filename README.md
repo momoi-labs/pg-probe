@@ -104,4 +104,4 @@ scripts. Creating a protected `vMAJOR.MINOR.PATCH` tag whose version matches
 
 ## License
 
-Licensed under the Apache License, Version 2.0.
+Licensed under the [PostgreSQL License](https://opensource.org/license/postgresql).
