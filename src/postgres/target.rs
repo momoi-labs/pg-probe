@@ -6,8 +6,6 @@
 
 use std::fmt;
 
-use libpq::Connection;
-
 use crate::contract::{now_utc, CollectionStatus, ComponentOutcome};
 use crate::postgres::connection::{
     parse_text_bool, parse_text_i32, parse_text_string, AdapterError, ConnectedClient,
@@ -120,8 +118,7 @@ fn read_identity_columns(
     client: &ConnectedClient,
     outcomes: &mut Vec<ComponentOutcome>,
 ) -> Result<(String, String), AdapterError> {
-    let connection: &Connection = client.connection();
-    let raw_user = connection.user().map_err(|_| AdapterError::ColumnInvalid)?;
+    let raw_user = client.user().map_err(|_| AdapterError::ColumnInvalid)?;
     let sanitized_user = sanitize_identifier(&raw_user);
     if sanitized_user.redacted {
         outcomes.push(ComponentOutcome::failed(
@@ -132,7 +129,7 @@ fn read_identity_columns(
         ));
         return Err(AdapterError::ColumnInvalid);
     }
-    let raw_db = connection.db().map_err(|_| AdapterError::ColumnInvalid)?;
+    let raw_db = client.db().map_err(|_| AdapterError::ColumnInvalid)?;
     let sanitized_db = sanitize_identifier(&raw_db);
     if sanitized_db.redacted {
         outcomes.push(ComponentOutcome::failed(

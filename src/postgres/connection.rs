@@ -1,22 +1,23 @@
-//! Minimal safe adapter over the `libpq` C library.
+//! Minimal safe adapter over the real `libpq` C library.
 //!
-//! Issue #16 mandates a "small safe real-libpq adapter" that preserves libpq's
-//! standard resolution rules without ever persisting the complete input the
-//! user gave us. The functions in this module wrap libpq's C calls, validate
-//! returned identifiers before they leave the adapter, and translate failures
-//! into the typed `Outcome` enum so other modules never need to look at raw
-//! libpq strings, decoders, or query bodies.
+//! Release builds link a bundled `libpq` (via `pq-sys`'s `bundled` feature) and
+//! vendored OpenSSL. All unsafe FFI stays in this module; callers only see
+//! typed, sanitized results and never raw libpq diagnostic strings.
 
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::fmt;
+use std::os::raw::{c_char, c_int};
 use std::path::Path;
+use std::ptr;
 
 use chrono::{DateTime, Utc};
-use libpq::{Connection, Format, Oid};
 use thiserror::Error;
 
 use crate::contract::{now_utc, CollectionStatus, ComponentOutcome};
 use crate::postgres::sanitize::{parse_libpq_port, parse_port, sanitize_host};
+
+/// Ensure the vendored OpenSSL archive participates in the final link.
+use openssl_sys as _;
 
 /// Public reason a libpq call did not produce the requested value. The error
 /// itself is never logged; only the variant name reaches the terminal or
@@ -84,9 +85,10 @@ impl EndpointKind {
     }
 }
 
-#[derive(Debug, Clone)]
+/// Owns a live libpq connection and the sanitized endpoint identity derived
+/// from it. Dropping this value closes the underlying connection.
 pub struct ConnectedClient {
-    connection: Connection,
+    conn: *mut pq_sys::PGconn,
     endpoint: EndpointIdentity,
     /// The original libpq connection string used to open this connection.
     /// It is kept only in memory to build per-database connection strings
@@ -94,14 +96,21 @@ pub struct ConnectedClient {
     connection_string: Option<String>,
 }
 
-impl ConnectedClient {
-    /// Underlying libpq handle. Only the immediate call needs the raw
-    /// connection; everywhere else goes through the helper methods so we
-    /// never accidentally drop into unsafe gradients.
-    pub fn connection(&self) -> &Connection {
-        &self.connection
-    }
+// libpq connections are not Sync; ConnectedClient is only used on one thread
+// in the collector spine.
+unsafe impl Send for ConnectedClient {}
 
+impl Drop for ConnectedClient {
+    fn drop(&mut self) {
+        if !self.conn.is_null() {
+            // SAFETY: conn is an owned PGconn pointer created by PQconnectdb.
+            unsafe { pq_sys::PQfinish(self.conn) };
+            self.conn = ptr::null_mut();
+        }
+    }
+}
+
+impl ConnectedClient {
     /// Open a libpq connection using psql-compatible resolution rules. Pass
     /// the user-supplied `--dbname` value (when present) as `dsn_input` and
     /// leave it `None` to let standard environment resolution apply.
@@ -115,7 +124,7 @@ impl ConnectedClient {
         outcomes: &mut Vec<ComponentOutcome>,
     ) -> Result<Self, AdapterError> {
         let started_at_utc = now_utc();
-        let connection = match dsn_input {
+        let conninfo = match dsn_input {
             Some(raw) => {
                 if raw.is_empty() {
                     let _ = timestamped_failure(
@@ -125,31 +134,40 @@ impl ConnectedClient {
                     );
                     return Err(AdapterError::InvalidParameter);
                 }
-                match Connection::new(raw) {
-                    Ok(conn) => conn,
-                    Err(_) => {
-                        let _ = timestamped_failure(
-                            outcomes,
-                            source,
-                            AdapterOutcomeStatus::QueryFailed,
-                        );
-                        return Err(AdapterError::ConnectionFailed);
-                    }
-                }
+                raw
             }
-            None => match Connection::new("") {
-                Ok(conn) => conn,
-                Err(_) => {
-                    let _ =
-                        timestamped_failure(outcomes, source, AdapterOutcomeStatus::QueryFailed);
-                    return Err(AdapterError::ConnectionFailed);
-                }
-            },
+            None => "",
         };
 
-        let endpoint = match current_endpoint(&connection) {
+        let c_conninfo = match CString::new(conninfo) {
+            Ok(value) => value,
+            Err(_) => {
+                let _ =
+                    timestamped_failure(outcomes, source, AdapterOutcomeStatus::InvalidParameter);
+                return Err(AdapterError::InvalidParameter);
+            }
+        };
+
+        // SAFETY: c_conninfo is a valid NUL-terminated C string.
+        let conn = unsafe { pq_sys::PQconnectdb(c_conninfo.as_ptr()) };
+        if conn.is_null() {
+            let _ = timestamped_failure(outcomes, source, AdapterOutcomeStatus::QueryFailed);
+            return Err(AdapterError::ConnectionFailed);
+        }
+
+        // SAFETY: conn is a non-null PGconn from PQconnectdb.
+        let status = unsafe { pq_sys::PQstatus(conn) };
+        if status != pq_sys::ConnStatusType::CONNECTION_OK {
+            // SAFETY: owned pointer from PQconnectdb.
+            unsafe { pq_sys::PQfinish(conn) };
+            let _ = timestamped_failure(outcomes, source, AdapterOutcomeStatus::QueryFailed);
+            return Err(AdapterError::ConnectionFailed);
+        }
+
+        let endpoint = match current_endpoint(conn) {
             Ok(endpoint) => endpoint,
             Err(error) => {
+                unsafe { pq_sys::PQfinish(conn) };
                 let _ = timestamped_failure(outcomes, source, adapter_status_for(&error));
                 return Err(error);
             }
@@ -164,7 +182,7 @@ impl ConnectedClient {
         ));
 
         Ok(Self {
-            connection,
+            conn,
             endpoint,
             connection_string: dsn_input.map(ToOwned::to_owned),
         })
@@ -180,6 +198,16 @@ impl ConnectedClient {
         self.connection_string.as_deref()
     }
 
+    /// Connected role name from libpq, without logging.
+    pub fn user(&self) -> Result<String, AdapterError> {
+        read_conn_field(self.conn, pq_sys::PQuser)
+    }
+
+    /// Initial database name from libpq, without logging.
+    pub fn db(&self) -> Result<String, AdapterError> {
+        read_conn_field(self.conn, pq_sys::PQdb)
+    }
+
     /// Read a bounded row from a catalog query. Returns the raw `&[u8]` values
     /// in column order so callers can apply their own typed parsing without
     /// going through libpq's lossy decoder.
@@ -189,32 +217,12 @@ impl ConnectedClient {
         source: &'static str,
         outcomes: &mut Vec<ComponentOutcome>,
     ) -> Result<Vec<Vec<u8>>, AdapterError> {
-        self.exec_bounded_row_with_params(query, &[], &[], &[], Format::Text, source, outcomes)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn exec_bounded_row_with_params(
-        &self,
-        query: &str,
-        param_types: &[Oid],
-        param_values: &[Option<&[u8]>],
-        param_formats: &[Format],
-        result_format: Format,
-        source: &'static str,
-        outcomes: &mut Vec<ComponentOutcome>,
-    ) -> Result<Vec<Vec<u8>>, AdapterError> {
         let started_at_utc = now_utc();
-        let result = self.connection.exec_params(
-            query,
-            param_types,
-            param_values,
-            param_formats,
-            result_format,
-        );
+        let result = exec_query(self.conn, query)?;
         match result.status() {
-            libpq::Status::TuplesOk => {}
-            _ => {
-                let status = adapter_status_from_query(result.status());
+            QueryStatus::TuplesOk => {}
+            other => {
+                let status = adapter_status_from_query(other);
                 outcomes.push(
                     ComponentOutcome::failed(
                         source,
@@ -276,11 +284,11 @@ impl ConnectedClient {
         outcomes: &mut Vec<ComponentOutcome>,
     ) -> Result<BoundedRows, AdapterError> {
         let started_at_utc = now_utc();
-        let result = self.connection.exec(query);
+        let result = exec_query(self.conn, query)?;
         match result.status() {
-            libpq::Status::TuplesOk => {}
-            _ => {
-                let status = adapter_status_from_query(result.status());
+            QueryStatus::TuplesOk => {}
+            other => {
+                let status = adapter_status_from_query(other);
                 outcomes.push(
                     ComponentOutcome::failed(
                         source,
@@ -331,14 +339,103 @@ impl BoundedRows {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QueryStatus {
+    TuplesOk,
+    CommandOk,
+    FatalError,
+    BadResponse,
+    Other,
+}
+
+struct QueryResult {
+    ptr: *mut pq_sys::PGresult,
+}
+
+impl Drop for QueryResult {
+    fn drop(&mut self) {
+        if !self.ptr.is_null() {
+            // SAFETY: owned PGresult from PQexec.
+            unsafe { pq_sys::PQclear(self.ptr) };
+            self.ptr = ptr::null_mut();
+        }
+    }
+}
+
+impl QueryResult {
+    fn status(&self) -> QueryStatus {
+        // SAFETY: ptr is a live PGresult for the lifetime of self.
+        let status = unsafe { pq_sys::PQresultStatus(self.ptr) };
+        match status {
+            pq_sys::ExecStatusType::PGRES_TUPLES_OK => QueryStatus::TuplesOk,
+            pq_sys::ExecStatusType::PGRES_COMMAND_OK => QueryStatus::CommandOk,
+            pq_sys::ExecStatusType::PGRES_FATAL_ERROR => QueryStatus::FatalError,
+            pq_sys::ExecStatusType::PGRES_BAD_RESPONSE => QueryStatus::BadResponse,
+            _ => QueryStatus::Other,
+        }
+    }
+
+    fn ntuples(&self) -> usize {
+        // SAFETY: ptr is a live PGresult.
+        unsafe { pq_sys::PQntuples(self.ptr) as usize }
+    }
+
+    fn nfields(&self) -> usize {
+        // SAFETY: ptr is a live PGresult.
+        unsafe { pq_sys::PQnfields(self.ptr) as usize }
+    }
+
+    fn value(&self, row: usize, column: usize) -> Option<Vec<u8>> {
+        // SAFETY: ptr is a live PGresult; row/column are within ntuples/nfields
+        // when callers follow the contract used above.
+        let is_null = unsafe { pq_sys::PQgetisnull(self.ptr, row as c_int, column as c_int) };
+        if is_null != 0 {
+            return None;
+        }
+        let len = unsafe { pq_sys::PQgetlength(self.ptr, row as c_int, column as c_int) };
+        if len < 0 {
+            return None;
+        }
+        let ptr = unsafe { pq_sys::PQgetvalue(self.ptr, row as c_int, column as c_int) };
+        if ptr.is_null() {
+            return None;
+        }
+        // SAFETY: PQgetvalue returns a pointer to len bytes owned by the result.
+        let bytes = unsafe { std::slice::from_raw_parts(ptr as *const u8, len as usize) };
+        Some(bytes.to_vec())
+    }
+}
+
+fn exec_query(conn: *mut pq_sys::PGconn, query: &str) -> Result<QueryResult, AdapterError> {
+    let c_query = CString::new(query).map_err(|_| AdapterError::InvalidParameter)?;
+    // SAFETY: conn is a live CONNECTION_OK handle; c_query is NUL-terminated.
+    let ptr = unsafe { pq_sys::PQexec(conn, c_query.as_ptr()) };
+    if ptr.is_null() {
+        return Err(AdapterError::QueryFailed);
+    }
+    Ok(QueryResult { ptr })
+}
+
+fn read_conn_field(
+    conn: *mut pq_sys::PGconn,
+    reader: unsafe extern "C" fn(*const pq_sys::PGconn) -> *mut c_char,
+) -> Result<String, AdapterError> {
+    // SAFETY: conn is a live PGconn; reader is a libpq accessor.
+    let ptr = unsafe { reader(conn) };
+    if ptr.is_null() {
+        return Err(AdapterError::ColumnInvalid);
+    }
+    // SAFETY: libpq returns a NUL-terminated string owned by the connection.
+    let value = unsafe { CStr::from_ptr(ptr) };
+    Ok(bounded_cstr_to_string(value))
+}
+
 /// Derive the sanitized endpoint identity from a freshly opened libpq
 /// connection. libpq reports either an IP/hostname with a port, or a Unix
 /// socket path; anything else is rejected so we never persist a malformed
 /// endpoint component.
-fn current_endpoint(connection: &Connection) -> Result<EndpointIdentity, AdapterError> {
-    let raw_host = connection
-        .host()
-        .map_err(|_| AdapterError::ConnectionFailed)?;
+fn current_endpoint(conn: *mut pq_sys::PGconn) -> Result<EndpointIdentity, AdapterError> {
+    let raw_host = read_conn_field(conn, pq_sys::PQhost)?;
     let sanitized_host = sanitize_host(&raw_host);
     if sanitized_host.redacted {
         return Err(AdapterError::ColumnInvalid);
@@ -348,7 +445,7 @@ fn current_endpoint(connection: &Connection) -> Result<EndpointIdentity, Adapter
     } else {
         EndpointKind::Tcp
     };
-    let port = match connection.port() {
+    let port = match read_conn_field(conn, pq_sys::PQport) {
         Ok(raw_port) => match parse_libpq_port(&raw_port) {
             Ok(value) => {
                 if value == 0 {
@@ -378,16 +475,11 @@ fn current_endpoint(connection: &Connection) -> Result<EndpointIdentity, Adapter
     })
 }
 
-fn adapter_status_from_query(status: libpq::Status) -> AdapterOutcomeStatus {
+fn adapter_status_from_query(status: QueryStatus) -> AdapterOutcomeStatus {
     match status {
-        libpq::Status::TuplesOk => AdapterOutcomeStatus::Ok,
-        libpq::Status::CommandOk => AdapterOutcomeStatus::Ok,
-        libpq::Status::FatalError | libpq::Status::BadResponse => {
-            // Permission errors from libpq are reported as `FATAL: permission denied`
-            // for the connection. Anything else is a query failure.
-            AdapterOutcomeStatus::QueryFailed
-        }
-        _ => AdapterOutcomeStatus::InvalidParameter,
+        QueryStatus::TuplesOk | QueryStatus::CommandOk => AdapterOutcomeStatus::Ok,
+        QueryStatus::FatalError | QueryStatus::BadResponse => AdapterOutcomeStatus::QueryFailed,
+        QueryStatus::Other => AdapterOutcomeStatus::InvalidParameter,
     }
 }
 
@@ -438,7 +530,7 @@ pub fn host_is_unix_socket(host: &str) -> bool {
 }
 
 /// Common trait for connection metadata that the rest of the codebase can use
-/// without depending on the `libpq` crate directly.
+/// without depending on the FFI layer directly.
 pub trait Client {
     fn endpoint(&self) -> &EndpointIdentity;
 }

@@ -1,0 +1,61 @@
+# GoReleaser configuration for pg-probe musl Linux releases.
+# Builds use the Rust builder with cargo-cross; Cross.toml pins container images.
+# Publication (draft → attest → publish) stays in .github/workflows/release.yml so
+# native smoke gates run against the exact archives before any GitHub Release.
+version: 2
+
+project_name: pg-probe
+
+builds:
+  - id: pg-probe
+    builder: rust
+    binary: pg-probe
+    tool: cross
+    command: build
+    flags:
+      - --release
+      - --locked
+    targets:
+      - x86_64-unknown-linux-musl
+      - aarch64-unknown-linux-musl
+
+archives:
+  - id: musl
+    ids:
+      - pg-probe
+    formats:
+      - tar.gz
+    # Matches the packaging contract: pg-probe-v<VERSION>-<rust-target>.tar.gz
+    name_template: "{{ .ProjectName }}-v{{ .Version }}-{{ .Target }}"
+    wrap_in_directory: true
+    builds_info:
+      owner: root
+      group: root
+      mtime: "{{ .CommitDate }}"
+    files:
+      - src: LICENSE
+        dst: LICENSE
+        info:
+          owner: root
+          group: root
+          mode: 0o644
+          mtime: "{{ .CommitDate }}"
+      - src: README.md
+        dst: README.md
+        info:
+          owner: root
+          group: root
+          mode: 0o644
+          mtime: "{{ .CommitDate }}"
+
+checksum:
+  name_template: SHA256SUMS
+  algorithm: sha256
+
+changelog:
+  disable: true
+
+# Publishing is performed by the release workflow after native execution gates,
+# checksum verification, and keyless attestations succeed.
+release:
+  disable: true

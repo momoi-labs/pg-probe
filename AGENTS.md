@@ -19,15 +19,16 @@ This is a single-context repository. See `docs/agents/domain.md`.
 `pg-probe` is a single Rust CLI crate (no long-running service). Standard commands
 live in `README.md` (`## Development`) and `.github/workflows/ci.yml`.
 
-- The crate sets `rust-version = "1.85"` in `Cargo.toml`. The VM base image ships an
-  older default Rust; the startup update script switches to the `stable` channel
-  (currently 1.97.x), so use `stable` rather than any pinned older toolchain.
-- Lint/test/build: `cargo fmt --check`, `cargo clippy --all-targets --all-features
+- The crate sets `rust-version = "1.85"` in `Cargo.toml` and pins an exact
+  channel in `rust-toolchain.toml` for CI/release reproducibility. Prefer that
+  pin (currently 1.97.1) over an unpinned older toolchain.
+- Lint/test/build: `cargo fmt --all -- --check`, `cargo clippy --all-targets --all-features
   --locked -- -D warnings`, `cargo test --all-targets --locked`, `cargo build
-  --release --locked` (CI runs these exact commands).
-- Running the app: `cargo run -- snapshot --output <path>.sqlite.gz` (or the release
-  binary at `target/release/pg-probe`). The `--output` path must NOT already exist —
-  `pg-probe` never overwrites an artifact, so use a fresh path each run.
+  --release --locked` (CI runs these, plus musl cross-builds and packaging-script
+  tests).
+- Running the app: `cargo run -- --data-directory <dir>` (or the release
+  binary at `target/release/pg-probe`). Artifacts are never overwritten; collisions
+  receive numeric suffixes.
 - The collector reads Linux kernel/libc/`/proc` sources directly, so it only runs
   meaningfully on Linux (the cloud VM is Linux, so this is fine).
 - Inspect an artifact: `gunzip -k snapshot.sqlite.gz` then

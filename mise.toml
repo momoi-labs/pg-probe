@@ -1,5 +1,6 @@
 [tools]
 rust = "stable"
+goreleaser = "2.17.1"
 
 [tasks.prototype-schema]
 description = "Run the throwaway SQLite schema prototype"

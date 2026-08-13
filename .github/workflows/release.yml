@@ -1,0 +1,356 @@
+name: Release
+
+# Protected SemVer tags (vMAJOR.MINOR.PATCH) trigger this workflow.
+# Builds use GoReleaser's Rust builder (cargo-cross). No pull_request /
+# pull_request_target triggers. No repository secrets are required.
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # cross git revision used by GoReleaser's rust builder (also in Cross.toml)
+  CROSS_GIT_REV: 55f847251389c5406df85579191c0eac412fab3a
+  # goreleaser/goreleaser v2.17.1
+  GORELEASER_VERSION: v2.17.1
+
+jobs:
+  validate:
+    name: Validate tag and tree
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check out the tagged commit
+        # actions/checkout@v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Verify tag matches Cargo.toml version
+        id: version
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          case "$tag" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *)
+              echo "tag is not a SemVer release tag: ${tag}" >&2
+              exit 1
+              ;;
+          esac
+          version="${tag#v}"
+          cargo_version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)"
+          if [[ "$version" != "$cargo_version" ]]; then
+            echo "tag version ${version} does not match Cargo.toml version ${cargo_version}" >&2
+            exit 1
+          fi
+          echo "version=${version}" >>"$GITHUB_OUTPUT"
+
+      - name: Install toolchain from rust-toolchain.toml
+        # dtolnay/rust-toolchain@master (pin)
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+
+      - name: Install GoReleaser
+        # goreleaser/goreleaser-action@v7.2.3
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
+        with:
+          distribution: goreleaser
+          version: ${{ env.GORELEASER_VERSION }}
+          install-only: true
+
+      - name: Validate GoReleaser config
+        run: goreleaser check
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+      - name: Run tests
+        run: cargo test --all-targets --locked
+
+      - name: Verify lockfile is committed and current
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --format-version 1 >/dev/null
+          git diff --exit-code -- Cargo.lock
+
+  build:
+    name: GoReleaser build musl archives
+    needs: validate
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the tagged commit
+        # actions/checkout@v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install toolchain from rust-toolchain.toml
+        # dtolnay/rust-toolchain@master (pin)
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
+
+      - name: Install cross
+        run: |
+          cargo install --locked --git https://github.com/cross-rs/cross --rev "${CROSS_GIT_REV}" cross
+
+      - name: Install GoReleaser
+        # goreleaser/goreleaser-action@v7.2.3
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
+        with:
+          distribution: goreleaser
+          version: ${{ env.GORELEASER_VERSION }}
+          install-only: true
+
+      - name: Build and archive with GoReleaser
+        run: |
+          set -euo pipefail
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct "${GITHUB_SHA}")"
+          # release.disable in .goreleaser.yaml prevents publication here.
+          goreleaser release --clean --skip=publish
+
+      - name: Verify archives and static linking
+        run: |
+          set -euo pipefail
+          version="${{ needs.validate.outputs.version }}"
+          for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
+            archive="dist/pg-probe-v${version}-${target}.tar.gz"
+            test -f "$archive"
+            mkdir -p "verify/${target}"
+            tar -xzf "$archive" -C "verify/${target}"
+            binary="verify/${target}/pg-probe-v${version}-${target}/pg-probe"
+            test -x "$binary"
+            file "$binary"
+            if [[ "$target" == "x86_64-unknown-linux-musl" ]]; then
+              if ldd "$binary" >/tmp/ldd.out 2>&1; then
+                echo "expected a static musl binary, but ldd reported dynamic libs:" >&2
+                cat /tmp/ldd.out >&2
+                exit 1
+              fi
+            fi
+          done
+          test -f dist/SHA256SUMS
+
+      - name: Upload release dist
+        # actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-dist
+          path: |
+            dist/pg-probe-v${{ needs.validate.outputs.version }}-x86_64-unknown-linux-musl.tar.gz
+            dist/pg-probe-v${{ needs.validate.outputs.version }}-aarch64-unknown-linux-musl.tar.gz
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  native-test:
+    name: Native test (${{ matrix.runner }})
+    needs: [validate, build]
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+    steps:
+      - name: Check out the tagged commit
+        # actions/checkout@v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Download GoReleaser dist
+        # actions/download-artifact@v4.3.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-dist
+          path: dist
+
+      - name: Install sqlite3 for artifact checks
+        run: sudo apt-get update && sudo apt-get install -y sqlite3
+
+      - name: Extract and smoke-test on Ubuntu (Debian family)
+        run: |
+          set -euo pipefail
+          archive="dist/pg-probe-v${{ needs.validate.outputs.version }}-${{ matrix.target }}.tar.gz"
+          test -f "$archive"
+          mkdir -p extracted work
+          tar -xzf "$archive" -C extracted
+          binary="extracted/pg-probe-v${{ needs.validate.outputs.version }}-${{ matrix.target }}/pg-probe"
+          scripts/smoke-test-release-binary.sh "$binary" work/ubuntu
+
+      - name: Smoke-test inside Rocky Linux (RHEL-compatible)
+        run: |
+          set -euo pipefail
+          binary="extracted/pg-probe-v${{ needs.validate.outputs.version }}-${{ matrix.target }}/pg-probe"
+          mkdir -p work/rocky
+          # rockylinux:9 index digest (multi-arch)
+          docker run --rm \
+            -v "${PWD}/${binary}:/usr/local/bin/pg-probe:ro" \
+            -v "${PWD}/scripts/smoke-test-release-binary.sh:/smoke.sh:ro" \
+            -v "${PWD}/work/rocky:/work" \
+            rockylinux@sha256:d7be1c094cc5845ee815d4632fe377514ee6ebcf8efaed6892889657e5ddaaa6 \
+            bash -lc 'dnf install -y sqlite gzip >/dev/null && bash /smoke.sh /usr/local/bin/pg-probe /work'
+
+      - name: Smoke-test inside Alpine
+        run: |
+          set -euo pipefail
+          binary="extracted/pg-probe-v${{ needs.validate.outputs.version }}-${{ matrix.target }}/pg-probe"
+          mkdir -p work/alpine
+          # alpine:3.21 index digest (multi-arch)
+          docker run --rm \
+            -v "${PWD}/${binary}:/usr/local/bin/pg-probe:ro" \
+            -v "${PWD}/scripts/smoke-test-release-binary.sh:/smoke.sh:ro" \
+            -v "${PWD}/work/alpine:/work" \
+            alpine@sha256:48b0309ca019d89d40f670aa1bc06e426dc0931948452e8491e3d65087abc07d \
+            sh -lc 'apk add --no-cache bash sqlite gzip >/dev/null && bash /smoke.sh /usr/local/bin/pg-probe /work'
+
+  publish:
+    name: Publish release
+    needs: [validate, build, native-test]
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out the tagged commit
+        # actions/checkout@v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Fail if the release already exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "release ${tag} already exists" >&2
+            exit 1
+          fi
+
+      - name: Download GoReleaser dist
+        # actions/download-artifact@v4.3.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: release-dist
+          path: dist
+
+      - name: Reject unexpected files and verify SHA256SUMS
+        run: |
+          set -euo pipefail
+          version="${{ needs.validate.outputs.version }}"
+          expected_x86="pg-probe-v${version}-x86_64-unknown-linux-musl.tar.gz"
+          expected_arm="pg-probe-v${version}-aarch64-unknown-linux-musl.tar.gz"
+          mapfile -t files < <(find dist -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)
+          if [[ "${#files[@]}" -ne 3 ]]; then
+            echo "expected exactly two tarballs and SHA256SUMS in dist/, found: ${files[*]-}" >&2
+            exit 1
+          fi
+          if [[ "${files[0]}" != "$expected_arm" \
+             || "${files[1]}" != "SHA256SUMS" \
+             || "${files[2]}" != "$expected_x86" ]]; then
+            echo "unexpected dist contents: ${files[*]}" >&2
+            exit 1
+          fi
+          (cd dist && sha256sum -c SHA256SUMS)
+
+      - name: Attest release assets
+        # actions/attest-build-provenance@v2.4.0
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+        with:
+          subject-path: |
+            dist/pg-probe-v${{ needs.validate.outputs.version }}-x86_64-unknown-linux-musl.tar.gz
+            dist/pg-probe-v${{ needs.validate.outputs.version }}-aarch64-unknown-linux-musl.tar.gz
+            dist/SHA256SUMS
+
+      - name: Create draft release and upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          version="${{ needs.validate.outputs.version }}"
+          notes="$(cat <<EOF
+          ## pg-probe ${tag}
+
+          Self-contained musl Linux builds with bundled libpq and vendored OpenSSL,
+          produced by GoReleaser's Rust builder.
+
+          ### Assets
+
+          - \`pg-probe-v${version}-x86_64-unknown-linux-musl.tar.gz\`
+          - \`pg-probe-v${version}-aarch64-unknown-linux-musl.tar.gz\`
+          - \`SHA256SUMS\`
+
+          ### Verify checksums
+
+          \`\`\`sh
+          sha256sum -c SHA256SUMS
+          \`\`\`
+
+          ### Verify attestations
+
+          \`\`\`sh
+          gh attestation verify --repo ${{ github.repository }} \\
+            pg-probe-v${version}-x86_64-unknown-linux-musl.tar.gz
+          gh attestation verify --repo ${{ github.repository }} \\
+            pg-probe-v${version}-aarch64-unknown-linux-musl.tar.gz
+          \`\`\`
+
+          Builds are repeatable and provenance-verifiable. This project does not
+          claim bit-for-bit reproducible Rust binaries until independent
+          rebuild-and-compare evidence exists.
+          EOF
+          )"
+          gh release create "$tag" \
+            --draft \
+            --title "$tag" \
+            --notes "$notes" \
+            "dist/pg-probe-v${version}-x86_64-unknown-linux-musl.tar.gz" \
+            "dist/pg-probe-v${version}-aarch64-unknown-linux-musl.tar.gz" \
+            dist/SHA256SUMS
+
+      - name: Publish the fully populated draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          mapfile -t assets < <(gh release view "$tag" --json assets --jq '.assets[].name' | LC_ALL=C sort)
+          expected_arm="pg-probe-v${{ needs.validate.outputs.version }}-aarch64-unknown-linux-musl.tar.gz"
+          expected_sum="SHA256SUMS"
+          expected_x86="pg-probe-v${{ needs.validate.outputs.version }}-x86_64-unknown-linux-musl.tar.gz"
+          if [[ "${#assets[@]}" -ne 3 \
+             || "${assets[0]}" != "$expected_arm" \
+             || "${assets[1]}" != "$expected_sum" \
+             || "${assets[2]}" != "$expected_x86" ]]; then
+            echo "draft release assets mismatch: ${assets[*]-}" >&2
+            exit 1
+          fi
+          gh release edit "$tag" --draft=false

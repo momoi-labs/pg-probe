@@ -3,16 +3,37 @@
 `pg-probe` captures a time-bounded PostgreSQL and host diagnostic dataset into a
 portable SQLite file.
 
-> **Status:** early development. This first slice ships the snapshot spine: the
-> CLI, the Linux host-identity collector, the typed snapshot contracts, and the
-> single SQLite writer that publishes a compressed artifact. Compute, memory,
-> storage, effective limits, PostgreSQL collection, and release packaging land
-> in later slices and are intentionally not implemented yet.
+> **Status:** early development. Collection domains continue to land in
+> dependency-ordered slices. Linux release packaging for attested musl
+> tarballs is available from SemVer tags.
 
 ## Requirements
 
 - Linux (the collector reads kernel and libc interfaces directly).
-- A recent stable Rust toolchain to build from source.
+- A recent stable Rust toolchain to build from source, or a published release
+  binary for `x86_64-unknown-linux-musl` / `aarch64-unknown-linux-musl`.
+
+## Install (release binaries)
+
+Protected `vMAJOR.MINOR.PATCH` tags publish self-contained musl archives with
+bundled libpq and vendored OpenSSL:
+
+- `pg-probe-v<VERSION>-x86_64-unknown-linux-musl.tar.gz`
+- `pg-probe-v<VERSION>-aarch64-unknown-linux-musl.tar.gz`
+- `SHA256SUMS`
+
+Each archive contains `pg-probe`, `README.md`, and `LICENSE`. After download:
+
+```bash
+tar -xzf pg-probe-v0.1.0-x86_64-unknown-linux-musl.tar.gz
+sha256sum -c SHA256SUMS
+gh attestation verify --repo momoi-labs/pg-probe \
+  pg-probe-v0.1.0-x86_64-unknown-linux-musl.tar.gz
+```
+
+Builds are repeatable and provenance-verifiable through GitHub artifact
+attestations. This project does not claim bit-for-bit reproducible Rust
+binaries until independent rebuild-and-compare evidence exists.
 
 ## Build
 
@@ -20,20 +41,25 @@ portable SQLite file.
 cargo build --release
 ```
 
-The executable is produced at `target/release/pg-probe`.
+The executable is produced at `target/release/pg-probe`. Release automation
+uses GoReleaser's Rust builder (`builder: rust` with `cross`) and pinned
+toolchain/container inputs; see `.goreleaser.yaml`, `.github/workflows/release.yml`,
+and `Cross.toml`.
 
 ## Usage
 
-Capture a snapshot into a new compressed SQLite artifact:
+Capture a snapshot into a new compressed SQLite artifact in the current
+directory (or an existing `--data-directory`):
 
 ```bash
-pg-probe snapshot --output ./snapshot.sqlite.gz
+pg-probe --domain all
 ```
 
-The `--output` path must not already exist; `pg-probe` never overwrites an
-existing artifact. On success the artifact is written atomically and the process
-exits `0`. If any required source fails, the artifact is still published as a
-partial snapshot and the process exits non-zero.
+Stdout prints only the final artifact path. The process never overwrites an
+existing artifact; collisions get numeric suffixes. On success the artifact is
+written atomically and the process exits `0`. If any required source fails, the
+artifact is still published as a partial snapshot and the process exits
+non-zero.
 
 Inspect the artifact with standard tooling:
 
@@ -67,12 +93,14 @@ number.
 ## Development
 
 ```bash
-cargo fmt --check
-cargo clippy --all-targets --all-features -- -D warnings
-cargo test --all-targets
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo test --all-targets --locked
 ```
 
-These same checks run in CI on every pull request.
+CI also cross-builds both musl release targets and exercises the packaging
+scripts. Creating a protected `vMAJOR.MINOR.PATCH` tag whose version matches
+`Cargo.toml` runs the attested release workflow.
 
 ## License
 
