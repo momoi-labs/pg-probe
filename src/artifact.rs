@@ -119,6 +119,7 @@ impl SqliteWriter {
                 CREATE TABLE collector_outcome (
                     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
                     source TEXT NOT NULL,
+                    sequence INTEGER NOT NULL,
                     started_at_utc TEXT NOT NULL,
                     finished_at_utc TEXT NOT NULL,
                     status TEXT NOT NULL CHECK (
@@ -136,7 +137,7 @@ impl SqliteWriter {
                     observed_at_utc TEXT,
                     collector_name TEXT NOT NULL,
                     collector_version TEXT NOT NULL,
-                    PRIMARY KEY (snapshot_id, source),
+                    PRIMARY KEY (snapshot_id, source, sequence),
                     CHECK (
                         (status = 'collected' AND error_code IS NULL AND observed_at_utc IS NOT NULL)
                         OR
@@ -382,6 +383,68 @@ impl SqliteWriter {
                     defrag_policy TEXT,
                     khugepaged_defrag INTEGER CHECK (khugepaged_defrag IN (0, 1))
                 ) STRICT;
+                CREATE TABLE postgres_target (
+                    snapshot_id TEXT PRIMARY KEY NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    endpoint_kind TEXT NOT NULL CHECK (endpoint_kind IN ('tcp', 'unix_socket')),
+                    endpoint TEXT NOT NULL,
+                    port INTEGER,
+                    connected_user TEXT NOT NULL,
+                    initial_database TEXT NOT NULL,
+                    server_version_num INTEGER NOT NULL,
+                    server_version TEXT NOT NULL,
+                    in_recovery INTEGER NOT NULL CHECK (in_recovery IN (0, 1)),
+                    block_size_bytes INTEGER NOT NULL CHECK (block_size_bytes > 0),
+                    is_superuser INTEGER NOT NULL CHECK (is_superuser IN (0, 1)),
+                    has_pg_monitor INTEGER NOT NULL CHECK (has_pg_monitor IN (0, 1)),
+                    has_pg_read_all_stats INTEGER NOT NULL CHECK (has_pg_read_all_stats IN (0, 1)),
+                    has_pg_read_all_settings INTEGER NOT NULL CHECK (has_pg_read_all_settings IN (0, 1))
+                ) STRICT;
+                CREATE TABLE postgres_setting (
+                    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    setting_name TEXT NOT NULL,
+                    setting_value TEXT NOT NULL,
+                    unit TEXT,
+                    value_type TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    pending_restart INTEGER NOT NULL CHECK (pending_restart IN (0, 1)),
+                    PRIMARY KEY (snapshot_id, setting_name)
+                ) STRICT;
+                CREATE TABLE postgres_database (
+                    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    database_name TEXT NOT NULL,
+                    is_template INTEGER NOT NULL CHECK (is_template IN (0, 1)),
+                    allows_connections INTEGER NOT NULL CHECK (allows_connections IN (0, 1)),
+                    can_connect INTEGER NOT NULL CHECK (can_connect IN (0, 1)),
+                    size_bytes INTEGER,
+                    extension_visit_status TEXT NOT NULL CHECK (extension_visit_status IN (
+                        'pending', 'visited', 'not_connectable', 'permission_denied', 'connection_failed'
+                    )),
+                    PRIMARY KEY (snapshot_id, database_name)
+                ) STRICT;
+                CREATE TABLE postgres_extension (
+                    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+                    collected_at TEXT NOT NULL,
+                    database_name TEXT NOT NULL,
+                    extension_name TEXT NOT NULL,
+                    extension_version TEXT NOT NULL,
+                    PRIMARY KEY (snapshot_id, database_name, extension_name)
+                ) STRICT;
+                CREATE VIEW database_inventory AS
+                    SELECT
+                        d.snapshot_id,
+                        d.database_name,
+                        d.is_template,
+                        d.allows_connections,
+                        d.can_connect,
+                        d.size_bytes,
+                        d.extension_visit_status,
+                        (SELECT COUNT(*) FROM postgres_extension e
+                            WHERE e.snapshot_id = d.snapshot_id
+                              AND e.database_name = d.database_name) AS extension_count
+                    FROM postgres_database d;
                 "
             ))
             .map_err(ArtifactError::Sqlite)?;
@@ -418,17 +481,18 @@ impl SqliteWriter {
             let mut statement = transaction
                 .prepare(
                     "INSERT INTO collector_outcome (
-                        snapshot_id, source, started_at_utc, finished_at_utc,
+                        snapshot_id, source, sequence, started_at_utc, finished_at_utc,
                         status, error_code, os_error_code, observed_at_utc,
                         collector_name, collector_version
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
                 )
                 .map_err(ArtifactError::Sqlite)?;
-            for outcome in &snapshot.outcomes {
+            for (sequence, outcome) in snapshot.outcomes.iter().enumerate() {
                 statement
                     .execute(params![
                         snapshot.snapshot_id.to_string(),
                         outcome.source,
+                        i64::try_from(sequence).map_err(|_| ArtifactError::ValueOutOfRange)?,
                         format_timestamp(outcome.started_at_utc),
                         format_timestamp(outcome.finished_at_utc),
                         outcome.status.as_str(),
@@ -503,6 +567,10 @@ impl SqliteWriter {
         Self::write_kernel_vm(&transaction, snapshot, &collected_at)?;
         Self::write_kernel_ipc(&transaction, snapshot, &collected_at)?;
         Self::write_thp(&transaction, snapshot, &collected_at)?;
+        Self::write_postgres_target(&transaction, snapshot, &collected_at)?;
+        Self::write_postgres_settings(&transaction, snapshot, &collected_at)?;
+        Self::write_postgres_databases(&transaction, snapshot, &collected_at)?;
+        Self::write_postgres_extensions(&transaction, snapshot, &collected_at)?;
 
         transaction.commit().map_err(ArtifactError::Sqlite)?;
         self.connection
@@ -1251,6 +1319,137 @@ impl SqliteWriter {
                 ],
             )
             .map_err(ArtifactError::Sqlite)?;
+        Ok(())
+    }
+
+    fn write_postgres_target(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let target = match snapshot.target_inventory.inventory.target.as_ref() {
+            Some(target) => target,
+            None => return Ok(()),
+        };
+        let port = target.endpoint.port.map(i64::from);
+        transaction
+            .execute(
+                "INSERT INTO postgres_target (
+                    snapshot_id, collected_at, endpoint_kind, endpoint, port,
+                    connected_user, initial_database,
+                    server_version_num, server_version, in_recovery, block_size_bytes,
+                    is_superuser, has_pg_monitor, has_pg_read_all_stats, has_pg_read_all_settings
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15
+                )",
+                params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    target.endpoint.endpoint_kind.as_str(),
+                    target.endpoint.host.as_str(),
+                    port,
+                    target.connected_user.as_str(),
+                    target.initial_database.as_str(),
+                    i64::from(target.server_version_num),
+                    target.server_version.as_str(),
+                    i64::from(target.in_recovery),
+                    i64::from(target.block_size_bytes),
+                    i64::from(target.is_superuser),
+                    i64::from(target.has_pg_monitor),
+                    i64::from(target.has_pg_read_all_stats),
+                    i64::from(target.has_pg_read_all_settings),
+                ],
+            )
+            .map_err(ArtifactError::Sqlite)?;
+        Ok(())
+    }
+
+    fn write_postgres_settings(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let mut statement = transaction
+            .prepare(
+                "INSERT INTO postgres_setting (
+                    snapshot_id, collected_at, setting_name, setting_value,
+                    unit, value_type, source, pending_restart
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            )
+            .map_err(ArtifactError::Sqlite)?;
+        for setting in &snapshot.target_inventory.inventory.settings {
+            statement
+                .execute(params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    setting.name.as_str(),
+                    setting.value.as_str(),
+                    setting.unit.as_deref(),
+                    setting.value_type.as_str(),
+                    setting.source.as_str(),
+                    i64::from(setting.pending_restart),
+                ])
+                .map_err(ArtifactError::Sqlite)?;
+        }
+        Ok(())
+    }
+
+    fn write_postgres_databases(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let mut statement = transaction
+            .prepare(
+                "INSERT INTO postgres_database (
+                    snapshot_id, collected_at, database_name,
+                    is_template, allows_connections, can_connect, size_bytes,
+                    extension_visit_status
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            )
+            .map_err(ArtifactError::Sqlite)?;
+        for database in &snapshot.target_inventory.inventory.databases {
+            let size = database.size_bytes;
+            statement
+                .execute(params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    database.database_name.as_str(),
+                    i64::from(database.is_template),
+                    i64::from(database.allows_connections),
+                    i64::from(database.can_connect),
+                    size,
+                    database.extension_visit_status.as_str(),
+                ])
+                .map_err(ArtifactError::Sqlite)?;
+        }
+        Ok(())
+    }
+
+    fn write_postgres_extensions(
+        transaction: &rusqlite::Transaction,
+        snapshot: &Snapshot,
+        collected_at: &str,
+    ) -> Result<(), ArtifactError> {
+        let mut statement = transaction
+            .prepare(
+                "INSERT INTO postgres_extension (
+                    snapshot_id, collected_at, database_name,
+                    extension_name, extension_version
+                ) VALUES (?1, ?2, ?3, ?4, ?5)",
+            )
+            .map_err(ArtifactError::Sqlite)?;
+        for extension in &snapshot.target_inventory.inventory.extensions {
+            statement
+                .execute(params![
+                    snapshot.snapshot_id.to_string(),
+                    collected_at,
+                    extension.database_name.as_str(),
+                    extension.extension_name.as_str(),
+                    extension.extension_version.as_str(),
+                ])
+                .map_err(ArtifactError::Sqlite)?;
+        }
         Ok(())
     }
 }

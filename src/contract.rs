@@ -152,6 +152,17 @@ pub struct LinuxStorageLimits {
     pub kernel: crate::linux::KernelObservations,
 }
 
+/// Snapshot of the bounded PostgreSQL target and inventory observations
+/// captured by the postgres module. Every field is allowlisted and sanitized
+/// at the source; the spine only moves this struct into the artifact
+/// unchanged.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PostgresTargetInventory {
+    pub inventory: crate::postgres::TargetInventory,
+    pub started_at_utc: Option<DateTime<Utc>>,
+    pub finished_at_utc: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub snapshot_id: Uuid,
@@ -161,10 +172,12 @@ pub struct Snapshot {
     pub identity: LinuxIdentity,
     pub compute_memory: LinuxComputeMemory,
     pub storage_limits: LinuxStorageLimits,
+    pub target_inventory: PostgresTargetInventory,
     pub outcomes: Vec<ComponentOutcome>,
 }
 
 impl Snapshot {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         snapshot_id: Uuid,
         started_at_utc: DateTime<Utc>,
@@ -172,6 +185,7 @@ impl Snapshot {
         identity: LinuxIdentity,
         compute_memory: LinuxComputeMemory,
         storage_limits: LinuxStorageLimits,
+        target_inventory: PostgresTargetInventory,
         outcomes: Vec<ComponentOutcome>,
     ) -> Self {
         let status = if outcomes
@@ -191,6 +205,7 @@ impl Snapshot {
             identity,
             compute_memory,
             storage_limits,
+            target_inventory,
             outcomes,
         }
     }
@@ -224,6 +239,7 @@ mod tests {
             LinuxIdentity::default(),
             LinuxComputeMemory::default(),
             LinuxStorageLimits::default(),
+            PostgresTargetInventory::default(),
             vec![ComponentOutcome::failed(
                 "linux.optional",
                 CollectionStatus::Unsupported,
@@ -245,6 +261,7 @@ mod tests {
             LinuxIdentity::default(),
             LinuxComputeMemory::default(),
             LinuxStorageLimits::default(),
+            PostgresTargetInventory::default(),
             vec![ComponentOutcome::failed(
                 "proc.uptime",
                 CollectionStatus::ParseError,
