@@ -62,7 +62,6 @@ fn black_box_postgres_collection_publishes_target_settings_and_extensions() {
             .unwrap(),
         "ok"
     );
-
     let target_row: (String, String, String, i64, i64, i64) = connection
         .query_row(
             "SELECT endpoint_kind, endpoint, connected_user, server_version_num, block_size_bytes, has_pg_monitor

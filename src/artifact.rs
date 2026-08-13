@@ -376,6 +376,18 @@ impl PartialWriter {
         write_postgres_settings(&tx, &self.snapshot_id, inventory, &collected_at)?;
         write_postgres_databases(&tx, &self.snapshot_id, inventory, &collected_at)?;
         write_postgres_extensions(&tx, &self.snapshot_id, inventory, &collected_at)?;
+        write_postgres_database_stats(&tx, &self.snapshot_id, inventory, &collected_at)?;
+        write_postgres_standby_conflicts(&tx, &self.snapshot_id, inventory, &collected_at)?;
+        write_postgres_wal_stats(&tx, &self.snapshot_id, inventory, &collected_at)?;
+        write_postgres_bgwriter_stats(&tx, &self.snapshot_id, inventory, &collected_at)?;
+        write_postgres_checkpointer_stats(&tx, &self.snapshot_id, inventory, &collected_at)?;
+        write_postgres_archiver_stats(&tx, &self.snapshot_id, inventory, &collected_at)?;
+        write_postgres_io_stats(&tx, &self.snapshot_id, inventory, &collected_at)?;
+        write_postgres_slru_stats(&tx, &self.snapshot_id, inventory, &collected_at)?;
+        write_postgres_activity_aggregates(&tx, &self.snapshot_id, inventory, &collected_at)?;
+        write_postgres_lock_aggregates(&tx, &self.snapshot_id, inventory, &collected_at)?;
+        write_postgres_replication_aggregates(&tx, &self.snapshot_id, inventory, &collected_at)?;
+        write_postgres_slot_aggregates(&tx, &self.snapshot_id, inventory, &collected_at)?;
         tx.commit().map_err(ArtifactError::Sqlite)?;
         self.fsync_partial()
     }
@@ -1601,6 +1613,416 @@ fn write_postgres_extensions(
     Ok(())
 }
 
+fn write_postgres_database_stats(
+    tx: &rusqlite::Transaction,
+    snapshot_id: &str,
+    inventory: &TargetInventory,
+    collected_at: &str,
+) -> Result<(), ArtifactError> {
+    let mut statement = tx
+        .prepare(
+            "INSERT INTO postgres_database_stats (
+                snapshot_id, collected_at, database_oid, database_name,
+                num_backends, xact_commit, xact_rollback, blks_read, blks_hit,
+                tup_returned, tup_fetched, tup_inserted, tup_updated, tup_deleted,
+                conflicts, temp_files, temp_bytes, deadlocks, checksum_failures,
+                blk_read_time_ms, blk_write_time_ms, session_time_ms, active_time_ms,
+                idle_in_transaction_time_ms, sessions, sessions_abandoned, sessions_fatal,
+                sessions_killed, stats_reset
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
+        )
+        .map_err(ArtifactError::Sqlite)?;
+    for stats in &inventory.stats.database_stats {
+        statement
+            .execute(params![
+                snapshot_id,
+                collected_at,
+                stats.database_oid,
+                stats.database_name.as_str(),
+                stats.num_backends,
+                stats.xact_commit,
+                stats.xact_rollback,
+                stats.blks_read,
+                stats.blks_hit,
+                stats.tup_returned,
+                stats.tup_fetched,
+                stats.tup_inserted,
+                stats.tup_updated,
+                stats.tup_deleted,
+                stats.conflicts,
+                stats.temp_files,
+                stats.temp_bytes,
+                stats.deadlocks,
+                stats.checksum_failures,
+                stats.blk_read_time_ms,
+                stats.blk_write_time_ms,
+                stats.session_time_ms,
+                stats.active_time_ms,
+                stats.idle_in_transaction_time_ms,
+                stats.sessions,
+                stats.sessions_abandoned,
+                stats.sessions_fatal,
+                stats.sessions_killed,
+                stats.stats_reset.as_ref().map(|ts| ts.to_rfc3339()),
+            ])
+            .map_err(ArtifactError::Sqlite)?;
+    }
+    Ok(())
+}
+
+fn write_postgres_standby_conflicts(
+    tx: &rusqlite::Transaction,
+    snapshot_id: &str,
+    inventory: &TargetInventory,
+    collected_at: &str,
+) -> Result<(), ArtifactError> {
+    let mut statement = tx
+        .prepare(
+            "INSERT INTO postgres_standby_conflicts (
+                snapshot_id, collected_at, database_oid, database_name,
+                confl_tablespace, confl_lock, confl_snapshot, confl_bufferpin, confl_deadlock
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        )
+        .map_err(ArtifactError::Sqlite)?;
+    for stats in &inventory.stats.standby_conflicts {
+        statement
+            .execute(params![
+                snapshot_id,
+                collected_at,
+                stats.database_oid,
+                stats.database_name.as_str(),
+                stats.confl_tablespace,
+                stats.confl_lock,
+                stats.confl_snapshot,
+                stats.confl_bufferpin,
+                stats.confl_deadlock,
+            ])
+            .map_err(ArtifactError::Sqlite)?;
+    }
+    Ok(())
+}
+
+fn write_postgres_wal_stats(
+    tx: &rusqlite::Transaction,
+    snapshot_id: &str,
+    inventory: &TargetInventory,
+    collected_at: &str,
+) -> Result<(), ArtifactError> {
+    if let Some(stats) = &inventory.stats.wal_stats {
+        tx.execute(
+            "INSERT INTO postgres_wal_stats (
+                snapshot_id, collected_at, wal_records, wal_fpi, wal_bytes,
+                wal_buffers_full, wal_write, wal_sync, wal_write_time_ms, wal_sync_time_ms, stats_reset
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                snapshot_id,
+                collected_at,
+                stats.wal_records,
+                stats.wal_fpi,
+                stats.wal_bytes,
+                stats.wal_buffers_full,
+                stats.wal_write,
+                stats.wal_sync,
+                stats.wal_write_time_ms,
+                stats.wal_sync_time_ms,
+                stats.stats_reset,
+            ],
+        )
+        .map_err(ArtifactError::Sqlite)?;
+    }
+    Ok(())
+}
+
+fn write_postgres_bgwriter_stats(
+    tx: &rusqlite::Transaction,
+    snapshot_id: &str,
+    inventory: &TargetInventory,
+    collected_at: &str,
+) -> Result<(), ArtifactError> {
+    if let Some(stats) = &inventory.stats.bgwriter_stats {
+        tx.execute(
+            "INSERT INTO postgres_bgwriter_stats (
+                snapshot_id, collected_at, checkpoints_timed, checkpoints_req,
+                checkpoint_write_time_ms, checkpoint_sync_time_ms, buffers_checkpoint,
+                buffers_clean, maxwritten_clean, buffers_backend, buffers_backend_fsync,
+                buffers_alloc, stats_reset
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            params![
+                snapshot_id,
+                collected_at,
+                stats.checkpoints_timed,
+                stats.checkpoints_req,
+                stats.checkpoint_write_time_ms,
+                stats.checkpoint_sync_time_ms,
+                stats.buffers_checkpoint,
+                stats.buffers_clean,
+                stats.maxwritten_clean,
+                stats.buffers_backend,
+                stats.buffers_backend_fsync,
+                stats.buffers_alloc,
+                stats.stats_reset,
+            ],
+        )
+        .map_err(ArtifactError::Sqlite)?;
+    }
+    Ok(())
+}
+
+fn write_postgres_checkpointer_stats(
+    tx: &rusqlite::Transaction,
+    snapshot_id: &str,
+    inventory: &TargetInventory,
+    collected_at: &str,
+) -> Result<(), ArtifactError> {
+    if let Some(stats) = &inventory.stats.checkpointer_stats {
+        tx.execute(
+            "INSERT INTO postgres_checkpointer_stats (
+                snapshot_id, collected_at, num_timed, num_requested,
+                write_time_ms, sync_time_ms, buffers_written, stats_reset
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                snapshot_id,
+                collected_at,
+                stats.checkpoints_timed,
+                stats.checkpoints_req,
+                stats.checkpoint_write_time_ms,
+                stats.checkpoint_sync_time_ms,
+                stats.buffers_checkpoint,
+                stats.stats_reset,
+            ],
+        )
+        .map_err(ArtifactError::Sqlite)?;
+    }
+    Ok(())
+}
+
+fn write_postgres_archiver_stats(
+    tx: &rusqlite::Transaction,
+    snapshot_id: &str,
+    inventory: &TargetInventory,
+    collected_at: &str,
+) -> Result<(), ArtifactError> {
+    if let Some(stats) = &inventory.stats.archiver_stats {
+        tx.execute(
+            "INSERT INTO postgres_archiver_stats (
+                snapshot_id, collected_at, archived_count, last_archived_wal,
+                last_archived_time, failed_count, last_failed_wal, last_failed_time, stats_reset
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                snapshot_id,
+                collected_at,
+                stats.archived_count,
+                stats.last_archived_wal,
+                stats.last_archived_time,
+                stats.failed_count,
+                stats.last_failed_wal,
+                stats.last_failed_time,
+                stats.stats_reset,
+            ],
+        )
+        .map_err(ArtifactError::Sqlite)?;
+    }
+    Ok(())
+}
+
+fn write_postgres_io_stats(
+    tx: &rusqlite::Transaction,
+    snapshot_id: &str,
+    inventory: &TargetInventory,
+    collected_at: &str,
+) -> Result<(), ArtifactError> {
+    if let Some(entries) = &inventory.stats.io_stats {
+        let mut statement = tx
+            .prepare(
+                "INSERT INTO postgres_io_stats (
+                    snapshot_id, collected_at, backend_type, io_object, io_context,
+                    reads, read_time_ms, writes, write_time_ms, extends, extend_time_ms,
+                    op_bytes, hits, evictions, reuses, fsyncs, stats_reset
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            )
+            .map_err(ArtifactError::Sqlite)?;
+        for entry in entries {
+            statement
+                .execute(params![
+                    snapshot_id,
+                    collected_at,
+                    entry.backend_type.as_str(),
+                    entry.io_object,
+                    entry.io_context,
+                    entry.reads,
+                    entry.read_time_ms,
+                    entry.writes,
+                    entry.write_time_ms,
+                    entry.extends,
+                    entry.extend_time_ms,
+                    entry.op_bytes,
+                    entry.hits,
+                    entry.evictions,
+                    entry.reuses,
+                    entry.fsyncs,
+                    entry.stats_reset,
+                ])
+                .map_err(ArtifactError::Sqlite)?;
+        }
+    }
+    Ok(())
+}
+
+fn write_postgres_slru_stats(
+    tx: &rusqlite::Transaction,
+    snapshot_id: &str,
+    inventory: &TargetInventory,
+    collected_at: &str,
+) -> Result<(), ArtifactError> {
+    if let Some(entries) = &inventory.stats.slru_stats {
+        let mut statement = tx
+            .prepare(
+                "INSERT INTO postgres_slru_stats (
+                    snapshot_id, collected_at, name, blocks_zeroed, blocks_hit,
+                    blocks_read, blocks_written, blocks_exists, flush_count, stats_reset
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            )
+            .map_err(ArtifactError::Sqlite)?;
+        for entry in entries {
+            statement
+                .execute(params![
+                    snapshot_id,
+                    collected_at,
+                    entry.name.as_str(),
+                    entry.blocks_zeroed,
+                    entry.blocks_hit,
+                    entry.blocks_read,
+                    entry.blocks_written,
+                    entry.blocks_exists,
+                    entry.flush_count,
+                    entry.stats_reset,
+                ])
+                .map_err(ArtifactError::Sqlite)?;
+        }
+    }
+    Ok(())
+}
+
+fn write_postgres_activity_aggregates(
+    tx: &rusqlite::Transaction,
+    snapshot_id: &str,
+    inventory: &TargetInventory,
+    collected_at: &str,
+) -> Result<(), ArtifactError> {
+    let mut statement = tx
+        .prepare(
+            "INSERT INTO postgres_activity_aggregates (
+                snapshot_id, collected_at, database_name, backend_type, state,
+                wait_event_type, count, max_age_seconds
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )
+        .map_err(ArtifactError::Sqlite)?;
+    for agg in &inventory.stats.activity_aggregates {
+        statement
+            .execute(params![
+                snapshot_id,
+                collected_at,
+                agg.database_name,
+                agg.backend_type.as_str(),
+                agg.state,
+                agg.wait_event_type,
+                agg.count,
+                agg.max_age_seconds,
+            ])
+            .map_err(ArtifactError::Sqlite)?;
+    }
+    Ok(())
+}
+
+fn write_postgres_lock_aggregates(
+    tx: &rusqlite::Transaction,
+    snapshot_id: &str,
+    inventory: &TargetInventory,
+    collected_at: &str,
+) -> Result<(), ArtifactError> {
+    let mut statement = tx
+        .prepare(
+            "INSERT INTO postgres_lock_aggregates (
+                snapshot_id, collected_at, lock_mode, lock_type, granted,
+                fast_path, count, max_wait_age_seconds
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )
+        .map_err(ArtifactError::Sqlite)?;
+    for agg in &inventory.stats.lock_aggregates {
+        statement
+            .execute(params![
+                snapshot_id,
+                collected_at,
+                agg.lock_mode.as_str(),
+                agg.lock_type.as_str(),
+                agg.granted as i32,
+                agg.fast_path.map(|b| b as i32),
+                agg.count,
+                agg.max_wait_age_seconds,
+            ])
+            .map_err(ArtifactError::Sqlite)?;
+    }
+    Ok(())
+}
+
+fn write_postgres_replication_aggregates(
+    tx: &rusqlite::Transaction,
+    snapshot_id: &str,
+    inventory: &TargetInventory,
+    collected_at: &str,
+) -> Result<(), ArtifactError> {
+    let mut statement = tx
+        .prepare(
+            "INSERT INTO postgres_replication_aggregates (
+                snapshot_id, collected_at, state, sync_state, count, max_lag_bytes
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )
+        .map_err(ArtifactError::Sqlite)?;
+    for agg in &inventory.stats.replication_aggregates {
+        statement
+            .execute(params![
+                snapshot_id,
+                collected_at,
+                agg.state,
+                agg.sync_state,
+                agg.count,
+                agg.max_lag_bytes,
+            ])
+            .map_err(ArtifactError::Sqlite)?;
+    }
+    Ok(())
+}
+
+fn write_postgres_slot_aggregates(
+    tx: &rusqlite::Transaction,
+    snapshot_id: &str,
+    inventory: &TargetInventory,
+    collected_at: &str,
+) -> Result<(), ArtifactError> {
+    if let Some(aggregates) = &inventory.stats.slot_aggregates {
+        let mut statement = tx
+            .prepare(
+                "INSERT INTO postgres_slot_aggregates (
+                    snapshot_id, collected_at, slot_type, active, count, max_retained_bytes
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )
+            .map_err(ArtifactError::Sqlite)?;
+        for agg in aggregates {
+            statement
+                .execute(params![
+                    snapshot_id,
+                    collected_at,
+                    agg.slot_type.as_str(),
+                    agg.active as i32,
+                    agg.count,
+                    agg.max_retained_bytes,
+                ])
+                .map_err(ArtifactError::Sqlite)?;
+        }
+    }
+    Ok(())
+}
+
 fn format_cpu_set(cpus: &[u32]) -> String {
     if cpus.is_empty() {
         return String::new();
@@ -1977,6 +2399,168 @@ CREATE VIEW database_inventory AS
             WHERE e.snapshot_id = d.snapshot_id
               AND e.database_name = d.database_name) AS extension_count
     FROM postgres_database d;
+CREATE TABLE postgres_database_stats (
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    collected_at TEXT NOT NULL,
+    database_oid INTEGER NOT NULL,
+    database_name TEXT NOT NULL,
+    num_backends INTEGER,
+    xact_commit INTEGER NOT NULL,
+    xact_rollback INTEGER NOT NULL,
+    blks_read INTEGER NOT NULL,
+    blks_hit INTEGER NOT NULL,
+    tup_returned INTEGER NOT NULL,
+    tup_fetched INTEGER NOT NULL,
+    tup_inserted INTEGER NOT NULL,
+    tup_updated INTEGER NOT NULL,
+    tup_deleted INTEGER NOT NULL,
+    conflicts INTEGER NOT NULL,
+    temp_files INTEGER NOT NULL,
+    temp_bytes INTEGER NOT NULL,
+    deadlocks INTEGER NOT NULL,
+    checksum_failures INTEGER,
+    blk_read_time_ms REAL,
+    blk_write_time_ms REAL,
+    session_time_ms REAL,
+    active_time_ms REAL,
+    idle_in_transaction_time_ms REAL,
+    sessions INTEGER,
+    sessions_abandoned INTEGER,
+    sessions_fatal INTEGER,
+    sessions_killed INTEGER,
+    stats_reset TEXT,
+    PRIMARY KEY (snapshot_id, database_oid)
+) STRICT;
+CREATE TABLE postgres_standby_conflicts (
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    collected_at TEXT NOT NULL,
+    database_oid INTEGER NOT NULL,
+    database_name TEXT NOT NULL,
+    confl_tablespace INTEGER NOT NULL,
+    confl_lock INTEGER NOT NULL,
+    confl_snapshot INTEGER NOT NULL,
+    confl_bufferpin INTEGER NOT NULL,
+    confl_deadlock INTEGER NOT NULL,
+    PRIMARY KEY (snapshot_id, database_oid)
+) STRICT;
+CREATE TABLE postgres_wal_stats (
+    snapshot_id TEXT PRIMARY KEY NOT NULL REFERENCES snapshot(snapshot_id),
+    collected_at TEXT NOT NULL,
+    wal_records INTEGER NOT NULL,
+    wal_fpi INTEGER NOT NULL,
+    wal_bytes INTEGER NOT NULL,
+    wal_buffers_full INTEGER,
+    wal_write INTEGER,
+    wal_sync INTEGER,
+    wal_write_time_ms REAL,
+    wal_sync_time_ms REAL,
+    stats_reset TEXT
+) STRICT;
+CREATE TABLE postgres_bgwriter_stats (
+    snapshot_id TEXT PRIMARY KEY NOT NULL REFERENCES snapshot(snapshot_id),
+    collected_at TEXT NOT NULL,
+    checkpoints_timed INTEGER,
+    checkpoints_req INTEGER,
+    checkpoint_write_time_ms REAL,
+    checkpoint_sync_time_ms REAL,
+    buffers_checkpoint INTEGER,
+    buffers_clean INTEGER,
+    maxwritten_clean INTEGER,
+    buffers_backend INTEGER,
+    buffers_backend_fsync INTEGER,
+    buffers_alloc INTEGER,
+    stats_reset TEXT
+) STRICT;
+CREATE TABLE postgres_checkpointer_stats (
+    snapshot_id TEXT PRIMARY KEY NOT NULL REFERENCES snapshot(snapshot_id),
+    collected_at TEXT NOT NULL,
+    num_timed INTEGER,
+    num_requested INTEGER,
+    write_time_ms REAL,
+    sync_time_ms REAL,
+    buffers_written INTEGER,
+    stats_reset TEXT
+) STRICT;
+CREATE TABLE postgres_archiver_stats (
+    snapshot_id TEXT PRIMARY KEY NOT NULL REFERENCES snapshot(snapshot_id),
+    collected_at TEXT NOT NULL,
+    archived_count INTEGER NOT NULL,
+    last_archived_wal TEXT,
+    last_archived_time TEXT,
+    failed_count INTEGER NOT NULL,
+    last_failed_wal TEXT,
+    last_failed_time TEXT,
+    stats_reset TEXT
+) STRICT;
+CREATE TABLE postgres_io_stats (
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    collected_at TEXT NOT NULL,
+    backend_type TEXT NOT NULL,
+    io_object TEXT,
+    io_context TEXT,
+    reads INTEGER NOT NULL,
+    read_time_ms REAL,
+    writes INTEGER NOT NULL,
+    write_time_ms REAL,
+    extends INTEGER NOT NULL,
+    extend_time_ms REAL,
+    op_bytes INTEGER NOT NULL,
+    hits INTEGER NOT NULL,
+    evictions INTEGER NOT NULL,
+    reuses INTEGER NOT NULL,
+    fsyncs INTEGER NOT NULL,
+    stats_reset TEXT,
+    PRIMARY KEY (snapshot_id, backend_type, io_object, io_context)
+) STRICT;
+CREATE TABLE postgres_slru_stats (
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    collected_at TEXT NOT NULL,
+    name TEXT NOT NULL,
+    blocks_zeroed INTEGER NOT NULL,
+    blocks_hit INTEGER NOT NULL,
+    blocks_read INTEGER NOT NULL,
+    blocks_written INTEGER NOT NULL,
+    blocks_exists INTEGER NOT NULL,
+    flush_count INTEGER NOT NULL,
+    stats_reset TEXT,
+    PRIMARY KEY (snapshot_id, name)
+) STRICT;
+CREATE TABLE postgres_activity_aggregates (
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    collected_at TEXT NOT NULL,
+    database_name TEXT,
+    backend_type TEXT NOT NULL,
+    state TEXT,
+    wait_event_type TEXT,
+    count INTEGER NOT NULL,
+    max_age_seconds INTEGER
+);
+CREATE TABLE postgres_lock_aggregates (
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    collected_at TEXT NOT NULL,
+    lock_mode TEXT NOT NULL,
+    lock_type TEXT NOT NULL,
+    granted INTEGER NOT NULL CHECK (granted IN (0, 1)),
+    fast_path INTEGER CHECK (fast_path IN (0, 1)),
+    count INTEGER NOT NULL,
+    max_wait_age_seconds INTEGER
+);
+CREATE TABLE postgres_replication_aggregates (
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    collected_at TEXT NOT NULL,
+    state TEXT,
+    sync_state TEXT,
+    count INTEGER NOT NULL,
+    max_lag_bytes INTEGER
+);
+CREATE TABLE postgres_slot_aggregates (
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    collected_at TEXT NOT NULL,
+    slot_type TEXT NOT NULL,
+    active INTEGER NOT NULL CHECK (active IN (0, 1)),
+    count INTEGER NOT NULL,
+    max_retained_bytes INTEGER
+);
 "#;
 
 #[cfg(test)]

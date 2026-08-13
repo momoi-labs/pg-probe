@@ -1,11 +1,17 @@
-//! PostgreSQL target and inventory collector.
+//! PostgreSQL target, inventory, and statistics collector.
 //!
 //! Issue #16 captures the bounded set of facts that identify the PostgreSQL
 //! cluster, collects a small allowlist of runtime settings, walks the
 //! database inventory (with sizes when readable), and visits every
-//! connectable database to record installed extensions. Each subcollector
-//! is isolated: a failure somewhere leaves the rest working and records a
-//! single sanitized failure outcome.
+//! connectable database to record installed extensions.
+//!
+//! Issue #17 extends the collector with reset-aware cumulative statistics
+//! (per-database activity, standby conflicts, WAL, bgwriter, checkpointer,
+//! archiver, I/O, SLRU) and privacy-preserving workload aggregates
+//! (activity, locks, replication, slots). Each subcollector is capability-
+//! gated: unavailable version-specific sources are recorded as unsupported
+//! rather than failed, and permission or query failures remain isolated so
+//! they don't make an otherwise complete artifact partial.
 
 mod connection;
 mod databases;
@@ -13,6 +19,7 @@ mod extensions;
 mod sanitize;
 mod settings;
 mod settings_allowlist;
+pub(crate) mod stats;
 mod target;
 
 pub use connection::{
@@ -21,6 +28,11 @@ pub use connection::{
 pub use databases::{DatabaseEntry, ExtensionVisitStatus};
 pub use extensions::ExtensionEntry;
 pub use settings::Setting;
+pub use stats::{
+    ActivityAggregate, ArchiverStats, BgWriterStats, DatabaseStats, IoStatEntry, LockAggregate,
+    PostgresStats, ReplicationAggregate, SlotAggregate, SlruStatEntry, StandbyConflictStats,
+    WalStats,
+};
 pub use target::Target;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -31,12 +43,13 @@ use crate::contract::{now_utc, CollectionStatus, ComponentOutcome};
 
 /// The complete observation produced by the PostgreSQL target and inventory
 /// collector for one snapshot.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct TargetInventory {
     pub target: Option<Target>,
     pub settings: Vec<Setting>,
     pub databases: Vec<DatabaseEntry>,
     pub extensions: Vec<ExtensionEntry>,
+    pub stats: PostgresStats,
 }
 
 /// The panic-safe entry point used from the snapshot spine. A collector
@@ -201,6 +214,14 @@ pub fn collect_target_inventory(
         }
     }
     inventory.extensions = extensions;
+
+    if let Some(target) = inventory.target.as_ref() {
+        let server_version_num = target.server_version_num;
+        let (pg_stats, stats_outcomes) =
+            stats::collect_postgres_stats_isolated(&client, server_version_num);
+        outcomes.extend(stats_outcomes);
+        inventory.stats = pg_stats;
+    }
 
     (inventory, outcomes)
 }

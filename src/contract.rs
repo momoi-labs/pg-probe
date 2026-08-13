@@ -156,7 +156,7 @@ pub struct LinuxStorageLimits {
 /// captured by the postgres module. Every field is allowlisted and sanitized
 /// at the source; the spine only moves this struct into the artifact
 /// unchanged.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct PostgresTargetInventory {
     pub inventory: crate::postgres::TargetInventory,
     pub started_at_utc: Option<DateTime<Utc>>,
