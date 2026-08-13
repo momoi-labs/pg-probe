@@ -184,7 +184,7 @@ impl SqliteWriter {
                 CREATE TABLE linux_cpu_time (
                     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
                     collected_at TEXT NOT NULL,
-                    cpu_id INTEGER,
+                    cpu_id INTEGER NOT NULL,
                     state TEXT NOT NULL,
                     ticks INTEGER NOT NULL,
                     PRIMARY KEY (snapshot_id, cpu_id, state)
@@ -343,15 +343,6 @@ impl SqliteWriter {
         Self::write_vm_events(&transaction, snapshot, &collected_at)?;
         Self::write_psi(&transaction, snapshot, &collected_at)?;
 
-        Self::write_cpu_sets(&transaction, snapshot, &collected_at)?;
-        Self::write_cpu_topology(&transaction, snapshot, &collected_at)?;
-        Self::write_numa_nodes(&transaction, snapshot, &collected_at)?;
-        Self::write_cpu_times(&transaction, snapshot, &collected_at)?;
-        Self::write_scheduler(&transaction, snapshot, &collected_at)?;
-        Self::write_memory(&transaction, snapshot, &collected_at)?;
-        Self::write_vm_events(&transaction, snapshot, &collected_at)?;
-        Self::write_psi(&transaction, snapshot, &collected_at)?;
-
         transaction.commit().map_err(ArtifactError::Sqlite)?;
         self.connection
             .execute_batch("PRAGMA optimize;")
@@ -371,7 +362,7 @@ impl SqliteWriter {
     ) -> Result<(), ArtifactError> {
         let mut statement = transaction
             .prepare(
-                "INSERT INTO linux_cpu_set (snapshot_id, collected_at, set_kind, cpu_id)
+                "INSERT OR IGNORE INTO linux_cpu_set (snapshot_id, collected_at, set_kind, cpu_id)
                  VALUES (?1, ?2, ?3, ?4)",
             )
             .map_err(ArtifactError::Sqlite)?;
@@ -407,7 +398,7 @@ impl SqliteWriter {
     ) -> Result<(), ArtifactError> {
         let mut statement = transaction
             .prepare(
-                "INSERT INTO linux_cpu_topology (
+                "INSERT OR IGNORE INTO linux_cpu_topology (
                     snapshot_id, collected_at, cpu_id, package_id, die_id, core_id, sibling_set
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             )
@@ -440,7 +431,7 @@ impl SqliteWriter {
     ) -> Result<(), ArtifactError> {
         let mut statement = transaction
             .prepare(
-                "INSERT INTO linux_numa_node (snapshot_id, collected_at, node_id, cpu_set)
+                "INSERT OR IGNORE INTO linux_numa_node (snapshot_id, collected_at, node_id, cpu_set)
                  VALUES (?1, ?2, ?3, ?4)",
             )
             .map_err(ArtifactError::Sqlite)?;
@@ -465,7 +456,7 @@ impl SqliteWriter {
     ) -> Result<(), ArtifactError> {
         let mut statement = transaction
             .prepare(
-                "INSERT INTO linux_cpu_time (snapshot_id, collected_at, cpu_id, state, ticks)
+                "INSERT OR REPLACE INTO linux_cpu_time (snapshot_id, collected_at, cpu_id, state, ticks)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
             )
             .map_err(ArtifactError::Sqlite)?;
@@ -487,11 +478,12 @@ impl SqliteWriter {
             for (state_name, ticks_value) in states {
                 let ticks = i64::try_from(ticks_value)
                     .map_err(|_| ArtifactError::ValueOutOfRange)?;
+                let cpu_id = entry.cpu_id.map(i64::from).unwrap_or(-1);
                 statement
                     .execute(params![
                         snapshot.snapshot_id.to_string(),
                         collected_at,
-                        entry.cpu_id.map(i64::from),
+                        cpu_id,
                         state_name,
                         ticks,
                     ])
