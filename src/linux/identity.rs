@@ -20,6 +20,8 @@ pub fn collector_hostname() -> String {
     if unsafe { libc::uname(&mut value) } != 0 {
         return String::from("unknown");
     }
+    // c_char is i8 on some targets and u8 on others (e.g. aarch64 Linux).
+    #[allow(clippy::unnecessary_cast)]
     let bytes: Vec<u8> = value
         .nodename
         .iter()
@@ -129,6 +131,8 @@ fn collect_uname() -> Result<KernelIdentity, ComponentOutcome> {
 }
 
 fn uts_field(field: &[libc::c_char], error_code: &'static str) -> Result<String, ComponentOutcome> {
+    // c_char is i8 on some targets and u8 on others (e.g. aarch64 Linux).
+    #[allow(clippy::unnecessary_cast)]
     let bytes: Vec<u8> = field
         .iter()
         .map(|character| *character as u8)
