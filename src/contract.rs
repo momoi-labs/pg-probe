@@ -58,6 +58,11 @@ pub struct ComponentOutcome {
     pub error_code: Option<&'static str>,
     pub os_error_code: Option<i32>,
     pub observed_at_utc: Option<DateTime<Utc>>,
+    /// Optional human-readable reason for a failed outcome, surfaced only to
+    /// the operator through logging. It is deliberately not persisted: the
+    /// artifact keeps only the stable error code and OS error number so raw
+    /// driver text (which may carry credentials) never reaches the artifact.
+    pub detail: Option<String>,
 }
 
 impl ComponentOutcome {
@@ -75,6 +80,7 @@ impl ComponentOutcome {
             error_code: None,
             os_error_code: None,
             observed_at_utc: Some(observed_at_utc),
+            detail: None,
         }
     }
 
@@ -93,6 +99,7 @@ impl ComponentOutcome {
             error_code: Some(error_code),
             os_error_code,
             observed_at_utc: None,
+            detail: None,
         }
     }
 
@@ -103,6 +110,11 @@ impl ComponentOutcome {
     ) -> Self {
         self.started_at_utc = started_at_utc;
         self.finished_at_utc = finished_at_utc;
+        self
+    }
+
+    pub fn with_detail(mut self, detail: String) -> Self {
+        self.detail = Some(detail);
         self
     }
 }

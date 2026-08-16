@@ -124,11 +124,70 @@ where
         ),
     };
 
+    log_outcomes(&outcomes);
     collector.write(sink, &output, &outcomes)?;
 
     Ok(outcomes
         .iter()
         .any(|outcome| outcome.status.makes_snapshot_partial()))
+}
+
+/// Records one structured event per collector outcome, mapping each status to a
+/// level so a subscriber can colorize it (collected → info, unsupported → warn,
+/// failure → error). Failure and unsupported events also carry the structured
+/// `error_code` (and the OS error number when captured) so an operator can see
+/// why a collector did not succeed.
+///
+/// Per-collector progress is a `--verbose` feature: the binary maps verbose to
+/// info level, so these events are emitted only while info is enabled. That keeps
+/// the status-to-level color mapping while leaving default and `--quiet` runs
+/// silent.
+fn log_outcomes(outcomes: &[ComponentOutcome]) {
+    if !tracing::enabled!(tracing::Level::INFO) {
+        return;
+    }
+    for outcome in outcomes {
+        let duration = format_duration(outcome.finished_at_utc - outcome.started_at_utc);
+        match outcome.status {
+            CollectionStatus::Collected => tracing::info!(
+                source = %outcome.source,
+                status = %outcome.status.as_str(),
+                duration = %duration,
+                "collector outcome",
+            ),
+            CollectionStatus::Unsupported => tracing::warn!(
+                source = %outcome.source,
+                status = %outcome.status.as_str(),
+                duration = %duration,
+                error_code = %outcome.error_code.unwrap_or("unsupported"),
+                "collector outcome",
+            ),
+            CollectionStatus::PermissionDenied
+            | CollectionStatus::ParseError
+            | CollectionStatus::IoError
+            | CollectionStatus::Raced => tracing::error!(
+                source = %outcome.source,
+                status = %outcome.status.as_str(),
+                duration = %duration,
+                error_code = %outcome.error_code.unwrap_or("unknown"),
+                os_error_code = %format_os_error(outcome.os_error_code),
+                detail = outcome.detail.as_deref().unwrap_or("-"),
+                "collector outcome",
+            ),
+        }
+    }
+}
+
+fn format_os_error(code: Option<i32>) -> String {
+    code.map_or_else(|| "-".to_string(), |value| value.to_string())
+}
+
+fn format_duration(delta: chrono::TimeDelta) -> String {
+    match delta.num_microseconds() {
+        Some(micros) if micros < 1_000 => format!("{micros}µs"),
+        Some(micros) => format!("{:.1}ms", micros as f64 / 1_000.0),
+        None => "unknown".to_string(),
+    }
 }
 
 #[cfg(test)]

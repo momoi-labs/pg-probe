@@ -74,15 +74,17 @@ struct Cli {
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
+    init_logger(cli.quiet, cli.verbose);
+
     if let Err(error) = signal::install() {
-        eprintln!("pg-probe: failed to install signal handlers: {error}");
+        tracing::error!("failed to install signal handlers: {error}");
         return ExitCode::from(EXIT_PERSIST);
     }
 
     let domains = match parse_domain(&cli.domain) {
         Ok(d) => d,
         Err(msg) => {
-            eprintln!("pg-probe: invalid --domain value: {msg}");
+            tracing::error!("invalid --domain value: {msg}");
             return ExitCode::from(EXIT_USAGE);
         }
     };
@@ -90,16 +92,14 @@ fn main() -> ExitCode {
     let data_dir = cli.data_directory.clone();
 
     if !data_dir.is_dir() {
-        eprintln!(
-            "pg-probe: data directory does not exist or is not a directory: {}",
+        tracing::error!(
+            "data directory does not exist or is not a directory: {}",
             data_dir.display()
         );
         return ExitCode::from(EXIT_USAGE);
     }
 
-    if !cli.quiet {
-        warn_about_existing_partials(&data_dir);
-    }
+    warn_about_existing_partials(&data_dir);
 
     let params = pg_probe::ConnectionParams {
         host: cli.host,
@@ -110,7 +110,26 @@ fn main() -> ExitCode {
 
     let result = pg_probe::capture_with_cancellation(&data_dir, signal::flag(), domains, &params);
 
-    report_exit(result, cli.quiet, cli.verbose)
+    report_exit(result)
+}
+
+/// Installs the structured logger on stderr. The level is derived from the
+/// verbosity flags: `--quiet` keeps only errors, the default keeps errors and
+/// warnings, and `--verbose` adds per-collector progress at info level.
+fn init_logger(quiet: bool, verbose: bool) {
+    let level = if quiet {
+        tracing::Level::ERROR
+    } else if verbose {
+        tracing::Level::INFO
+    } else {
+        tracing::Level::WARN
+    };
+    tracing_subscriber::fmt()
+        .with_max_level(level)
+        .with_ansi(true)
+        .with_target(false)
+        .with_writer(std::io::stderr)
+        .init();
 }
 
 fn parse_domain(value: &str) -> Result<DomainSelection, String> {
@@ -126,54 +145,47 @@ fn parse_domain(value: &str) -> Result<DomainSelection, String> {
 
 fn warn_about_existing_partials(data_dir: &std::path::Path) {
     let partials = artifact::scan_for_partials(data_dir);
-    if !partials.is_empty() {
-        eprintln!(
-            "pg-probe: warning: found {} existing .sqlite.partial file(s) in {}:",
-            partials.len(),
-            data_dir.display()
-        );
-        for path in &partials {
-            eprintln!("  {}", path.display());
-        }
-        eprintln!(
-            "pg-probe: these files are left untouched. A future --cleanup option will manage them."
-        );
+    if partials.is_empty() {
+        return;
     }
+    let listing = partials
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join("\n  ");
+    tracing::warn!(
+        "found {} existing .sqlite.partial file(s) in {}:\n  {}\nleft untouched; a future --cleanup option will manage them",
+        partials.len(),
+        data_dir.display(),
+        listing,
+    );
 }
 
-fn report_exit(
-    result: Result<CaptureReport, ArtifactError>,
-    quiet: bool,
-    verbose: bool,
-) -> ExitCode {
+fn report_exit(result: Result<CaptureReport, ArtifactError>) -> ExitCode {
     match result {
         Ok(report) if report.interrupted => {
-            if !quiet {
-                if let Some(ref partial) = report.partial_path {
-                    eprintln!(
-                        "pg-probe: interrupted; committed results preserved in {}",
-                        partial.display()
-                    );
-                } else {
-                    eprintln!("pg-probe: interrupted before any data was collected");
-                }
+            if let Some(ref partial) = report.partial_path {
+                tracing::warn!(
+                    "interrupted; committed results preserved in {}",
+                    partial.display()
+                );
+            } else {
+                tracing::warn!("interrupted before any data was collected");
             }
             ExitCode::from(EXIT_INTERRUPTED)
         }
         Ok(report) => {
-            if let Some(ref path) = report.final_path {
-                println!("{}", path.display());
-            }
-            if !quiet {
-                match report.status {
-                    SnapshotStatus::Complete => {
-                        if verbose {
-                            eprintln!("pg-probe: complete snapshot published");
-                        }
+            match report.status {
+                SnapshotStatus::Complete => {
+                    if let Some(ref path) = report.final_path {
+                        tracing::info!(artifact = %path.display(), "complete snapshot published");
                     }
-                    SnapshotStatus::Partial => {
-                        eprintln!(
-                            "pg-probe: partial snapshot published (one or more sources failed)"
+                }
+                SnapshotStatus::Partial => {
+                    if let Some(ref path) = report.final_path {
+                        tracing::warn!(
+                            artifact = %path.display(),
+                            "partial snapshot published (one or more sources failed)"
                         );
                     }
                 }
@@ -184,15 +196,15 @@ fn report_exit(
             }
         }
         Err(ArtifactError::DataDirectoryMissing) => {
-            eprintln!("pg-probe: the data directory does not exist or is not a directory");
+            tracing::error!("the data directory does not exist or is not a directory");
             ExitCode::from(EXIT_USAGE)
         }
         Err(ArtifactError::DataDirectoryNotWritable) => {
-            eprintln!("pg-probe: the data directory is not writable");
+            tracing::error!("the data directory is not writable");
             ExitCode::from(EXIT_USAGE)
         }
         Err(error) => {
-            eprintln!("pg-probe: {error}");
+            tracing::error!("{error}");
             ExitCode::from(EXIT_PERSIST)
         }
     }

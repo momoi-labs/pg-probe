@@ -11,6 +11,22 @@ use tempfile::tempdir;
 
 const CANARY: &str = "probe-canary-very-unique-string-7f7c4b1a";
 
+fn sole_gzip(dir: &std::path::Path) -> std::path::PathBuf {
+    let gz_files: Vec<_> = fs::read_dir(dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "gz"))
+        .collect();
+    assert_eq!(
+        gz_files.len(),
+        1,
+        "expected exactly one .gz file in {:?}",
+        dir
+    );
+    gz_files[0].clone()
+}
+
 #[test]
 fn black_box_postgres_collection_publishes_target_settings_and_extensions() {
     let cluster = match common::pg::cluster() {
@@ -42,8 +58,7 @@ fn black_box_postgres_collection_publishes_target_settings_and_extensions() {
         panic!("pg-probe exited with status {:?}", output.status);
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let artifact = directory.path().join(stdout.trim());
+    let artifact = sole_gzip(directory.path());
     assert!(artifact.exists(), "artifact {:?} does not exist", artifact);
 
     let mut decoder = GzDecoder::new(fs::File::open(&artifact).unwrap());
@@ -151,7 +166,7 @@ fn black_box_postgres_collection_uses_standard_pg_environment() {
     };
     let directory = tempdir().unwrap();
 
-    let output = cargo_bin_cmd!("pg-probe")
+    cargo_bin_cmd!("pg-probe")
         .arg("--data-directory")
         .arg(directory.path())
         .env("PGHOST", &cluster.host)
@@ -160,13 +175,9 @@ fn black_box_postgres_collection_uses_standard_pg_environment() {
         .env("PGUSER", &cluster.admin_role)
         .env("PGPASSWORD", &cluster.bootstrap_password)
         .assert()
-        .success()
-        .get_output()
-        .clone();
+        .success();
 
-    let artifact = directory
-        .path()
-        .join(String::from_utf8_lossy(&output.stdout).trim());
+    let artifact = sole_gzip(directory.path());
     let mut decoder = GzDecoder::new(fs::File::open(artifact).unwrap());
     let mut bytes = Vec::new();
     decoder.read_to_end(&mut bytes).unwrap();
@@ -194,7 +205,7 @@ fn black_box_postgres_collection_uses_psql_connection_flags() {
     };
     let directory = tempdir().unwrap();
 
-    let output = cargo_bin_cmd!("pg-probe")
+    cargo_bin_cmd!("pg-probe")
         .arg("-D")
         .arg(directory.path())
         .arg("-h")
@@ -207,13 +218,9 @@ fn black_box_postgres_collection_uses_psql_connection_flags() {
         .arg(&cluster.admin_database)
         .env("PGPASSWORD", &cluster.bootstrap_password)
         .assert()
-        .success()
-        .get_output()
-        .clone();
+        .success();
 
-    let artifact = directory
-        .path()
-        .join(String::from_utf8_lossy(&output.stdout).trim());
+    let artifact = sole_gzip(directory.path());
     let mut decoder = GzDecoder::new(fs::File::open(artifact).unwrap());
     let mut bytes = Vec::new();
     decoder.read_to_end(&mut bytes).unwrap();

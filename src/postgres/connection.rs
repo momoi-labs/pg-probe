@@ -142,14 +142,11 @@ impl ConnectedClient {
     ) -> Result<Self, AdapterError> {
         let started_at_utc = now_utc();
         let endpoint = endpoint_from_config(&config)?;
-        let client = config
-            .connect(rustls_connector())
-            .map_err(|_| AdapterError::ConnectionFailed);
-        let client = match client {
+        let client = match config.connect(rustls_connector()) {
             Ok(client) => client,
             Err(error) => {
-                let _ = timestamped_failure(outcomes, source, AdapterOutcomeStatus::QueryFailed);
-                return Err(error);
+                record_connection_failure(outcomes, source, &error);
+                return Err(AdapterError::ConnectionFailed);
             }
         };
         let observed_at_utc = now_utc();
@@ -426,6 +423,55 @@ pub struct BoundedRows {
 impl BoundedRows {
     pub fn into_rows(self) -> Vec<Vec<Vec<u8>>> {
         self.rows
+    }
+}
+
+/// Records a failed connection attempt with a stable error code and, when the
+/// driver exposes one, the OS error number. Raw driver messages are deliberately
+/// not surfaced here (they may contain connection input or credentials).
+fn record_connection_failure(
+    outcomes: &mut Vec<ComponentOutcome>,
+    source: &'static str,
+    error: &postgres::error::Error,
+) {
+    let (code, os_error) = classify_connection_error(error);
+    let mut outcome = ComponentOutcome::failed(source, CollectionStatus::IoError, code, os_error);
+    if let Some(detail) = safe_error_detail(error) {
+        outcome = outcome.with_detail(detail);
+    }
+    outcomes.push(outcome);
+}
+
+/// Returns a safe, human-readable reason for a connection failure. Only
+/// server-reported (DB) and OS-level (IO) messages are surfaced; other driver
+/// text (e.g. config parsing) may echo connection input and is withheld.
+fn safe_error_detail(error: &postgres::error::Error) -> Option<String> {
+    if let Some(db) = error.as_db_error() {
+        return Some(db.message().to_string());
+    }
+    std::error::Error::source(error)
+        .and_then(|source| source.downcast_ref::<std::io::Error>())
+        .map(|io| io.to_string())
+}
+
+/// Maps a connection error to a stable code plus the OS error number, so an
+/// operator can tell an authentication failure from a network failure without
+/// exposing raw driver text.
+fn classify_connection_error(error: &postgres::error::Error) -> (&'static str, Option<i32>) {
+    if let Some(sqlstate) = error.code() {
+        let code = if sqlstate.code().starts_with("28") {
+            "authentication_failed"
+        } else if sqlstate.code().starts_with("3D") {
+            "database_does_not_exist"
+        } else {
+            "connection_failed"
+        };
+        (code, None)
+    } else {
+        let os_error = std::error::Error::source(error)
+            .and_then(|source| source.downcast_ref::<std::io::Error>())
+            .and_then(std::io::Error::raw_os_error);
+        ("connection_failed", os_error)
     }
 }
 

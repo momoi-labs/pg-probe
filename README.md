@@ -76,11 +76,14 @@ environment variables: `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`,
 (`pg_service.conf`), passfiles (`.pgpass`), and multi-host connection strings
 are intentionally unsupported.
 
-Stdout prints only the final artifact path. The process never overwrites an
-existing artifact; collisions get numeric suffixes. On success the artifact is
-written atomically and the process exits `0`. If any required source fails, the
-artifact is still published as a partial snapshot and the process exits
-non-zero.
+All diagnostics go to stderr as structured log lines: the default keeps errors
+and warnings, `--quiet` keeps only errors, and `--verbose` adds per-collector
+progress. The published artifact path is reported as the `artifact` field of
+the final "complete"/"partial snapshot published" line. The process never
+overwrites an existing artifact; collisions get numeric suffixes. On success the
+artifact is written atomically and the process exits `0`. If any required
+source fails, the artifact is still published as a partial snapshot and the
+process exits non-zero.
 
 Inspect the artifact with standard tooling:
 

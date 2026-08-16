@@ -181,12 +181,13 @@ fn a_successful_run_publishes_a_valid_gzip_artifact() {
 }
 
 #[test]
-fn stdout_contains_only_the_artifact_path() {
+fn stdout_is_empty_and_artifact_path_is_logged() {
     let directory = tempdir().unwrap();
 
     let output = cargo_bin_cmd!("pg-probe")
         .arg("--data-directory")
         .arg(directory.path())
+        .arg("--verbose")
         .assert();
 
     let code = output.get_output().status.code().unwrap();
@@ -198,11 +199,11 @@ fn stdout_contains_only_the_artifact_path() {
     let stdout = String::from_utf8(output.get_output().stdout.clone()).unwrap();
     let stderr = String::from_utf8(output.get_output().stderr.clone()).unwrap();
 
-    let stdout_trimmed = stdout.trim();
-    assert!(!stdout_trimmed.is_empty(), "stdout is empty");
-    assert!(stdout_trimmed.ends_with(".sqlite.gz"));
-    assert!(!stdout.contains("pg-probe:"));
-    assert!(!stderr.contains(".sqlite.gz"));
+    assert!(stdout.is_empty(), "stdout should be empty, got: {stdout}");
+    assert!(
+        stderr.contains(".sqlite.gz"),
+        "the artifact path should appear on stderr, got stderr: {stderr}"
+    );
 }
 
 #[test]
@@ -339,6 +340,87 @@ fn quiet_suppresses_stderr_warnings() {
     assert!(
         stderr.is_empty(),
         "stderr should be empty with --quiet, got: {stderr}"
+    );
+}
+
+#[test]
+fn verbose_emits_colored_per_collector_progress_on_stderr() {
+    let directory = tempdir().unwrap();
+
+    let output = cargo_bin_cmd!("pg-probe")
+        .arg("--data-directory")
+        .arg(directory.path())
+        .arg("--verbose")
+        .assert();
+
+    let code = output.get_output().status.code().unwrap();
+    assert!(
+        code == 0 || code == 1,
+        "expected exit 0 (complete) or 1 (partial), got {code}"
+    );
+
+    let stdout = String::from_utf8(output.get_output().stdout.clone()).unwrap();
+    let stderr = String::from_utf8(output.get_output().stderr.clone()).unwrap();
+
+    assert!(stdout.is_empty(), "stdout should be empty, got: {stdout}");
+    assert!(
+        stderr.contains("linux.uname"),
+        "expected per-collector progress for linux.uname, got stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("collected"),
+        "expected a collected status line, got stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("\u{1b}[32m"),
+        "expected green ANSI status under --verbose even when piped, got stderr: {stderr}"
+    );
+}
+
+#[test]
+fn default_run_emits_no_per_collector_progress() {
+    let directory = tempdir().unwrap();
+
+    let output = cargo_bin_cmd!("pg-probe")
+        .arg("--data-directory")
+        .arg(directory.path())
+        .assert();
+
+    let stderr = String::from_utf8(output.get_output().stderr.clone()).unwrap();
+
+    assert!(
+        !stderr.contains("linux.uname"),
+        "default run must not emit per-collector progress, got stderr: {stderr}"
+    );
+    assert!(
+        !stderr.contains("\u{1b}[32m"),
+        "default run must not emit ANSI colors, got stderr: {stderr}"
+    );
+}
+
+#[test]
+fn verbose_reports_error_code_for_failed_collector() {
+    let directory = tempdir().unwrap();
+
+    let output = cargo_bin_cmd!("pg-probe")
+        .arg("--data-directory")
+        .arg(directory.path())
+        .arg("--domain")
+        .arg("postgresql")
+        .arg("--dbname")
+        .arg("host=127.0.0.1 port=1 user=postgres dbname=postgres connect_timeout=1")
+        .arg("--verbose")
+        .assert();
+
+    let stderr = String::from_utf8(output.get_output().stderr.clone()).unwrap();
+
+    assert!(
+        stderr.contains("postgres.connection"),
+        "expected a postgres.connection outcome, got stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("connection_failed"),
+        "expected the failure reason to be surfaced, got stderr: {stderr}"
     );
 }
 
