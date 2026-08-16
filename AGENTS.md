@@ -1,9 +1,27 @@
 ## Agent skills
 
+### Engineering principles
+
+Read `docs/PRINCIPLES.md` before making an implementation choice. It governs
+how to decide when more than one implementation is correct; non-invasiveness
+toward the observed server outranks collection speed.
+
+Read the ADRs in `docs/adr/` that touch the area being changed. They record
+deliberate deviations from the issues — do not "fix" something an ADR says was
+chosen on purpose. ADRs are append-only: never rewrite the body of an existing
+one. To reverse a decision, add a new ADR and set `status: superseded` and
+`superseded_by` in the frontmatter of the old one.
+
 ### Issue tracker
 
 Issues and PRDs for this repository live in GitHub Issues. See
 `docs/agents/issue-tracker.md`.
+
+An epic is not done when its implementation sub-issues close. Every epic
+carries a final conformance-review sub-issue, blocked by all the others, that
+checks the delivered code against the epic's own acceptance criteria across the
+whole epic rather than slice by slice. Drift accumulates between slices that
+are each internally correct.
 
 ### Triage labels
 
