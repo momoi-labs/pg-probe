@@ -1,9 +1,10 @@
 //! Safe PostgreSQL connection adapter backed by the Rust `postgres` client.
 //!
 //! The supported connection contract is intentionally small: PostgreSQL URLs
-//! and keyword strings supplied through `--database`, or the ordinary `PG*`
-//! environment variables when no explicit connection input is supplied. It
-//! does not resolve service files, passfiles, or multi-host configurations.
+//! and keyword strings supplied through `--dbname`, the individual `--host`,
+//! `--port`, and `--username` options, or the ordinary `PG*` environment
+//! variables. It does not resolve service files, passfiles, or multi-host
+//! configurations.
 
 use std::env;
 use std::fmt;
@@ -84,6 +85,19 @@ impl EndpointKind {
     }
 }
 
+/// Explicit PostgreSQL connection parameters supplied on the command line.
+///
+/// Every field is optional. Unset fields fall back to the `PG*` environment
+/// variables and then to the client defaults, and a conninfo string or URI in
+/// `dbname` is the highest-precedence source, matching psql.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConnectionParams {
+    pub host: Option<String>,
+    pub port: Option<u16>,
+    pub username: Option<String>,
+    pub dbname: Option<String>,
+}
+
 /// Owns a live Rust-native client and its sanitized endpoint identity.
 pub struct ConnectedClient {
     client: Mutex<PostgresClient>,
@@ -92,14 +106,14 @@ pub struct ConnectedClient {
 }
 
 impl ConnectedClient {
-    /// Opens a PostgreSQL connection from an explicit URL/keyword string, or
-    /// from the supported `PG*` environment variables when no input is given.
+    /// Opens a PostgreSQL connection from explicit connection parameters, or
+    /// from the supported `PG*` environment variables when parameters are unset.
     pub fn open(
-        dsn_input: Option<&str>,
+        params: &ConnectionParams,
         source: &'static str,
         outcomes: &mut Vec<ComponentOutcome>,
     ) -> Result<Self, AdapterError> {
-        let config = match connection_config(dsn_input) {
+        let config = match resolve_config(params) {
             Ok(config) => config,
             Err(error) => {
                 let _ =
@@ -265,43 +279,103 @@ impl ConnectedClient {
     }
 }
 
-fn connection_config(dsn_input: Option<&str>) -> Result<Config, AdapterError> {
-    match dsn_input {
-        Some(raw) if raw.is_empty() || raw.contains('\0') => Err(AdapterError::InvalidParameter),
-        Some(raw) => Config::from_str(raw).map_err(|_| AdapterError::InvalidParameter),
-        None => Ok(config_from_environment()),
+/// Resolves the effective client configuration from explicit command-line
+/// parameters, the `PG*` environment variables, and the client defaults.
+///
+/// Precedence, highest first, matches psql:
+///
+/// 1. a conninfo string or URI passed via `--dbname`;
+/// 2. the individual `--host`, `--port`, `--username`, and plain
+///    `--dbname` options;
+/// 3. the `PG*` environment variables;
+/// 4. the client defaults.
+fn resolve_config(params: &ConnectionParams) -> Result<Config, AdapterError> {
+    if let Some(dbname) = params.dbname.as_deref() {
+        if dbname.is_empty() || dbname.contains('\0') {
+            return Err(AdapterError::InvalidParameter);
+        }
     }
+
+    let mut config = match params.dbname.as_deref() {
+        Some(dbname) if is_conninfo(dbname) => {
+            Config::from_str(dbname).map_err(|_| AdapterError::InvalidParameter)?
+        }
+        _ => Config::new(),
+    };
+
+    if config.get_hosts().is_empty() {
+        if let Some(host) = params.host.as_deref().filter(|host| !host.is_empty()) {
+            config.host(host);
+        } else {
+            let host = env::var("PGHOST").unwrap_or_else(|_| "localhost".to_owned());
+            config.host(&host);
+        }
+    }
+
+    if config.get_ports().is_empty() {
+        if let Some(port) = params.port {
+            config.port(port);
+        } else if let Some(port) = env::var("PGPORT").ok().and_then(|value| parse_port(&value)) {
+            config.port(port);
+        }
+    }
+
+    if config.get_user().is_none() {
+        if let Some(user) = params.username.as_deref().filter(|user| !user.is_empty()) {
+            config.user(user);
+        } else if let Ok(user) = env::var("PGUSER") {
+            config.user(&user);
+        }
+    }
+
+    if config.get_dbname().is_none() {
+        match params.dbname.as_deref() {
+            Some(dbname) if !is_conninfo(dbname) => {
+                config.dbname(dbname);
+            }
+            _ => {
+                if let Ok(dbname) = env::var("PGDATABASE") {
+                    config.dbname(&dbname);
+                }
+            }
+        }
+    }
+
+    if config.get_password().is_none() {
+        if let Ok(password) = env::var("PGPASSWORD") {
+            config.password(password);
+        }
+    }
+
+    if config.get_options().is_none() {
+        if let Ok(options) = env::var("PGOPTIONS") {
+            config.options(&options);
+        }
+    }
+
+    if config.get_application_name().is_none() {
+        if let Ok(application_name) = env::var("PGAPPNAME") {
+            config.application_name(&application_name);
+        }
+    }
+
+    if config.get_connect_timeout().is_none() {
+        if let Some(seconds) = env::var("PGCONNECT_TIMEOUT")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|seconds| *seconds > 0)
+        {
+            config.connect_timeout(Duration::from_secs(seconds));
+        }
+    }
+
+    Ok(config)
 }
 
-fn config_from_environment() -> Config {
-    let mut config = Config::new();
-    config.host(&env::var("PGHOST").unwrap_or_else(|_| "localhost".to_owned()));
-    if let Some(port) = env::var("PGPORT").ok().and_then(|value| parse_port(&value)) {
-        config.port(port);
-    }
-    if let Ok(database) = env::var("PGDATABASE") {
-        config.dbname(&database);
-    }
-    if let Ok(user) = env::var("PGUSER") {
-        config.user(&user);
-    }
-    if let Ok(password) = env::var("PGPASSWORD") {
-        config.password(password);
-    }
-    if let Ok(options) = env::var("PGOPTIONS") {
-        config.options(&options);
-    }
-    if let Ok(application_name) = env::var("PGAPPNAME") {
-        config.application_name(&application_name);
-    }
-    if let Some(seconds) = env::var("PGCONNECT_TIMEOUT")
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok())
-        .filter(|seconds| *seconds > 0)
-    {
-        config.connect_timeout(Duration::from_secs(seconds));
-    }
-    config
+/// A value is a conninfo string when it is a PostgreSQL URI or a keyword/value
+/// string, rather than a bare database name.
+fn is_conninfo(value: &str) -> bool {
+    value.starts_with("postgresql://") || value.starts_with("postgres://") || value.contains('=')
 }
 
 fn rustls_connector() -> MakeTlsConnector {
@@ -439,14 +513,68 @@ impl fmt::Display for EndpointIdentity {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use postgres::config::Host;
 
     #[test]
     fn explicit_postgresql_url_builds_a_client_config() {
-        let config =
-            connection_config(Some("postgresql://probe:secret@localhost:6543/probe_main")).unwrap();
+        let config = resolve_config(&ConnectionParams {
+            dbname: Some("postgresql://probe:secret@localhost:6543/probe_main".to_owned()),
+            ..ConnectionParams::default()
+        })
+        .unwrap();
         assert_eq!(config.get_user(), Some("probe"));
         assert_eq!(config.get_dbname(), Some("probe_main"));
         assert_eq!(config.get_ports(), [6543]);
+    }
+
+    #[test]
+    fn keyword_string_overrides_individual_options() {
+        let config = resolve_config(&ConnectionParams {
+            host: Some("cli-host".to_owned()),
+            port: Some(1111),
+            username: Some("cli-user".to_owned()),
+            dbname: Some("host=dsn-host port=2222 user=dsn-user dbname=dsn-db".to_owned()),
+        })
+        .unwrap();
+        assert_eq!(config.get_ports(), [2222]);
+        assert_eq!(config.get_user(), Some("dsn-user"));
+        assert_eq!(config.get_dbname(), Some("dsn-db"));
+        match config.get_hosts().first() {
+            Some(Host::Tcp(host)) => assert_eq!(host.as_str(), "dsn-host"),
+            other => panic!("expected a TCP host from the conninfo string, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn individual_options_resolve_without_environment() {
+        let config = resolve_config(&ConnectionParams {
+            host: Some("db.example".to_owned()),
+            port: Some(6543),
+            username: Some("probe".to_owned()),
+            dbname: Some("app".to_owned()),
+        })
+        .unwrap();
+        assert_eq!(config.get_ports(), [6543]);
+        assert_eq!(config.get_user(), Some("probe"));
+        assert_eq!(config.get_dbname(), Some("app"));
+        match config.get_hosts().first() {
+            Some(Host::Tcp(host)) => assert_eq!(host.as_str(), "db.example"),
+            other => panic!("expected a TCP host, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn plain_dbname_defaults_host_to_localhost() {
+        let config = resolve_config(&ConnectionParams {
+            dbname: Some("app".to_owned()),
+            ..ConnectionParams::default()
+        })
+        .unwrap();
+        assert_eq!(config.get_dbname(), Some("app"));
+        match config.get_hosts().first() {
+            Some(Host::Tcp(host)) => assert_eq!(host.as_str(), "localhost"),
+            other => panic!("expected localhost, got {other:?}"),
+        }
     }
 
     #[test]

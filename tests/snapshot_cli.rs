@@ -41,10 +41,16 @@ fn help_flag_prints_usage() {
         .arg("--help")
         .assert()
         .success()
+        .stdout(predicate::str::contains("--host"))
+        .stdout(predicate::str::contains("--port"))
+        .stdout(predicate::str::contains("--username"))
+        .stdout(predicate::str::contains("--dbname"))
         .stdout(predicate::str::contains("--data-directory"))
         .stdout(predicate::str::contains("--domain"))
         .stdout(predicate::str::contains("--quiet"))
-        .stdout(predicate::str::contains("--verbose"));
+        .stdout(predicate::str::contains("--verbose"))
+        // `--database` was replaced by `--dbname` and must not appear.
+        .stdout(predicate::str::contains("--database").not());
 }
 
 #[test]
@@ -54,6 +60,66 @@ fn version_flag_prints_version() {
         .assert()
         .success()
         .stdout(predicate::str::contains("pg-probe"));
+}
+
+#[test]
+fn data_directory_short_flag_is_uppercase_d() {
+    let directory = tempdir().unwrap();
+
+    let output = cargo_bin_cmd!("pg-probe")
+        .arg("-D")
+        .arg(directory.path())
+        .args(["--domain", "linux"])
+        .assert();
+
+    let code = output.get_output().status.code().unwrap();
+    assert!(
+        code == 0 || code == 1,
+        "expected exit 0 (complete) or 1 (partial), got {code}"
+    );
+
+    assert!(sole_gzip(directory.path()).is_file());
+}
+
+#[test]
+fn lowercase_d_is_dbname_not_data_directory() {
+    let directory = tempdir().unwrap();
+    let missing = directory.path().join("definitely-not-a-data-directory");
+
+    // `-d` is the database name (psql semantics), not the data directory.
+    // With `--domain linux` PostgreSQL is never contacted, so a bogus
+    // database name is harmless and the run still succeeds. If `-d` were
+    // still the data directory, this run would exit 2.
+    let output = cargo_bin_cmd!("pg-probe")
+        .args(["--domain", "linux"])
+        .arg("-d")
+        .arg(&missing)
+        .arg("-D")
+        .arg(directory.path())
+        .assert();
+
+    let code = output.get_output().status.code().unwrap();
+    assert!(
+        code == 0 || code == 1,
+        "expected exit 0 (complete) or 1 (partial), got {code}"
+    );
+
+    assert!(sole_gzip(directory.path()).is_file());
+}
+
+#[test]
+fn database_long_option_is_removed() {
+    let directory = tempdir().unwrap();
+
+    cargo_bin_cmd!("pg-probe")
+        .arg("--database")
+        .arg("postgres")
+        .arg("-D")
+        .arg(directory.path())
+        .assert()
+        .failure()
+        .code(2)
+        .stderr(predicate::str::contains("unexpected argument"));
 }
 
 #[test]

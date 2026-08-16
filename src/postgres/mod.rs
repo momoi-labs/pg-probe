@@ -23,7 +23,8 @@ pub(crate) mod stats;
 mod target;
 
 pub use connection::{
-    AdapterError, AdapterOutcomeStatus, Client, ConnectedClient, EndpointIdentity, EndpointKind,
+    AdapterError, AdapterOutcomeStatus, Client, ConnectedClient, ConnectionParams,
+    EndpointIdentity, EndpointKind,
 };
 pub use databases::{DatabaseEntry, ExtensionVisitStatus};
 pub use extensions::ExtensionEntry;
@@ -56,9 +57,9 @@ pub struct TargetInventory {
 /// panic is recorded as a single failed outcome; the rest of the snapshot is
 /// unaffected.
 pub fn collect_target_inventory_isolated(
-    dsn_input: Option<&str>,
+    params: &ConnectionParams,
 ) -> (TargetInventory, Vec<ComponentOutcome>) {
-    match catch_unwind(AssertUnwindSafe(|| collect_target_inventory(dsn_input))) {
+    match catch_unwind(AssertUnwindSafe(|| collect_target_inventory(params))) {
         Ok((inventory, outcomes)) => (inventory, outcomes),
         Err(_) => (
             TargetInventory::default(),
@@ -77,7 +78,7 @@ pub fn collect_target_inventory_isolated(
 /// window the inventory was captured in.
 #[allow(clippy::type_complexity)]
 pub fn collect_target_inventory_with_timing(
-    dsn_input: Option<&str>,
+    params: &ConnectionParams,
 ) -> (
     TargetInventory,
     Vec<ComponentOutcome>,
@@ -85,19 +86,19 @@ pub fn collect_target_inventory_with_timing(
     Option<DateTime<Utc>>,
 ) {
     let started_at = now_utc();
-    let (inventory, outcomes) = collect_target_inventory_isolated(dsn_input);
+    let (inventory, outcomes) = collect_target_inventory_isolated(params);
     let finished_at = now_utc();
     (inventory, outcomes, Some(started_at), Some(finished_at))
 }
 
 pub fn collect_target_inventory(
-    dsn_input: Option<&str>,
+    params: &ConnectionParams,
 ) -> (TargetInventory, Vec<ComponentOutcome>) {
     let mut outcomes = Vec::new();
     let mut inventory = TargetInventory::default();
 
     let connection_source = "postgres.connection";
-    let client = match ConnectedClient::open(dsn_input, connection_source, &mut outcomes) {
+    let client = match ConnectedClient::open(params, connection_source, &mut outcomes) {
         Ok(client) => client,
         Err(_) => {
             return (inventory, outcomes);
@@ -232,7 +233,7 @@ mod tests {
 
     #[test]
     fn panic_isolation_records_a_single_failed_outcome() {
-        let (inventory, outcomes) = collect_target_inventory_isolated(None);
+        let (inventory, outcomes) = collect_target_inventory_isolated(&ConnectionParams::default());
         assert!(inventory.target.is_none());
         assert_eq!(outcomes.len(), 1);
         assert_eq!(outcomes[0].status, CollectionStatus::IoError);
@@ -240,9 +241,12 @@ mod tests {
 
     #[test]
     fn unreachable_target_records_a_failed_outcome_without_panicking() {
-        let (inventory, outcomes) = collect_target_inventory(Some(
-            "host=127.0.0.1 port=1 user=postgres dbname=postgres connect_timeout=1",
-        ));
+        let (inventory, outcomes) = collect_target_inventory(&ConnectionParams {
+            dbname: Some(
+                "host=127.0.0.1 port=1 user=postgres dbname=postgres connect_timeout=1".to_owned(),
+            ),
+            ..ConnectionParams::default()
+        });
         assert!(inventory.target.is_none());
         assert!(outcomes
             .iter()

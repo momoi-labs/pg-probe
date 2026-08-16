@@ -19,6 +19,7 @@ const EXIT_INTERRUPTED: u8 = 130;
 #[command(
     name = "pg-probe",
     version,
+    disable_help_flag = true,
     about = "Capture a portable PostgreSQL and Linux diagnostic snapshot",
     long_about = "Capture a portable PostgreSQL and Linux diagnostic snapshot.\n\n\
         Exit codes:\n  \
@@ -31,13 +32,26 @@ const EXIT_INTERRUPTED: u8 = 130;
         results in a .sqlite.partial file. A second Ctrl+C has no effect."
 )]
 struct Cli {
-    /// PostgreSQL database name to target (used by PostgreSQL collectors).
-    #[arg(long, value_name = "NAME")]
-    database: Option<String>,
+    /// PostgreSQL host or socket directory to connect to (psql `-h`).
+    #[arg(short = 'h', long, value_name = "HOST")]
+    host: Option<String>,
+
+    /// PostgreSQL port to connect to (psql `-p`).
+    #[arg(short = 'p', long, value_name = "PORT")]
+    port: Option<u16>,
+
+    /// PostgreSQL user name to connect as (psql `-U`).
+    #[arg(short = 'U', long, value_name = "USER")]
+    username: Option<String>,
+
+    /// Database name, a `postgresql://` URL, or a keyword/value string
+    /// (psql `-d`).
+    #[arg(short = 'd', long = "dbname", value_name = "NAME")]
+    dbname: Option<String>,
 
     /// Directory where the artifact is written. Must already exist and be
     /// writable. Defaults to the current directory.
-    #[arg(short, long, value_name = "DIR", default_value = ".")]
+    #[arg(short = 'D', long, value_name = "DIR", default_value = ".")]
     data_directory: PathBuf,
 
     /// Which collection domains to run: 'all', 'linux', or 'postgresql'.
@@ -51,6 +65,10 @@ struct Cli {
     /// Print detailed progress messages on stderr.
     #[arg(short, long)]
     verbose: bool,
+
+    /// Print help.
+    #[arg(short = '?', long = "help", action = clap::ArgAction::Help)]
+    help: Option<bool>,
 }
 
 fn main() -> ExitCode {
@@ -83,12 +101,14 @@ fn main() -> ExitCode {
         warn_about_existing_partials(&data_dir);
     }
 
-    let result = pg_probe::capture_with_cancellation(
-        &data_dir,
-        signal::flag(),
-        domains,
-        cli.database.as_deref(),
-    );
+    let params = pg_probe::ConnectionParams {
+        host: cli.host,
+        port: cli.port,
+        username: cli.username,
+        dbname: cli.dbname,
+    };
+
+    let result = pg_probe::capture_with_cancellation(&data_dir, signal::flag(), domains, &params);
 
     report_exit(result, cli.quiet, cli.verbose)
 }

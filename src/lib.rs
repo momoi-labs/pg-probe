@@ -12,6 +12,7 @@ use contract::{now_utc, SnapshotStatus};
 use uuid::Uuid;
 
 pub use artifact::ArtifactError;
+pub use postgres::ConnectionParams;
 
 /// Which collection domains to initialize during a capture run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,16 +41,21 @@ pub struct CaptureReport {
 }
 
 pub fn capture(data_dir: &Path) -> Result<CaptureReport, ArtifactError> {
-    capture_with_cancellation(data_dir, &CancelFlag::new(), DomainSelection::All, None)
+    capture_with_cancellation(
+        data_dir,
+        &CancelFlag::new(),
+        DomainSelection::All,
+        &ConnectionParams::default(),
+    )
 }
 
 /// Captures a snapshot into `data_dir`, honoring a cooperative cancellation
-/// flag, domain selection, and optional PostgreSQL database target.
+/// flag, domain selection, and optional PostgreSQL connection parameters.
 pub fn capture_with_cancellation(
     data_dir: &Path,
     cancel: &CancelFlag,
     domains: DomainSelection,
-    dbname: Option<&str>,
+    params: &ConnectionParams,
 ) -> Result<CaptureReport, ArtifactError> {
     let hostname = linux::collector_hostname();
     let sanitized = sanitize::sanitize_hostname(&hostname);
@@ -60,14 +66,14 @@ pub fn capture_with_cancellation(
     let writer =
         artifact::PartialWriter::create(data_dir, &base_name, snapshot_id, started_at_utc)?;
 
-    run_collection(writer, cancel, domains, dbname)
+    run_collection(writer, cancel, domains, params)
 }
 
 fn run_collection(
     mut writer: artifact::PartialWriter,
     cancel: &CancelFlag,
     domains: DomainSelection,
-    dbname: Option<&str>,
+    params: &ConnectionParams,
 ) -> Result<CaptureReport, ArtifactError> {
     let partial_path = writer.partial_path().to_path_buf();
 
@@ -176,7 +182,7 @@ fn run_collection(
     }
 
     if domains.postgresql_enabled() {
-        let (pg_inventory, pg_outcomes) = postgres::collect_target_inventory_isolated(dbname);
+        let (pg_inventory, pg_outcomes) = postgres::collect_target_inventory_isolated(params);
         if pg_outcomes
             .iter()
             .any(|o| o.status.makes_snapshot_partial())

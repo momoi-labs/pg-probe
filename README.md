@@ -48,18 +48,33 @@ inputs; see `.goreleaser.yaml` and `.github/workflows/release.yml`.
 ## Usage
 
 Capture a snapshot into a new compressed SQLite artifact in the current
-directory (or an existing `--data-directory`):
+directory (or an existing `-D`/`--data-directory`):
 
 ```bash
 pg-probe --domain all
 ```
 
-To select a PostgreSQL target, pass a `postgresql://` URL or a PostgreSQL
-keyword string with `--database`. Without `--database`, pg-probe reads the
-ordinary connection environment variables: `PGHOST`, `PGPORT`, `PGDATABASE`,
-`PGUSER`, `PGPASSWORD`, `PGOPTIONS`, `PGAPPNAME`, and `PGCONNECT_TIMEOUT`.
-Service files, passfiles, and multi-host resolution are intentionally outside
-this CLI contract.
+Connection options follow psql:
+
+| Option | Meaning |
+|---|---|
+| `-h`, `--host` | PostgreSQL host or socket directory |
+| `-p`, `--port` | PostgreSQL port |
+| `-U`, `--username` | PostgreSQL user |
+| `-d`, `--dbname` | database name, a `postgresql://` URL, or a keyword/value string |
+| `-D`, `--data-directory` | directory where the artifact is written |
+
+`-d` is the database name, matching psql; it no longer means the data
+directory (a breaking change accepted pre-1.0). Precedence, highest first,
+matches psql: a conninfo string or URI in `--dbname`, then the individual
+connection options, then the `PG*` environment variables, then the client
+defaults.
+
+Without any connection options, pg-probe reads the ordinary connection
+environment variables: `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`,
+`PGPASSWORD`, `PGOPTIONS`, `PGAPPNAME`, and `PGCONNECT_TIMEOUT`. Service files
+(`pg_service.conf`), passfiles (`.pgpass`), and multi-host connection strings
+are intentionally unsupported.
 
 Stdout prints only the final artifact path. The process never overwrites an
 existing artifact; collisions get numeric suffixes. On success the artifact is

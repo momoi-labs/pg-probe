@@ -2,7 +2,7 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 
 use pg_probe::artifact;
-use pg_probe::{capture, capture_with_cancellation, CancelFlag, DomainSelection};
+use pg_probe::{capture, capture_with_cancellation, CancelFlag, ConnectionParams, DomainSelection};
 use tempfile::tempdir;
 
 const SIGINT: i32 = libc::SIGINT;
@@ -39,8 +39,13 @@ fn cancellation_before_collection_preserves_partial_without_gzip() {
     let cancel = CancelFlag::new();
     cancel.request(SIGINT);
 
-    let report =
-        capture_with_cancellation(directory.path(), &cancel, DomainSelection::All, None).unwrap();
+    let report = capture_with_cancellation(
+        directory.path(),
+        &cancel,
+        DomainSelection::All,
+        &ConnectionParams::default(),
+    )
+    .unwrap();
 
     assert!(report.interrupted);
     assert!(
@@ -131,7 +136,7 @@ fn domain_postgresql_only_produces_artifact_without_linux_data() {
         directory.path(),
         &CancelFlag::new(),
         DomainSelection::PostgreSql,
-        None,
+        &ConnectionParams::default(),
     )
     .unwrap();
 
@@ -150,7 +155,7 @@ fn domain_linux_only_produces_artifact_with_linux_data() {
         directory.path(),
         &CancelFlag::new(),
         DomainSelection::Linux,
-        None,
+        &ConnectionParams::default(),
     )
     .unwrap();
 

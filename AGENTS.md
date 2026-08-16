@@ -44,9 +44,10 @@ live in `README.md` (`## Development`) and `.github/workflows/ci.yml`.
   --locked -- -D warnings`, `cargo test --all-targets --locked`, `cargo build
   --release --locked` (CI runs these, plus musl cross-builds and packaging-script
   tests).
-- Running the app: `cargo run -- --data-directory <dir>` (or the release
-  binary at `target/release/pg-probe`). Artifacts are never overwritten; collisions
-  receive numeric suffixes.
+- Running the app: `cargo run -- -D <dir>` (or `--data-directory <dir>`; the
+  release binary is at `target/release/pg-probe`). Connection options match
+  psql: `-h/--host`, `-p/--port`, `-U/--username`, `-d/--dbname`. Artifacts are
+  never overwritten; collisions receive numeric suffixes.
 - The collector reads Linux kernel/libc/`/proc` sources directly, so it only runs
   meaningfully on Linux (the cloud VM is Linux, so this is fine).
 - Inspect an artifact: `gunzip -k snapshot.sqlite.gz` then
