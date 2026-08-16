@@ -1,5 +1,6 @@
 pub mod artifact;
 pub mod cancel;
+pub mod collector;
 pub mod contract;
 pub mod linux;
 pub mod postgres;
@@ -10,6 +11,13 @@ use std::path::{Path, PathBuf};
 pub use cancel::CancelFlag;
 use contract::{now_utc, SnapshotStatus};
 use uuid::Uuid;
+
+use crate::collector::run_collector;
+use crate::linux::{
+    CgroupsCollector, ComputeCollector, IdentityCollector, KernelCollector, LimitsCollector,
+    MemoryCollector, PressureCollector, StorageCollector,
+};
+use crate::postgres::PostgresCollector;
 
 pub use artifact::ArtifactError;
 pub use postgres::ConnectionParams;
@@ -84,112 +92,50 @@ fn run_collection(
     let mut has_failures = false;
 
     if domains.linux_enabled() {
-        let (identity, id_outcomes) = linux::collect_identity_isolated();
-        if id_outcomes
-            .iter()
-            .any(|o| o.status.makes_snapshot_partial())
-        {
-            has_failures = true;
-        }
-        writer.write_identity(&identity, &id_outcomes)?;
+        has_failures |= run_collector(&IdentityCollector, &mut writer)?;
         if cancel.is_cancelled() {
             return Ok(interrupted_report(partial_path));
         }
 
-        let (compute, compute_outcomes) = linux::collect_compute_isolated();
-        if compute_outcomes
-            .iter()
-            .any(|o| o.status.makes_snapshot_partial())
-        {
-            has_failures = true;
-        }
-        writer.write_compute(&compute, &compute_outcomes)?;
+        has_failures |= run_collector(&ComputeCollector, &mut writer)?;
         if cancel.is_cancelled() {
             return Ok(interrupted_report(partial_path));
         }
 
-        let (memory, memory_outcomes) = linux::collect_memory_isolated();
-        if memory_outcomes
-            .iter()
-            .any(|o| o.status.makes_snapshot_partial())
-        {
-            has_failures = true;
-        }
-        writer.write_memory(&memory, &memory_outcomes)?;
+        has_failures |= run_collector(&MemoryCollector, &mut writer)?;
         if cancel.is_cancelled() {
             return Ok(interrupted_report(partial_path));
         }
 
-        let (pressure, pressure_outcomes) = linux::collect_pressure_isolated();
-        if pressure_outcomes
-            .iter()
-            .any(|o| o.status.makes_snapshot_partial())
-        {
-            has_failures = true;
-        }
-        writer.write_pressure(&pressure, &pressure_outcomes)?;
+        has_failures |= run_collector(&PressureCollector, &mut writer)?;
         if cancel.is_cancelled() {
             return Ok(interrupted_report(partial_path));
         }
 
-        let (storage, storage_outcomes) = linux::collect_storage_isolated();
-        if storage_outcomes
-            .iter()
-            .any(|o| o.status.makes_snapshot_partial())
-        {
-            has_failures = true;
-        }
-        writer.write_storage(&storage, &storage_outcomes)?;
+        has_failures |= run_collector(&StorageCollector, &mut writer)?;
         if cancel.is_cancelled() {
             return Ok(interrupted_report(partial_path));
         }
 
-        let (limits, limits_outcomes) = linux::collect_limits_isolated();
-        if limits_outcomes
-            .iter()
-            .any(|o| o.status.makes_snapshot_partial())
-        {
-            has_failures = true;
-        }
-        writer.write_limits(&limits, &limits_outcomes)?;
+        has_failures |= run_collector(&LimitsCollector, &mut writer)?;
         if cancel.is_cancelled() {
             return Ok(interrupted_report(partial_path));
         }
 
-        let (cgroups, cgroups_outcomes) = linux::collect_cgroups_isolated();
-        if cgroups_outcomes
-            .iter()
-            .any(|o| o.status.makes_snapshot_partial())
-        {
-            has_failures = true;
-        }
-        writer.write_cgroups(&cgroups, &cgroups_outcomes)?;
+        has_failures |= run_collector(&CgroupsCollector, &mut writer)?;
         if cancel.is_cancelled() {
             return Ok(interrupted_report(partial_path));
         }
 
-        let (kernel, kernel_outcomes) = linux::collect_kernel_isolated();
-        if kernel_outcomes
-            .iter()
-            .any(|o| o.status.makes_snapshot_partial())
-        {
-            has_failures = true;
-        }
-        writer.write_kernel(&kernel, &kernel_outcomes)?;
+        has_failures |= run_collector(&KernelCollector, &mut writer)?;
         if cancel.is_cancelled() {
             return Ok(interrupted_report(partial_path));
         }
     }
 
     if domains.postgresql_enabled() {
-        let (pg_inventory, pg_outcomes) = postgres::collect_target_inventory_isolated(params);
-        if pg_outcomes
-            .iter()
-            .any(|o| o.status.makes_snapshot_partial())
-        {
-            has_failures = true;
-        }
-        writer.write_postgres(&pg_inventory, &pg_outcomes)?;
+        let collector = PostgresCollector::new(params.clone());
+        has_failures |= run_collector(&collector, &mut writer)?;
         if cancel.is_cancelled() {
             return Ok(interrupted_report(partial_path));
         }

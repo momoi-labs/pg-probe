@@ -36,9 +36,7 @@ pub use stats::{
 };
 pub use target::Target;
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
-
-use chrono::{DateTime, Utc};
+use crate::collector::{Collector, Sink};
 
 use crate::contract::{now_utc, CollectionStatus, ComponentOutcome};
 
@@ -53,47 +51,39 @@ pub struct TargetInventory {
     pub stats: PostgresStats,
 }
 
-/// The panic-safe entry point used from the snapshot spine. A collector
-/// panic is recorded as a single failed outcome; the rest of the snapshot is
-/// unaffected.
-pub fn collect_target_inventory_isolated(
-    params: &ConnectionParams,
-) -> (TargetInventory, Vec<ComponentOutcome>) {
-    match catch_unwind(AssertUnwindSafe(|| collect_target_inventory(params))) {
-        Ok((inventory, outcomes)) => (inventory, outcomes),
-        Err(_) => (
-            TargetInventory::default(),
-            vec![ComponentOutcome::failed(
-                "postgres",
-                CollectionStatus::IoError,
-                "collector_panicked",
-                None,
-            )],
-        ),
+/// Collector for the PostgreSQL target, inventory, and statistics.
+pub struct PostgresCollector {
+    params: ConnectionParams,
+}
+
+impl PostgresCollector {
+    pub fn new(params: ConnectionParams) -> Self {
+        Self { params }
     }
 }
 
-/// The timed variant used by the snapshot spine. Returns the same data plus
-/// explicit start/finish timestamps so the artifact can record the bounded
-/// window the inventory was captured in.
-#[allow(clippy::type_complexity)]
-pub fn collect_target_inventory_with_timing(
-    params: &ConnectionParams,
-) -> (
-    TargetInventory,
-    Vec<ComponentOutcome>,
-    Option<DateTime<Utc>>,
-    Option<DateTime<Utc>>,
-) {
-    let started_at = now_utc();
-    let (inventory, outcomes) = collect_target_inventory_isolated(params);
-    let finished_at = now_utc();
-    (inventory, outcomes, Some(started_at), Some(finished_at))
+impl Collector for PostgresCollector {
+    type Output = TargetInventory;
+
+    fn source(&self) -> &'static str {
+        "postgres"
+    }
+
+    fn collect(&self) -> (Self::Output, Vec<ComponentOutcome>) {
+        collect_target_inventory(&self.params)
+    }
+
+    fn write<S: Sink>(
+        &self,
+        sink: &mut S,
+        output: &Self::Output,
+        outcomes: &[ComponentOutcome],
+    ) -> Result<(), S::Error> {
+        sink.write_postgres(output, outcomes)
+    }
 }
 
-pub fn collect_target_inventory(
-    params: &ConnectionParams,
-) -> (TargetInventory, Vec<ComponentOutcome>) {
+fn collect_target_inventory(params: &ConnectionParams) -> (TargetInventory, Vec<ComponentOutcome>) {
     let mut outcomes = Vec::new();
     let mut inventory = TargetInventory::default();
 
@@ -230,14 +220,6 @@ pub fn collect_target_inventory(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn panic_isolation_records_a_single_failed_outcome() {
-        let (inventory, outcomes) = collect_target_inventory_isolated(&ConnectionParams::default());
-        assert!(inventory.target.is_none());
-        assert_eq!(outcomes.len(), 1);
-        assert_eq!(outcomes[0].status, CollectionStatus::IoError);
-    }
 
     #[test]
     fn unreachable_target_records_a_failed_outcome_without_panicking() {

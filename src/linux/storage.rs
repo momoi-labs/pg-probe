@@ -1,8 +1,8 @@
 use std::fs;
 use std::io;
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 
+use crate::collector::{Collector, Sink};
 use crate::contract::{now_utc, CollectionStatus, ComponentOutcome};
 use crate::linux::identity::read_bounded;
 
@@ -68,18 +68,27 @@ pub struct StorageObservations {
     pub block_io: Vec<BlockIoEntry>,
 }
 
-pub fn collect_storage_isolated() -> (StorageObservations, Vec<ComponentOutcome>) {
-    catch_unwind(AssertUnwindSafe(collect_storage)).unwrap_or_else(|_| {
-        (
-            StorageObservations::default(),
-            vec![ComponentOutcome::failed(
-                "linux.storage",
-                CollectionStatus::IoError,
-                "collector_panicked",
-                None,
-            )],
-        )
-    })
+pub struct StorageCollector;
+
+impl Collector for StorageCollector {
+    type Output = StorageObservations;
+
+    fn source(&self) -> &'static str {
+        "linux.storage"
+    }
+
+    fn collect(&self) -> (Self::Output, Vec<ComponentOutcome>) {
+        collect_storage()
+    }
+
+    fn write<S: Sink>(
+        &self,
+        sink: &mut S,
+        output: &Self::Output,
+        outcomes: &[ComponentOutcome],
+    ) -> Result<(), S::Error> {
+        sink.write_storage(output, outcomes)
+    }
 }
 
 fn collect_storage() -> (StorageObservations, Vec<ComponentOutcome>) {

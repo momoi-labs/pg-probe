@@ -1,8 +1,8 @@
 use std::fs;
 use std::io;
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 
+use crate::collector::{Collector, Sink};
 use crate::contract::{now_utc, CollectionStatus, ComponentOutcome};
 use crate::linux::identity::read_bounded;
 
@@ -83,18 +83,27 @@ pub struct ComputeObservations {
     pub load_averages: Option<LoadAverages>,
 }
 
-pub fn collect_compute_isolated() -> (ComputeObservations, Vec<ComponentOutcome>) {
-    catch_unwind(AssertUnwindSafe(collect_compute)).unwrap_or_else(|_| {
-        (
-            ComputeObservations::default(),
-            vec![ComponentOutcome::failed(
-                "linux.compute",
-                CollectionStatus::IoError,
-                "collector_panicked",
-                None,
-            )],
-        )
-    })
+pub struct ComputeCollector;
+
+impl Collector for ComputeCollector {
+    type Output = ComputeObservations;
+
+    fn source(&self) -> &'static str {
+        "linux.compute"
+    }
+
+    fn collect(&self) -> (Self::Output, Vec<ComponentOutcome>) {
+        collect_compute()
+    }
+
+    fn write<S: Sink>(
+        &self,
+        sink: &mut S,
+        output: &Self::Output,
+        outcomes: &[ComponentOutcome],
+    ) -> Result<(), S::Error> {
+        sink.write_compute(output, outcomes)
+    }
 }
 
 fn collect_compute() -> (ComputeObservations, Vec<ComponentOutcome>) {

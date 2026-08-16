@@ -1,7 +1,7 @@
 use std::io;
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 
+use crate::collector::{Collector, Sink};
 use crate::contract::{now_utc, CollectionStatus, ComponentOutcome};
 use crate::linux::identity::read_bounded;
 
@@ -105,18 +105,27 @@ pub struct CgroupObservations {
     pub io: Vec<CgroupIoEntry>,
 }
 
-pub fn collect_cgroups_isolated() -> (CgroupObservations, Vec<ComponentOutcome>) {
-    catch_unwind(AssertUnwindSafe(collect_cgroups)).unwrap_or_else(|_| {
-        (
-            CgroupObservations::default(),
-            vec![ComponentOutcome::failed(
-                "linux.cgroups",
-                CollectionStatus::IoError,
-                "collector_panicked",
-                None,
-            )],
-        )
-    })
+pub struct CgroupsCollector;
+
+impl Collector for CgroupsCollector {
+    type Output = CgroupObservations;
+
+    fn source(&self) -> &'static str {
+        "linux.cgroups"
+    }
+
+    fn collect(&self) -> (Self::Output, Vec<ComponentOutcome>) {
+        collect_cgroups()
+    }
+
+    fn write<S: Sink>(
+        &self,
+        sink: &mut S,
+        output: &Self::Output,
+        outcomes: &[ComponentOutcome],
+    ) -> Result<(), S::Error> {
+        sink.write_cgroups(output, outcomes)
+    }
 }
 
 fn collect_cgroups() -> (CgroupObservations, Vec<ComponentOutcome>) {

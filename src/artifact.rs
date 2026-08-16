@@ -142,23 +142,6 @@ pub struct PartialWriter {
 }
 
 impl PartialWriter {
-    pub fn create(
-        data_dir: &Path,
-        base_name: &str,
-        snapshot_id: Uuid,
-        started_at_utc: DateTime<Utc>,
-    ) -> Result<Self, ArtifactError> {
-        if !data_dir.is_dir() {
-            return Err(ArtifactError::DataDirectoryMissing);
-        }
-        let (partial_path, final_path) = find_unique_paths(data_dir, base_name)?;
-        let writer = Self::try_create(&partial_path, &final_path, snapshot_id, started_at_utc);
-        if writer.is_err() {
-            let _ = fs::remove_file(&partial_path);
-        }
-        writer
-    }
-
     fn try_create(
         partial_path: &Path,
         final_path: &Path,
@@ -222,8 +205,12 @@ impl PartialWriter {
         tx.commit().map_err(ArtifactError::Sqlite)?;
         self.fsync_partial()
     }
+}
 
-    pub fn write_identity(
+impl crate::collector::Sink for PartialWriter {
+    type Error = ArtifactError;
+
+    fn write_identity(
         &mut self,
         identity: &LinuxIdentity,
         outcomes: &[ComponentOutcome],
@@ -238,7 +225,7 @@ impl PartialWriter {
         self.fsync_partial()
     }
 
-    pub fn write_compute(
+    fn write_compute(
         &mut self,
         compute: &ComputeObservations,
         outcomes: &[ComponentOutcome],
@@ -258,7 +245,7 @@ impl PartialWriter {
         self.fsync_partial()
     }
 
-    pub fn write_memory(
+    fn write_memory(
         &mut self,
         memory: &MemoryObservations,
         outcomes: &[ComponentOutcome],
@@ -275,7 +262,7 @@ impl PartialWriter {
         self.fsync_partial()
     }
 
-    pub fn write_pressure(
+    fn write_pressure(
         &mut self,
         pressure: &PressureObservations,
         outcomes: &[ComponentOutcome],
@@ -291,7 +278,7 @@ impl PartialWriter {
         self.fsync_partial()
     }
 
-    pub fn write_storage(
+    fn write_storage(
         &mut self,
         storage: &StorageObservations,
         outcomes: &[ComponentOutcome],
@@ -309,7 +296,7 @@ impl PartialWriter {
         self.fsync_partial()
     }
 
-    pub fn write_limits(
+    fn write_limits(
         &mut self,
         limits: &LimitsObservations,
         outcomes: &[ComponentOutcome],
@@ -325,7 +312,7 @@ impl PartialWriter {
         self.fsync_partial()
     }
 
-    pub fn write_cgroups(
+    fn write_cgroups(
         &mut self,
         cgroups: &CgroupObservations,
         outcomes: &[ComponentOutcome],
@@ -343,7 +330,7 @@ impl PartialWriter {
         self.fsync_partial()
     }
 
-    pub fn write_kernel(
+    fn write_kernel(
         &mut self,
         kernel: &KernelObservations,
         outcomes: &[ComponentOutcome],
@@ -361,7 +348,7 @@ impl PartialWriter {
         self.fsync_partial()
     }
 
-    pub fn write_postgres(
+    fn write_postgres(
         &mut self,
         inventory: &TargetInventory,
         outcomes: &[ComponentOutcome],
@@ -390,6 +377,25 @@ impl PartialWriter {
         write_postgres_slot_aggregates(&tx, &self.snapshot_id, inventory, &collected_at)?;
         tx.commit().map_err(ArtifactError::Sqlite)?;
         self.fsync_partial()
+    }
+}
+
+impl PartialWriter {
+    pub fn create(
+        data_dir: &Path,
+        base_name: &str,
+        snapshot_id: Uuid,
+        started_at_utc: DateTime<Utc>,
+    ) -> Result<Self, ArtifactError> {
+        if !data_dir.is_dir() {
+            return Err(ArtifactError::DataDirectoryMissing);
+        }
+        let (partial_path, final_path) = find_unique_paths(data_dir, base_name)?;
+        let writer = Self::try_create(&partial_path, &final_path, snapshot_id, started_at_utc);
+        if writer.is_err() {
+            let _ = fs::remove_file(&partial_path);
+        }
+        writer
     }
 
     pub fn finalize(

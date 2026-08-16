@@ -1,6 +1,6 @@
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 
+use crate::collector::{Collector, Sink};
 use crate::contract::{now_utc, CollectionStatus, ComponentOutcome};
 use crate::linux::identity::read_bounded;
 
@@ -55,18 +55,27 @@ pub struct KernelObservations {
     pub thp: Option<ThpEntry>,
 }
 
-pub fn collect_kernel_isolated() -> (KernelObservations, Vec<ComponentOutcome>) {
-    catch_unwind(AssertUnwindSafe(collect_kernel)).unwrap_or_else(|_| {
-        (
-            KernelObservations::default(),
-            vec![ComponentOutcome::failed(
-                "linux.kernel",
-                CollectionStatus::IoError,
-                "collector_panicked",
-                None,
-            )],
-        )
-    })
+pub struct KernelCollector;
+
+impl Collector for KernelCollector {
+    type Output = KernelObservations;
+
+    fn source(&self) -> &'static str {
+        "linux.kernel"
+    }
+
+    fn collect(&self) -> (Self::Output, Vec<ComponentOutcome>) {
+        collect_kernel()
+    }
+
+    fn write<S: Sink>(
+        &self,
+        sink: &mut S,
+        output: &Self::Output,
+        outcomes: &[ComponentOutcome],
+    ) -> Result<(), S::Error> {
+        sink.write_kernel(output, outcomes)
+    }
 }
 
 fn collect_kernel() -> (KernelObservations, Vec<ComponentOutcome>) {

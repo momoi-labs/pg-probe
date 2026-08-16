@@ -1,7 +1,7 @@
 use std::io;
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 
+use crate::collector::{Collector, Sink};
 use crate::contract::{now_utc, CollectionStatus, ComponentOutcome};
 use crate::linux::identity::read_bounded;
 
@@ -96,18 +96,27 @@ const VMSTAT_EXACT_KEYS: &[&str] = &[
 
 const VMSTAT_PREFIX_KEYS: &[&str] = &["allocstall_", "pgscan_", "pgsteal_", "compact_"];
 
-pub fn collect_memory_isolated() -> (MemoryObservations, Vec<ComponentOutcome>) {
-    catch_unwind(AssertUnwindSafe(collect_memory)).unwrap_or_else(|_| {
-        (
-            MemoryObservations::default(),
-            vec![ComponentOutcome::failed(
-                "linux.memory",
-                CollectionStatus::IoError,
-                "collector_panicked",
-                None,
-            )],
-        )
-    })
+pub struct MemoryCollector;
+
+impl Collector for MemoryCollector {
+    type Output = MemoryObservations;
+
+    fn source(&self) -> &'static str {
+        "linux.memory"
+    }
+
+    fn collect(&self) -> (Self::Output, Vec<ComponentOutcome>) {
+        collect_memory()
+    }
+
+    fn write<S: Sink>(
+        &self,
+        sink: &mut S,
+        output: &Self::Output,
+        outcomes: &[ComponentOutcome],
+    ) -> Result<(), S::Error> {
+        sink.write_memory(output, outcomes)
+    }
 }
 
 fn collect_memory() -> (MemoryObservations, Vec<ComponentOutcome>) {

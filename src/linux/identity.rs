@@ -1,8 +1,8 @@
 use std::fs;
 use std::io;
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 
+use crate::collector::{Collector, Sink};
 use crate::contract::{
     now_utc, ClockParameters, CollectionStatus, ComponentOutcome, DistributionIdentity,
     KernelIdentity, LinuxIdentity,
@@ -31,18 +31,27 @@ pub fn collector_hostname() -> String {
     String::from_utf8(bytes).unwrap_or_else(|_| String::from("unknown"))
 }
 
-pub fn collect_identity_isolated() -> (LinuxIdentity, Vec<ComponentOutcome>) {
-    catch_unwind(AssertUnwindSafe(collect_identity)).unwrap_or_else(|_| {
-        (
-            LinuxIdentity::default(),
-            vec![ComponentOutcome::failed(
-                "linux.identity",
-                CollectionStatus::IoError,
-                "collector_panicked",
-                None,
-            )],
-        )
-    })
+pub struct IdentityCollector;
+
+impl Collector for IdentityCollector {
+    type Output = LinuxIdentity;
+
+    fn source(&self) -> &'static str {
+        "linux.identity"
+    }
+
+    fn collect(&self) -> (Self::Output, Vec<ComponentOutcome>) {
+        collect_identity()
+    }
+
+    fn write<S: Sink>(
+        &self,
+        sink: &mut S,
+        output: &Self::Output,
+        outcomes: &[ComponentOutcome],
+    ) -> Result<(), S::Error> {
+        sink.write_identity(output, outcomes)
+    }
 }
 
 fn collect_identity() -> (LinuxIdentity, Vec<ComponentOutcome>) {

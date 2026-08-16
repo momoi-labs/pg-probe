@@ -1,5 +1,4 @@
-use std::panic::{catch_unwind, AssertUnwindSafe};
-
+use crate::collector::{Collector, Sink};
 use crate::contract::{now_utc, CollectionStatus, ComponentOutcome};
 
 const RLIMIT_SOURCE: &str = "proc.rlimit";
@@ -75,18 +74,27 @@ pub struct LimitsObservations {
     pub limits: Vec<ResourceLimitEntry>,
 }
 
-pub fn collect_limits_isolated() -> (LimitsObservations, Vec<ComponentOutcome>) {
-    catch_unwind(AssertUnwindSafe(collect_limits)).unwrap_or_else(|_| {
-        (
-            LimitsObservations::default(),
-            vec![ComponentOutcome::failed(
-                "linux.limits",
-                CollectionStatus::IoError,
-                "collector_panicked",
-                None,
-            )],
-        )
-    })
+pub struct LimitsCollector;
+
+impl Collector for LimitsCollector {
+    type Output = LimitsObservations;
+
+    fn source(&self) -> &'static str {
+        "linux.limits"
+    }
+
+    fn collect(&self) -> (Self::Output, Vec<ComponentOutcome>) {
+        collect_limits()
+    }
+
+    fn write<S: Sink>(
+        &self,
+        sink: &mut S,
+        output: &Self::Output,
+        outcomes: &[ComponentOutcome],
+    ) -> Result<(), S::Error> {
+        sink.write_limits(output, outcomes)
+    }
 }
 
 fn collect_limits() -> (LimitsObservations, Vec<ComponentOutcome>) {

@@ -43,6 +43,10 @@ the same target when an observation is database-local.
 A component responsible for one symbolic source of observations. Collectors are
 independent: one failing never prevents the others from producing results.
 
+**Sink**:
+The transactional destination that receives each collector's typed observations
+and structured outcomes, committing them atomically to the diagnostic artifact.
+
 **Observation**:
 A single allowlisted measurement or fact about the collector host or the
 PostgreSQL target, carrying an explicit unit and the time it was taken.

@@ -1,7 +1,7 @@
 use std::io;
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::Path;
 
+use crate::collector::{Collector, Sink};
 use crate::contract::{now_utc, CollectionStatus, ComponentOutcome};
 use crate::linux::identity::read_bounded;
 
@@ -56,18 +56,27 @@ pub struct PressureObservations {
     pub psi: Vec<PsiEntry>,
 }
 
-pub fn collect_pressure_isolated() -> (PressureObservations, Vec<ComponentOutcome>) {
-    catch_unwind(AssertUnwindSafe(collect_pressure)).unwrap_or_else(|_| {
-        (
-            PressureObservations::default(),
-            vec![ComponentOutcome::failed(
-                "linux.pressure",
-                CollectionStatus::IoError,
-                "collector_panicked",
-                None,
-            )],
-        )
-    })
+pub struct PressureCollector;
+
+impl Collector for PressureCollector {
+    type Output = PressureObservations;
+
+    fn source(&self) -> &'static str {
+        "linux.pressure"
+    }
+
+    fn collect(&self) -> (Self::Output, Vec<ComponentOutcome>) {
+        collect_pressure()
+    }
+
+    fn write<S: Sink>(
+        &self,
+        sink: &mut S,
+        output: &Self::Output,
+        outcomes: &[ComponentOutcome],
+    ) -> Result<(), S::Error> {
+        sink.write_pressure(output, outcomes)
+    }
 }
 
 fn collect_pressure() -> (PressureObservations, Vec<ComponentOutcome>) {
