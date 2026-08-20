@@ -92,3 +92,17 @@ unsuccessful.
 The on-disk working file of a snapshot that was never finalized, left behind by
 an interrupted or failed run so that committed evidence stays recoverable.
 _Avoid_: partial snapshot, temp file
+
+### Review
+
+**Snapshot listing**:
+
+The set of diagnostic artifacts in a data directory. Each artifact is a
+`.sqlite.gz` file named with a sanitized hostname and UTC timestamp. The
+listing is the entry point for reviewing collected snapshots.
+
+**Review**:
+
+The act of inspecting a diagnostic artifact through the `pg-probe analyze`
+subcommand. A review starts at the snapshot listing, selects one artifact, and
+drills into its tables and collection outcomes.

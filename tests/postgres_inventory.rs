@@ -38,6 +38,7 @@ fn black_box_postgres_collection_publishes_target_settings_and_extensions() {
 
     let dsn = cluster.admin_connection_string();
     let assert = cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("--data-directory")
         .arg(directory.path())
         .arg("--dbname")
@@ -167,6 +168,7 @@ fn black_box_postgres_collection_uses_standard_pg_environment() {
     let directory = tempdir().unwrap();
 
     cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("--data-directory")
         .arg(directory.path())
         .env("PGHOST", &cluster.host)
@@ -206,6 +208,7 @@ fn black_box_postgres_collection_uses_psql_connection_flags() {
     let directory = tempdir().unwrap();
 
     cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("-D")
         .arg(directory.path())
         .arg("-h")
@@ -244,6 +247,7 @@ fn black_box_postgres_collection_uses_psql_connection_flags() {
 fn black_box_postgres_collection_recovers_from_connection_failure() {
     let directory = tempdir().unwrap();
     cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("--data-directory")
         .arg(directory.path())
         .arg("--dbname")
@@ -261,6 +265,7 @@ fn black_box_postgres_collection_handles_permission_denied_collector() {
     let directory = tempdir().unwrap();
     let dsn = cluster.reader_connection_string();
     cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("--data-directory")
         .arg(directory.path())
         .arg("--dbname")
@@ -278,6 +283,7 @@ fn black_box_postgres_collection_handles_unavailable_database() {
     let directory = tempdir().unwrap();
     let dsn = cluster.unavailable_connection_string();
     cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("--data-directory")
         .arg(directory.path())
         .arg("--dbname")
@@ -291,6 +297,7 @@ fn black_box_postgres_collection_does_not_echo_dsn_password() {
     let directory = tempdir().unwrap();
     let dsn = "host=127.0.0.1 port=1 user=postgres password=probe-secret-secret dbname=postgres connect_timeout=1";
     cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("--data-directory")
         .arg(directory.path())
         .arg("--dbname")

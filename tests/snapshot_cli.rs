@@ -41,16 +41,8 @@ fn help_flag_prints_usage() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("--host"))
-        .stdout(predicate::str::contains("--port"))
-        .stdout(predicate::str::contains("--username"))
-        .stdout(predicate::str::contains("--dbname"))
-        .stdout(predicate::str::contains("--data-directory"))
-        .stdout(predicate::str::contains("--domain"))
-        .stdout(predicate::str::contains("--quiet"))
-        .stdout(predicate::str::contains("--verbose"))
-        // `--database` was replaced by `--dbname` and must not appear.
-        .stdout(predicate::str::contains("--database").not());
+        .stdout(predicate::str::contains("capture"))
+        .stdout(predicate::str::contains("analyze"));
 }
 
 #[test]
@@ -67,6 +59,7 @@ fn data_directory_short_flag_is_uppercase_d() {
     let directory = tempdir().unwrap();
 
     let output = cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("-D")
         .arg(directory.path())
         .args(["--domain", "linux"])
@@ -91,6 +84,7 @@ fn lowercase_d_is_dbname_not_data_directory() {
     // database name is harmless and the run still succeeds. If `-d` were
     // still the data directory, this run would exit 2.
     let output = cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .args(["--domain", "linux"])
         .arg("-d")
         .arg(&missing)
@@ -112,6 +106,7 @@ fn database_long_option_is_removed() {
     let directory = tempdir().unwrap();
 
     cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("--database")
         .arg("postgres")
         .arg("-D")
@@ -128,6 +123,7 @@ fn a_successful_run_publishes_a_valid_gzip_artifact() {
     let canary = "postgres://private-user:private-password@example.test/database";
 
     let output = cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("--data-directory")
         .arg(directory.path())
         .env("PGPASSWORD", canary)
@@ -174,6 +170,13 @@ fn a_successful_run_publishes_a_valid_gzip_artifact() {
             .unwrap(),
         1
     );
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM refinery_schema_history", [], |row| {
+            row.get::<_, i64>(0)
+        })
+        .unwrap(),
+        1
+    );
     let hostname: String = conn
         .query_row("SELECT hostname FROM linux_identity", [], |row| row.get(0))
         .unwrap();
@@ -185,6 +188,7 @@ fn stdout_is_empty_and_artifact_path_is_logged() {
     let directory = tempdir().unwrap();
 
     let output = cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("--data-directory")
         .arg(directory.path())
         .arg("--verbose")
@@ -212,6 +216,7 @@ fn missing_data_directory_exits_2() {
     let missing = directory.path().join("does-not-exist");
 
     cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("--data-directory")
         .arg(&missing)
         .assert()
@@ -225,6 +230,7 @@ fn invalid_domain_exits_2() {
     let directory = tempdir().unwrap();
 
     cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("--data-directory")
         .arg(directory.path())
         .args(["--domain", "bogus"])
@@ -239,6 +245,7 @@ fn domain_linux_only_does_not_initialize_postgresql() {
     let directory = tempdir().unwrap();
 
     let output = cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("--data-directory")
         .arg(directory.path())
         .args(["--domain", "linux"])
@@ -278,6 +285,7 @@ fn domain_postgresql_only_does_not_initialize_linux() {
     let directory = tempdir().unwrap();
 
     let output = cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("--data-directory")
         .arg(directory.path())
         .args(["--domain", "postgresql"])
@@ -325,6 +333,7 @@ fn quiet_suppresses_stderr_warnings() {
     let directory = tempdir().unwrap();
 
     let output = cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("--data-directory")
         .arg(directory.path())
         .arg("--quiet")
@@ -348,6 +357,7 @@ fn verbose_emits_colored_per_collector_progress_on_stderr() {
     let directory = tempdir().unwrap();
 
     let output = cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("--data-directory")
         .arg(directory.path())
         .arg("--verbose")
@@ -382,6 +392,7 @@ fn default_run_emits_no_per_collector_progress() {
     let directory = tempdir().unwrap();
 
     let output = cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("--data-directory")
         .arg(directory.path())
         .assert();
@@ -403,6 +414,7 @@ fn verbose_reports_error_code_for_failed_collector() {
     let directory = tempdir().unwrap();
 
     let output = cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("--data-directory")
         .arg(directory.path())
         .arg("--domain")
@@ -433,6 +445,7 @@ fn existing_partial_files_are_warned_about_and_left_untouched() {
     fs::write(&partial, b"pre-existing partial data").unwrap();
 
     let output = cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("--data-directory")
         .arg(directory.path())
         .assert();
@@ -454,6 +467,7 @@ fn filename_uses_sanitized_hostname_and_utc_timestamp() {
     let directory = tempdir().unwrap();
 
     let output = cargo_bin_cmd!("pg-probe")
+        .arg("capture")
         .arg("--data-directory")
         .arg(directory.path())
         .assert();

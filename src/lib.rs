@@ -4,6 +4,7 @@ pub mod collector;
 pub mod contract;
 pub mod linux;
 pub mod postgres;
+pub mod review;
 pub mod sanitize;
 
 use std::path::{Path, PathBuf};

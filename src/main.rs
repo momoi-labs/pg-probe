@@ -3,7 +3,7 @@ mod signal;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use pg_probe::artifact::{self, ArtifactError};
 use pg_probe::contract::SnapshotStatus;
 use pg_probe::{CaptureReport, DomainSelection};
@@ -20,6 +20,8 @@ const EXIT_INTERRUPTED: u8 = 130;
     name = "pg-probe",
     version,
     disable_help_flag = true,
+    subcommand_required = true,
+    arg_required_else_help = true,
     about = "Capture a portable PostgreSQL and Linux diagnostic snapshot",
     long_about = "Capture a portable PostgreSQL and Linux diagnostic snapshot.\n\n\
         Exit codes:\n  \
@@ -32,6 +34,24 @@ const EXIT_INTERRUPTED: u8 = 130;
         results in a .sqlite.partial file. A second Ctrl+C has no effect."
 )]
 struct Cli {
+    #[command(subcommand)]
+    command: Command,
+
+    /// Print help.
+    #[arg(long = "help", action = clap::ArgAction::Help)]
+    _help: Option<bool>,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Capture a portable PostgreSQL and Linux diagnostic snapshot.
+    Capture(CaptureArgs),
+    /// Review diagnostic artifacts in a local web console.
+    Analyze(AnalyzeArgs),
+}
+
+#[derive(Debug, Args)]
+struct CaptureArgs {
     /// PostgreSQL host or socket directory to connect to (psql `-h`).
     #[arg(short = 'h', long, value_name = "HOST")]
     host: Option<String>,
@@ -71,9 +91,56 @@ struct Cli {
     help: Option<bool>,
 }
 
+#[derive(Debug, Args)]
+struct AnalyzeArgs {
+    /// Directory containing .sqlite.gz diagnostic artifacts.
+    #[arg(short, long, value_name = "DIR", default_value = ".")]
+    data_directory: PathBuf,
+
+    /// Local TCP port for the review server.
+    #[arg(long, default_value_t = 3080)]
+    port: u16,
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
+    match cli.command {
+        Command::Analyze(args) => analyze(args),
+        Command::Capture(args) => capture(args),
+    }
+}
+
+fn analyze(args: AnalyzeArgs) -> ExitCode {
+    if !args.data_directory.is_dir() {
+        eprintln!(
+            "pg-probe: data directory does not exist or is not a directory: {}",
+            args.data_directory.display()
+        );
+        return ExitCode::from(EXIT_USAGE);
+    }
+
+    eprintln!(
+        "pg-probe: review console listening on http://127.0.0.1:{}/console/",
+        args.port
+    );
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("pg-probe: failed to start async runtime: {error}");
+            return ExitCode::from(EXIT_PERSIST);
+        }
+    };
+    match runtime.block_on(pg_probe::review::serve(args.data_directory, args.port)) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("pg-probe: review server failed: {error}");
+            ExitCode::from(EXIT_PERSIST)
+        }
+    }
+}
+
+fn capture(cli: CaptureArgs) -> ExitCode {
     init_logger(cli.quiet, cli.verbose);
 
     if let Err(error) = signal::install() {
