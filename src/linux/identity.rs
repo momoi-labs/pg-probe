@@ -54,7 +54,18 @@ impl Collector for IdentityCollector {
     }
 }
 
+/// Debug-only fault injection for the panic-boundary integration test.
+#[cfg(debug_assertions)]
+fn maybe_force_panic_for_testing() {
+    if std::env::var_os("PG_PROBE_FORCE_PANIC_LINUX_IDENTITY").is_some() {
+        panic!("pg-probe: test-only forced panic (PG_PROBE_FORCE_PANIC_LINUX_IDENTITY)");
+    }
+}
+
 fn collect_identity() -> (LinuxIdentity, Vec<ComponentOutcome>) {
+    #[cfg(debug_assertions)]
+    maybe_force_panic_for_testing();
+
     let mut identity = LinuxIdentity::default();
     let mut outcomes = Vec::with_capacity(4);
 

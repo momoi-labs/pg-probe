@@ -1,26 +1,8 @@
-//! Centralized sanitization for connection metadata and filesystem-safe names.
+//! Sanitization for artifact filenames.
 //!
-//! All connection metadata (collector hostname, PostgreSQL host/socket, port,
-//! database name, connected user) must pass through [`sanitize_metadata`] before
-//! logging or persistence. Hostnames used in artifact filenames pass through
-//! [`sanitize_hostname`] to guarantee a portable, collision-free name.
-
-/// Redacts known secret patterns from a string and returns a sanitized copy.
-pub fn sanitize_metadata(value: &str) -> String {
-    let mut result = String::with_capacity(value.len());
-    for segment in value.split(',') {
-        let trimmed = segment.trim();
-        if is_likely_dsn(trimmed) {
-            result.push_str(&redact_dsn(trimmed));
-        } else if contains_password_fragment(trimmed) {
-            result.push_str("<redacted>");
-        } else {
-            result.push_str(trimmed);
-        }
-        result.push(',');
-    }
-    result.trim_end_matches(',').to_string()
-}
+//! PostgreSQL connection metadata uses its own bounded positive allowlist.
+//! Generic pattern-matching redaction is intentionally not offered because it
+//! cannot establish the sensitive-data boundary.
 
 /// Sanitizes a hostname for use in an artifact filename.
 ///
@@ -43,37 +25,6 @@ pub fn sanitize_hostname(name: &str) -> String {
     } else {
         sanitized
     }
-}
-
-fn is_likely_dsn(value: &str) -> bool {
-    let lower = value.to_lowercase();
-    lower.starts_with("postgres://")
-        || lower.starts_with("postgresql://")
-        || (lower.contains("://") && lower.contains('@'))
-}
-
-fn redact_dsn(value: &str) -> String {
-    if let Some(scheme_end) = value.find("://") {
-        let after_scheme = &value[scheme_end + 3..];
-        if let Some(at_pos) = after_scheme.find('@') {
-            let credentials = &after_scheme[..at_pos];
-            let rest = &after_scheme[at_pos..];
-            let scheme = &value[..scheme_end + 3];
-            let user = credentials.split(':').next().unwrap_or("");
-            return format!("{scheme}{user}:<redacted>{rest}");
-        }
-    }
-    "<redacted>".to_string()
-}
-
-fn contains_password_fragment(value: &str) -> bool {
-    let lower = value.to_lowercase();
-    lower.contains("password=")
-        || lower.contains("passwd=")
-        || lower.contains("pwd=")
-        || lower.contains("token=")
-        || lower.contains("secret=")
-        || lower.contains("api_key=")
 }
 
 #[cfg(test)]
@@ -103,34 +54,5 @@ mod tests {
         assert_eq!(sanitize_hostname(""), "unknown");
         assert_eq!(sanitize_hostname("---"), "unknown");
         assert_eq!(sanitize_hostname("..."), "unknown");
-    }
-
-    #[test]
-    fn metadata_redacts_password_in_dsn() {
-        let canary = "postgres://user:supersecret@dbhost:5432/mydb";
-        let sanitized = sanitize_metadata(canary);
-        assert!(!sanitized.contains("supersecret"));
-        assert!(sanitized.contains("<redacted>"));
-    }
-
-    #[test]
-    fn metadata_redacts_password_fragment() {
-        let sanitized = sanitize_metadata("password=hunter2");
-        assert!(!sanitized.contains("hunter2"));
-        assert!(sanitized.contains("<redacted>"));
-    }
-
-    #[test]
-    fn metadata_preserves_non_secret_values() {
-        assert_eq!(sanitize_metadata("localhost"), "localhost");
-        assert_eq!(sanitize_metadata("5432"), "5432");
-    }
-
-    #[test]
-    fn metadata_handles_multiple_comma_separated_values() {
-        let sanitized = sanitize_metadata("localhost,password=secret,5432");
-        assert!(!sanitized.contains("secret"));
-        assert!(sanitized.contains("localhost"));
-        assert!(sanitized.contains("5432"));
     }
 }

@@ -114,6 +114,10 @@ variables, command lines, credentials, network identifiers, or raw source input.
 Errors carry only the symbolic source, a stable error code, and the OS error
 number.
 
+There is no unsafe debug or raw-output mode: no flag, environment variable, or
+build configuration bypasses the allowlist. Collector panics emit only a
+generic notice; payloads, source locations, and backtraces are suppressed.
+
 ## Development
 
 ```bash

@@ -7,7 +7,7 @@
 
 use std::fmt;
 
-use crate::contract::{now_utc, ComponentOutcome};
+use crate::contract::{now_utc, CollectionStatus, ComponentOutcome};
 use crate::postgres::connection::{
     parse_text_bool, parse_text_i64, parse_text_string, AdapterError, ConnectedClient,
 };
@@ -84,7 +84,16 @@ ORDER BY datname";
     for row in rows.rows {
         let database_name = {
             let value = parse_text_string(&row[0])?;
-            sanitize_identifier(&value).value
+            let sanitized = sanitize_identifier(&value);
+            if sanitized.redacted {
+                outcomes.push(ComponentOutcome::failed(
+                    inventory_source,
+                    CollectionStatus::ParseError,
+                    "database_name_invalid",
+                    None,
+                ));
+            }
+            sanitized.value
         };
         let is_template = parse_text_bool(&row[1])?;
         let allows_connections = parse_text_bool(&row[2])?;

@@ -103,6 +103,8 @@ struct AnalyzeArgs {
 }
 
 fn main() -> ExitCode {
+    pg_probe::panic_guard::install();
+
     let cli = Cli::parse();
 
     match cli.command {
