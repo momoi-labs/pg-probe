@@ -37,11 +37,18 @@ binaries until independent rebuild-and-compare evidence exists.
 
 ## Build
 
+To build a binary for a target server, use the static musl build. It runs on
+any x86_64 Linux, including old glibc hosts such as CentOS 7:
+
 ```bash
-cargo build --release
+mise install
+mise run build
 ```
 
-The executable is produced at `target/release/pg-probe`. Release automation
+The executable is produced at
+`target/x86_64-unknown-linux-musl/release/pg-probe`. A plain
+`cargo build --release` links against the local glibc and is meant for
+development; it writes to `target/release/pg-probe`. Release automation
 uses GoReleaser's Rust builder with `cargo-zigbuild` and pinned toolchain
 inputs; see `.goreleaser.yaml` and `.github/workflows/release.yml`.
 

@@ -1,3 +1,10 @@
 [tools]
 rust = "stable"
 goreleaser = "2.17.1"
+# Match the musl cross-build toolchain in .github/workflows/ci.yml.
+zig = "0.15.2"
+"cargo:cargo-zigbuild" = "0.23.0"
+
+[tasks.build]
+description = "Build the static x86_64 musl release binary"
+run = "cargo zigbuild --locked --release --target x86_64-unknown-linux-musl"
