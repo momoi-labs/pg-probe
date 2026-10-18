@@ -48,6 +48,8 @@ enum Command {
     Capture(CaptureArgs),
     /// Review diagnostic artifacts in a local web console.
     Analyze(AnalyzeArgs),
+    /// Show the queries running now, longest first (read-only session).
+    Top(TopArgs),
 }
 
 #[derive(Debug, Args)]
@@ -102,6 +104,34 @@ struct AnalyzeArgs {
     port: u16,
 }
 
+#[derive(Debug, Args)]
+struct TopArgs {
+    /// PostgreSQL host or socket directory to connect to (psql `-h`).
+    #[arg(short = 'h', long, value_name = "HOST")]
+    host: Option<String>,
+
+    /// PostgreSQL port to connect to (psql `-p`).
+    #[arg(short = 'p', long, value_name = "PORT")]
+    port: Option<u16>,
+
+    /// PostgreSQL user name to connect as (psql `-U`).
+    #[arg(short = 'U', long, value_name = "USER")]
+    username: Option<String>,
+
+    /// Database name, a `postgresql://` URL, or a keyword/value string
+    /// (psql `-d`).
+    #[arg(short = 'd', long = "dbname", value_name = "NAME")]
+    dbname: Option<String>,
+
+    /// Seconds between refreshes.
+    #[arg(short, long, value_name = "SECONDS", default_value_t = 2)]
+    interval: u64,
+
+    /// Print help.
+    #[arg(short = '?', long = "help", action = clap::ArgAction::Help)]
+    help: Option<bool>,
+}
+
 fn main() -> ExitCode {
     pg_probe::panic_guard::install();
 
@@ -110,6 +140,27 @@ fn main() -> ExitCode {
     match cli.command {
         Command::Analyze(args) => analyze(args),
         Command::Capture(args) => capture(args),
+        Command::Top(args) => top(args),
+    }
+}
+
+fn top(args: TopArgs) -> ExitCode {
+    if args.interval == 0 {
+        eprintln!("pg-probe: --interval must be at least 1 second");
+        return ExitCode::from(EXIT_USAGE);
+    }
+    let params = pg_probe::ConnectionParams {
+        host: args.host,
+        port: args.port,
+        username: args.username,
+        dbname: args.dbname,
+    };
+    match pg_probe::top::run(&params, std::time::Duration::from_secs(args.interval)) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("pg-probe: {error}");
+            ExitCode::from(EXIT_PARTIAL)
+        }
     }
 }
 

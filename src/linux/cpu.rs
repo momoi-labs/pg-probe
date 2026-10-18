@@ -694,7 +694,7 @@ fn parse_cpu_time_line(line: &str) -> Option<CpuTimeEntry> {
     })
 }
 
-fn parse_loadavg(content: &str) -> Option<LoadAverages> {
+pub fn parse_loadavg(content: &str) -> Option<LoadAverages> {
     let parts: Vec<&str> = content.split_whitespace().collect();
     if parts.len() < 4 {
         return None;

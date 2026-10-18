@@ -14,7 +14,7 @@ use crate::postgres::connection::ConnectedClient;
 mod activity_aggregates;
 mod archiver_stats;
 mod bgwriter_stats;
-mod capability;
+pub(crate) mod capability;
 mod database_stats;
 mod io_stats;
 mod lock_aggregates;

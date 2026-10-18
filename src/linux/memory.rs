@@ -227,7 +227,7 @@ fn collect_vmstat(observations: &mut MemoryObservations, outcomes: &mut Vec<Comp
     }
 }
 
-fn parse_meminfo(content: &str) -> Result<Vec<MemoryEntry>, &'static str> {
+pub fn parse_meminfo(content: &str) -> Result<Vec<MemoryEntry>, &'static str> {
     let mut entries = Vec::new();
 
     for line in content.lines() {

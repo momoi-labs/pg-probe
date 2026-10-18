@@ -7,6 +7,7 @@ pub mod panic_guard;
 pub mod postgres;
 pub mod review;
 pub mod sanitize;
+pub mod top;
 
 use std::path::{Path, PathBuf};
 

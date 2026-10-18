@@ -100,6 +100,29 @@ sqlite3 snapshot.sqlite '.tables'
 sqlite3 snapshot.sqlite 'SELECT status FROM snapshot;'
 ```
 
+### Live view
+
+`pg-probe top` shows the queries running now, longest first, in the style of
+pg_activity. It takes the same connection options as `capture`:
+
+```bash
+pg-probe top -U postgres -h /var/run/postgresql
+```
+
+`F1`, `F2`, and `F3` switch between running, waiting, and blocking queries.
+`v` opens the details of the selected backend, `Space` pauses, and `q` quits.
+`-i` sets the refresh interval in seconds (default 2).
+
+The session is read-only: it starts with `default_transaction_read_only=on`
+and a 5-second `statement_timeout`. Each refresh sends one `SELECT` over
+`pg_stat_activity`. The blocking view and the details panel add one query each,
+and only while they are open. Query text appears on the terminal only and is
+never written to disk.
+
+When the server runs on the same host, the view adds load, memory, and
+per-backend CPU and I/O from `/proc`. Reading another process's I/O counters
+needs root or the `postgres` user.
+
 ## Artifact format
 
 The artifact is a gzip-compressed SQLite database. Its schema version is stored

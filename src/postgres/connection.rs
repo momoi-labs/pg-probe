@@ -124,6 +124,28 @@ impl ConnectedClient {
         Self::open_config(config, source, outcomes)
     }
 
+    /// Opens a session that cannot write: every transaction starts read-only
+    /// and every statement is bounded by `statement_timeout`. The guard is
+    /// appended after any `PGOPTIONS`, so it takes precedence.
+    pub fn open_read_only(
+        params: &ConnectionParams,
+        statement_timeout_ms: u64,
+        source: &'static str,
+        outcomes: &mut Vec<ComponentOutcome>,
+    ) -> Result<Self, AdapterError> {
+        let mut config = match resolve_config(params) {
+            Ok(config) => config,
+            Err(error) => {
+                let _ =
+                    timestamped_failure(outcomes, source, AdapterOutcomeStatus::InvalidParameter);
+                return Err(error);
+            }
+        };
+        let options = read_only_options(config.get_options(), statement_timeout_ms);
+        config.options(&options);
+        Self::open_config(config, source, outcomes)
+    }
+
     pub fn for_database(
         &self,
         database: &str,
@@ -375,6 +397,15 @@ fn resolve_config(params: &ConnectionParams) -> Result<Config, AdapterError> {
     Ok(config)
 }
 
+fn read_only_options(existing: Option<&str>, statement_timeout_ms: u64) -> String {
+    let guard =
+        format!("-c default_transaction_read_only=on -c statement_timeout={statement_timeout_ms}");
+    match existing.filter(|options| !options.trim().is_empty()) {
+        Some(options) => format!("{options} {guard}"),
+        None => guard,
+    }
+}
+
 /// A value is a conninfo string when it is a PostgreSQL URI or a keyword/value
 /// string, rather than a bare database name.
 fn is_conninfo(value: &str) -> bool {
@@ -566,6 +597,19 @@ impl fmt::Display for EndpointIdentity {
 mod tests {
     use super::*;
     use postgres::config::Host;
+
+    #[test]
+    fn read_only_guard_is_appended_after_existing_options() {
+        assert_eq!(
+            read_only_options(None, 5000),
+            "-c default_transaction_read_only=on -c statement_timeout=5000"
+        );
+        assert_eq!(
+            read_only_options(Some("-c default_transaction_read_only=off"), 5000),
+            "-c default_transaction_read_only=off \
+             -c default_transaction_read_only=on -c statement_timeout=5000"
+        );
+    }
 
     #[test]
     fn explicit_postgresql_url_builds_a_client_config() {
