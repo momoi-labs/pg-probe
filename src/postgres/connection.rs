@@ -142,7 +142,13 @@ impl ConnectedClient {
     ) -> Result<Self, AdapterError> {
         let started_at_utc = now_utc();
         let endpoint = endpoint_from_config(&config)?;
-        let client = match config.connect(rustls_connector()) {
+        // A unix socket has no host name for the TLS connector to validate,
+        // and PostgreSQL never offers TLS on one, so connect without it.
+        let connected = match endpoint.endpoint_kind {
+            EndpointKind::UnixSocket => config.connect(postgres::NoTls),
+            EndpointKind::Tcp => config.connect(rustls_connector()),
+        };
+        let client = match connected {
             Ok(client) => client,
             Err(error) => {
                 record_connection_failure(outcomes, source, &error);
