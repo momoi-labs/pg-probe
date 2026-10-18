@@ -9,6 +9,7 @@ use crate::postgres::connection::{
     parse_text_i64, parse_text_string, AdapterError, ConnectedClient,
 };
 use crate::postgres::sanitize::sanitize_identifier;
+use crate::postgres::stats::capability::{has_backend_type, has_wait_event_type};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActivityAggregate {
@@ -20,23 +21,40 @@ pub struct ActivityAggregate {
     pub max_age_seconds: Option<i64>,
 }
 
-const ACTIVITY_QUERY: &str = "\
+/// Build the activity query for the given server version. Before PG 10,
+/// `pg_stat_activity` lists only client backends and has no `backend_type`.
+/// Before PG 9.6 it has no `wait_event_type`, so that column is NULL.
+fn activity_query(server_version_num: i32) -> String {
+    let backend_type = if has_backend_type(server_version_num).is_supported() {
+        "backend_type"
+    } else {
+        "'client backend'::text"
+    };
+    let wait_event_type = if has_wait_event_type(server_version_num).is_supported() {
+        "wait_event_type"
+    } else {
+        "NULL::text"
+    };
+    format!(
+        "\
 SELECT \
-    datname, backend_type, state, wait_event_type, \
+    datname, {backend_type} AS backend_type, state, {wait_event_type} AS wait_event_type, \
     COUNT(*) AS count, \
     COALESCE(MAX(EXTRACT(EPOCH FROM (now() - state_change))::bigint), 0) AS max_age_seconds \
 FROM pg_stat_activity \
 WHERE pid IS NOT NULL \
 GROUP BY datname, backend_type, state, wait_event_type \
-ORDER BY datname NULLS FIRST, backend_type, state NULLS FIRST, wait_event_type NULLS FIRST";
+ORDER BY datname NULLS FIRST, backend_type, state NULLS FIRST, wait_event_type NULLS FIRST"
+    )
+}
 
 pub fn collect_activity_aggregates(
     client: &ConnectedClient,
-    _server_version_num: i32,
+    server_version_num: i32,
     outcomes: &mut Vec<ComponentOutcome>,
 ) -> Result<Vec<ActivityAggregate>, AdapterError> {
     let source = "postgres.aggregates.activity";
-    let rows = client.exec_bounded_rows(ACTIVITY_QUERY, source, outcomes)?;
+    let rows = client.exec_bounded_rows(&activity_query(server_version_num), source, outcomes)?;
     let mut aggregates = Vec::with_capacity(rows.rows.len());
 
     for row in rows.rows {

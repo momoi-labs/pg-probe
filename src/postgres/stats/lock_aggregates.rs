@@ -9,6 +9,7 @@ use crate::postgres::connection::{
     parse_text_bool, parse_text_i64, parse_text_string, AdapterError, ConnectedClient,
 };
 use crate::postgres::sanitize::sanitize_identifier;
+use crate::postgres::stats::capability::has_lock_waitstart;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LockAggregate {
@@ -20,23 +21,34 @@ pub struct LockAggregate {
     pub max_wait_age_seconds: Option<i64>,
 }
 
-const LOCKS_QUERY: &str = "\
+/// Build the locks query for the given server version. `pg_locks.waitstart`
+/// exists only on PG 14+, so older servers report the wait age as NULL.
+fn locks_query(server_version_num: i32) -> String {
+    let max_wait_age = if has_lock_waitstart(server_version_num).is_supported() {
+        "COALESCE(MAX(EXTRACT(EPOCH FROM (now() - waitstart))::bigint), 0)"
+    } else {
+        "NULL::bigint"
+    };
+    format!(
+        "\
 SELECT \
     mode, locktype, granted, fastpath, \
     COUNT(*) AS count, \
-    COALESCE(MAX(EXTRACT(EPOCH FROM (now() - waitstart))::bigint), 0) AS max_wait_age_seconds \
+    {max_wait_age} AS max_wait_age_seconds \
 FROM pg_locks \
 WHERE pid IS NOT NULL \
 GROUP BY mode, locktype, granted, fastpath \
-ORDER BY locktype, mode, granted, fastpath NULLS FIRST";
+ORDER BY locktype, mode, granted, fastpath NULLS FIRST"
+    )
+}
 
 pub fn collect_lock_aggregates(
     client: &ConnectedClient,
-    _server_version_num: i32,
+    server_version_num: i32,
     outcomes: &mut Vec<ComponentOutcome>,
 ) -> Result<Vec<LockAggregate>, AdapterError> {
     let source = "postgres.aggregates.locks";
-    let rows = client.exec_bounded_rows(LOCKS_QUERY, source, outcomes)?;
+    let rows = client.exec_bounded_rows(&locks_query(server_version_num), source, outcomes)?;
     let mut aggregates = Vec::with_capacity(rows.rows.len());
 
     for row in rows.rows {

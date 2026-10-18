@@ -2,6 +2,7 @@
 
 use crate::contract::ComponentOutcome;
 use crate::postgres::connection::{parse_text_i64, AdapterError, ConnectedClient};
+use crate::postgres::stats::capability::has_archiver_stats;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArchiverStats {
@@ -22,10 +23,13 @@ FROM pg_stat_archiver";
 
 pub fn collect_archiver_stats(
     client: &ConnectedClient,
-    _server_version_num: i32,
+    server_version_num: i32,
     outcomes: &mut Vec<ComponentOutcome>,
 ) -> Result<Option<ArchiverStats>, AdapterError> {
     let source = "postgres.stats.archiver";
+    if !has_archiver_stats(server_version_num).is_supported() {
+        return Ok(None);
+    }
     let rows = match client.exec_bounded_rows(ARCHIVER_QUERY, source, outcomes) {
         Ok(rows) => rows,
         Err(_) => return Ok(None),

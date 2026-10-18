@@ -74,6 +74,52 @@ pub fn has_replication_slots(server_version_num: i32) -> StatsCapability {
     }
 }
 
+/// Detect whether `pg_stat_archiver` exists (PG 9.4+).
+pub fn has_archiver_stats(server_version_num: i32) -> StatsCapability {
+    if server_version_num >= 90400 {
+        StatsCapability::Supported
+    } else {
+        StatsCapability::Unsupported
+    }
+}
+
+/// Detect whether `pg_stat_activity.backend_type` exists (PG 10+).
+pub fn has_backend_type(server_version_num: i32) -> StatsCapability {
+    if server_version_num >= 100000 {
+        StatsCapability::Supported
+    } else {
+        StatsCapability::Unsupported
+    }
+}
+
+/// Detect whether `pg_stat_activity.wait_event_type` exists (PG 9.6+).
+pub fn has_wait_event_type(server_version_num: i32) -> StatsCapability {
+    if server_version_num >= 90600 {
+        StatsCapability::Supported
+    } else {
+        StatsCapability::Unsupported
+    }
+}
+
+/// Detect whether `pg_locks.waitstart` exists (PG 14+).
+pub fn has_lock_waitstart(server_version_num: i32) -> StatsCapability {
+    if server_version_num >= 140000 {
+        StatsCapability::Supported
+    } else {
+        StatsCapability::Unsupported
+    }
+}
+
+/// Detect whether the `pg_*_wal_lsn*` functions and `*_lsn` columns exist
+/// (PG 10+). Older servers use the `xlog`/`location` names.
+pub fn has_wal_lsn_naming(server_version_num: i32) -> StatsCapability {
+    if server_version_num >= 100000 {
+        StatsCapability::Supported
+    } else {
+        StatsCapability::Unsupported
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,5 +134,15 @@ mod tests {
         assert_eq!(has_wal_stats(130000), StatsCapability::Unsupported);
         assert_eq!(has_slru_stats(130000), StatsCapability::Supported);
         assert_eq!(has_slru_stats(120000), StatsCapability::Unsupported);
+        assert_eq!(has_archiver_stats(90400), StatsCapability::Supported);
+        assert_eq!(has_archiver_stats(90305), StatsCapability::Unsupported);
+        assert_eq!(has_backend_type(100000), StatsCapability::Supported);
+        assert_eq!(has_backend_type(90600), StatsCapability::Unsupported);
+        assert_eq!(has_wait_event_type(90600), StatsCapability::Supported);
+        assert_eq!(has_wait_event_type(90500), StatsCapability::Unsupported);
+        assert_eq!(has_lock_waitstart(140000), StatsCapability::Supported);
+        assert_eq!(has_lock_waitstart(130000), StatsCapability::Unsupported);
+        assert_eq!(has_wal_lsn_naming(100000), StatsCapability::Supported);
+        assert_eq!(has_wal_lsn_naming(90600), StatsCapability::Unsupported);
     }
 }

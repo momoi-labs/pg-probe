@@ -29,12 +29,19 @@ impl fmt::Display for Setting {
     }
 }
 
+/// `pg_settings.pending_restart` first shipped in PostgreSQL 9.5.
+const PENDING_RESTART_MIN_VERSION: i32 = 90500;
+
 /// Collect the approved `pg_settings` allowlist in canonical order. Each
 /// setting is recorded only if every column parses cleanly. A parse or
 /// permission failure on a single setting does not abort the rest of the
 /// allowlist, and the structured outcome records exactly which entry failed.
+///
+/// `server_version_num` is `None` when target collection failed; the query
+/// then assumes a server with `pending_restart`. Older servers report `false`.
 pub fn collect_settings(
     client: &ConnectedClient,
+    server_version_num: Option<i32>,
     outcomes: &mut Vec<ComponentOutcome>,
 ) -> Result<Vec<Setting>, AdapterError> {
     let started_at_utc = now_utc();
@@ -43,13 +50,17 @@ pub fn collect_settings(
         .map(|name| format!("'{}'", name.replace('\'', "''")))
         .collect::<Vec<_>>()
         .join(", ");
+    let pending_restart = match server_version_num {
+        Some(version) if version < PENDING_RESTART_MIN_VERSION => "false",
+        _ => "pending_restart",
+    };
     let query = format!(
         "\
-SELECT name, setting, unit, vartype, source, pending_restart \
+SELECT name, setting, unit, vartype, source, {} \
 FROM pg_settings \
 WHERE name IN ({}) \
 ORDER BY name",
-        allowlist_literal
+        pending_restart, allowlist_literal
     );
     let settings_source = "postgres.settings";
     let rows = client.exec_bounded_rows(&query, settings_source, outcomes)?;

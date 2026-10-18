@@ -41,17 +41,39 @@ impl fmt::Display for Target {
     }
 }
 
-const CAPABILITY_QUERY: &str = "\
+const VERSION_QUERY: &str = "SELECT current_setting('server_version_num')";
+
+/// Predefined monitoring roles first shipped in PostgreSQL 10.
+const MONITORING_ROLES_MIN_VERSION: i32 = 100000;
+
+/// Build the capability query for the given server version. Before
+/// PostgreSQL 10 the monitoring roles do not exist and `pg_has_role` errors
+/// on an unknown role, so those columns are reported as `false`.
+fn capability_query(server_version_num: i32) -> String {
+    let membership = |role: &str| {
+        if server_version_num >= MONITORING_ROLES_MIN_VERSION {
+            format!("pg_has_role(current_user, '{role}', 'MEMBER')")
+        } else {
+            "false".to_owned()
+        }
+    };
+    format!(
+        "\
 SELECT \
     current_setting('server_version_num') AS version_num, \
     current_setting('server_version') AS version, \
     pg_is_in_recovery() AS in_recovery, \
     current_setting('block_size')::int AS block_size, \
     (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS is_superuser, \
-    pg_has_role(current_user, 'pg_monitor', 'MEMBER') AS has_pg_monitor, \
-    pg_has_role(current_user, 'pg_read_all_stats', 'MEMBER') AS has_pg_read_all_stats, \
-    pg_has_role(current_user, 'pg_read_all_settings', 'MEMBER') AS has_pg_read_all_settings \
-";
+    {} AS has_pg_monitor, \
+    {} AS has_pg_read_all_stats, \
+    {} AS has_pg_read_all_settings \
+",
+        membership("pg_monitor"),
+        membership("pg_read_all_stats"),
+        membership("pg_read_all_settings"),
+    )
+}
 
 pub fn collect_target(
     client: &ConnectedClient,
@@ -62,7 +84,16 @@ pub fn collect_target(
     let (connected_user, initial_database) = read_identity_columns(client, outcomes)?;
 
     let capability_source = "postgres.target.capabilities";
-    let capability_rows = client.exec_bounded_row(CAPABILITY_QUERY, capability_source, outcomes)?;
+    let version_rows = client.exec_bounded_row(VERSION_QUERY, capability_source, outcomes)?;
+    let probed_version_num = match version_rows.first().map(|r| parse_text_i32(r)) {
+        Some(Ok(value)) => value,
+        _ => return Err(AdapterError::ColumnInvalid),
+    };
+    let capability_rows = client.exec_bounded_row(
+        &capability_query(probed_version_num),
+        capability_source,
+        outcomes,
+    )?;
 
     let server_version_num = match capability_rows.first().map(|r| parse_text_i32(r)) {
         Some(Ok(value)) => value,
@@ -164,6 +195,20 @@ mod tests {
     fn parse_text_string_rejects_non_utf8() {
         assert!(parse_text_string(&[0xff]).is_err());
         assert_eq!(parse_text_string(b"plain").unwrap(), "plain");
+    }
+
+    #[test]
+    fn capability_query_skips_monitoring_roles_before_pg10() {
+        let query = capability_query(90305);
+        assert!(!query.contains("pg_has_role"));
+        assert!(query.contains("false AS has_pg_monitor"));
+    }
+
+    #[test]
+    fn capability_query_checks_monitoring_roles_on_pg10() {
+        let query = capability_query(100000);
+        assert!(query.contains("pg_has_role(current_user, 'pg_monitor', 'MEMBER')"));
+        assert!(query.contains("pg_has_role(current_user, 'pg_read_all_settings', 'MEMBER')"));
     }
 
     #[test]

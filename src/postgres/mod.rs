@@ -122,7 +122,8 @@ fn collect_target_inventory(params: &ConnectionParams) -> (TargetInventory, Vec<
 
     let settings_source = "postgres.settings";
     let started_at = now_utc();
-    match settings::collect_settings(&client, &mut outcomes) {
+    let server_version_num = inventory.target.as_ref().map(|t| t.server_version_num);
+    match settings::collect_settings(&client, server_version_num, &mut outcomes) {
         Ok(collected) => {
             outcomes.push(ComponentOutcome::collected(
                 settings_source,

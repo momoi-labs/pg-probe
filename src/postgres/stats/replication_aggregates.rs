@@ -9,7 +9,7 @@ use crate::postgres::connection::{
     parse_text_bool, parse_text_i64, parse_text_string, AdapterError, ConnectedClient,
 };
 use crate::postgres::sanitize::sanitize_identifier;
-use crate::postgres::stats::capability::has_replication_slots;
+use crate::postgres::stats::capability::{has_replication_slots, has_wal_lsn_naming};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplicationAggregate {
@@ -27,32 +27,75 @@ pub struct SlotAggregate {
     pub max_retained_bytes: Option<i64>,
 }
 
-const REPLICATION_QUERY: &str = "\
+/// WAL position function and column names. PG 10 renamed `xlog` to `wal`
+/// and `location` to `lsn`.
+struct WalNames {
+    lsn_diff: &'static str,
+    current_lsn: &'static str,
+    replay_lsn: &'static str,
+}
+
+fn wal_names(server_version_num: i32) -> WalNames {
+    if has_wal_lsn_naming(server_version_num).is_supported() {
+        WalNames {
+            lsn_diff: "pg_wal_lsn_diff",
+            current_lsn: "pg_current_wal_lsn",
+            replay_lsn: "replay_lsn",
+        }
+    } else {
+        WalNames {
+            lsn_diff: "pg_xlog_location_diff",
+            current_lsn: "pg_current_xlog_location",
+            replay_lsn: "replay_location",
+        }
+    }
+}
+
+fn replication_query(server_version_num: i32) -> String {
+    let WalNames {
+        lsn_diff,
+        current_lsn,
+        replay_lsn,
+    } = wal_names(server_version_num);
+    format!(
+        "\
 SELECT \
     state, sync_state, \
     COUNT(*) AS count, \
-    COALESCE(MAX(pg_wal_lsn_diff(pg_current_wal_lsn(), replay_lsn)), 0)::bigint AS max_lag_bytes \
+    COALESCE(MAX({lsn_diff}({current_lsn}(), {replay_lsn})), 0)::bigint AS max_lag_bytes \
 FROM pg_stat_replication \
 WHERE pid IS NOT NULL \
 GROUP BY state, sync_state \
-ORDER BY state NULLS FIRST, sync_state NULLS FIRST";
+ORDER BY state NULLS FIRST, sync_state NULLS FIRST"
+    )
+}
 
-const SLOTS_QUERY: &str = "\
+fn slots_query(server_version_num: i32) -> String {
+    let WalNames {
+        lsn_diff,
+        current_lsn,
+        ..
+    } = wal_names(server_version_num);
+    format!(
+        "\
 SELECT \
     slot_type, active, \
     COUNT(*) AS count, \
-    COALESCE(MAX(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)), 0)::bigint AS max_retained_bytes \
+    COALESCE(MAX({lsn_diff}({current_lsn}(), restart_lsn)), 0)::bigint AS max_retained_bytes \
 FROM pg_replication_slots \
 GROUP BY slot_type, active \
-ORDER BY slot_type, active";
+ORDER BY slot_type, active"
+    )
+}
 
 pub fn collect_replication_aggregates(
     client: &ConnectedClient,
-    _server_version_num: i32,
+    server_version_num: i32,
     outcomes: &mut Vec<ComponentOutcome>,
 ) -> Result<Vec<ReplicationAggregate>, AdapterError> {
     let source = "postgres.aggregates.replication";
-    let rows = match client.exec_bounded_rows(REPLICATION_QUERY, source, outcomes) {
+    let query = replication_query(server_version_num);
+    let rows = match client.exec_bounded_rows(&query, source, outcomes) {
         Ok(rows) => rows,
         Err(_) => return Ok(Vec::new()),
     };
@@ -87,7 +130,8 @@ pub fn collect_slot_aggregates(
         return Ok(None);
     }
 
-    let rows = match client.exec_bounded_rows(SLOTS_QUERY, source, outcomes) {
+    let query = slots_query(server_version_num);
+    let rows = match client.exec_bounded_rows(&query, source, outcomes) {
         Ok(rows) => rows,
         Err(_) => return Ok(None),
     };
