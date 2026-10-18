@@ -54,3 +54,8 @@ live in `README.md` (`## Development`) and `.github/workflows/ci.yml`.
   `sqlite3 snapshot.sqlite '.tables'`. Host identity lives in `linux_identity`
   (columns are `kernel_sysname`, `kernel_release`, `kernel_machine`,
   `distribution_pretty_name`, etc.).
+
+## Kiso
+
+The UI follows Kiso. Read `docs/kiso.md` before changing a screen, and use
+the `kiso-page` skill to build or change one.
