@@ -169,6 +169,8 @@ pub struct Backend {
     pub wait_event: String,
     pub duration_s: Option<f64>,
     pub query: String,
+    /// The query with its line breaks, for the preview panel.
+    pub raw_query: String,
 }
 
 impl Backend {
@@ -259,6 +261,8 @@ struct App {
     paused: bool,
     /// The key list, opened with `?`.
     help: bool,
+    /// The selected query, formatted under the list. Toggled with Tab.
+    preview: bool,
     popup: Option<Popup>,
     backends: Vec<Backend>,
     /// Blocker pid to the pids it blocks. Filled only in the blocking view.
@@ -362,6 +366,7 @@ impl App {
             view: View::Running,
             paused: false,
             help: false,
+            preview: false,
             popup: None,
             backends: Vec::new(),
             blocks: HashMap::new(),
@@ -486,6 +491,7 @@ impl App {
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                     KeyCode::Char(' ') => self.paused = !self.paused,
                     KeyCode::Char('?') => self.help = true,
+                    KeyCode::Tab => self.preview = !self.preview,
                     KeyCode::Char('v') | KeyCode::Enter => self.open_popup(client)?,
                     KeyCode::F(1) | KeyCode::Char('1') => self.view = View::Running,
                     KeyCode::F(2) | KeyCode::Char('2') => self.view = View::Waiting,
@@ -689,7 +695,16 @@ impl App {
                 .alignment(Alignment::Center),
             title,
         );
-        self.draw_table(frame, body);
+        if self.preview {
+            let lines = self.preview_lines();
+            let height = (lines.len() as u16 + 2).min(body.height / 2);
+            let [table, preview] =
+                Layout::vertical([Constraint::Fill(1), Constraint::Length(height)]).areas(body);
+            self.draw_table(frame, table);
+            self.draw_preview(frame, preview, lines);
+        } else {
+            self.draw_table(frame, body);
+        }
         frame.render_widget(footer_line(self.view), footer);
         if self.popup.is_some() {
             self.draw_popup(frame);
@@ -699,6 +714,44 @@ impl App {
         if self.help {
             draw_help(frame);
         }
+    }
+
+    fn preview_lines(&self) -> Vec<String> {
+        let selected = self.table.selected().unwrap_or(0);
+        match self.visible().get(selected) {
+            Some(backend) => query_lines(
+                &backend.raw_query,
+                &backend.query,
+                self.server.query_size_limit,
+            ),
+            None => vec!["No query selected.".to_owned()],
+        }
+    }
+
+    fn draw_preview(&self, frame: &mut Frame, area: Rect, lines: Vec<String>) {
+        let selected = self.table.selected().unwrap_or(0);
+        let title = self
+            .visible()
+            .get(selected)
+            .map(|backend| {
+                format!(
+                    " PID {} · {}@{} · {} ",
+                    backend.pid,
+                    backend.user,
+                    backend.database,
+                    backend.duration_s.map(format_duration).unwrap_or_default()
+                )
+            })
+            .unwrap_or_default();
+        frame.render_widget(
+            Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>()).block(
+                Block::bordered()
+                    .border_style(Style::new().cyan())
+                    .title(Line::from(title).bold())
+                    .title_bottom(Line::from(" Tab hides ").dark_gray()),
+            ),
+            area,
+        );
     }
 
     fn header_lines(&self, width: u16) -> Vec<Line<'static>> {
@@ -1079,9 +1132,13 @@ impl App {
             Style::new().cyan().bold(),
         )));
         lines.extend(
-            query_lines(&details, self.server.query_size_limit)
-                .into_iter()
-                .map(Line::from),
+            query_lines(
+                &details.raw_query,
+                &details.query,
+                self.server.query_size_limit,
+            )
+            .into_iter()
+            .map(Line::from),
         );
 
         let area = frame.area();
@@ -1228,6 +1285,7 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
             ("Home End", "First or last row"),
             ("v Enter", "Query details"),
             ("Space", "Pause or resume refreshes"),
+            ("Tab", "Show or hide the selected query, formatted"),
             ("?", "This help"),
             ("q Esc", "Quit"),
         ],
@@ -1481,6 +1539,10 @@ fn fetch_backends(client: &ConnectedClient, sql: &str) -> Result<Vec<Backend>, A
                 wait_event: text(5),
                 duration_s: text(6).parse().ok(),
                 query: text(7),
+                raw_query: row
+                    .get(7)
+                    .map(|value| String::from_utf8_lossy(value).into_owned())
+                    .unwrap_or_default(),
             }
         })
         .collect())
@@ -1546,16 +1608,12 @@ fn fetch_blocks(
     Ok(blocks)
 }
 
-/// Decodes a server value for display: whitespace collapses to single spaces
-/// and control characters are dropped, so text from the server can neither
-/// break the layout nor send escape sequences to the terminal.
-/// Lays the query out one clause per line for the details panel. Text the
-/// server cut at `track_activity_query_size` stays on one line, since the
-/// formatter would indent a broken statement.
-fn query_lines(details: &Details, size_limit: usize) -> Vec<String> {
-    let raw = &details.raw_query;
+/// Lays the query out one clause per line. Text the server cut at
+/// `track_activity_query_size` stays as `flat`, since the formatter would
+/// indent a broken statement.
+fn query_lines(raw: &str, flat: &str, size_limit: usize) -> Vec<String> {
     if raw.trim().is_empty() || (size_limit > 0 && raw.len() + 1 >= size_limit) {
-        return vec![details.query.clone()];
+        return vec![flat.to_owned()];
     }
     let options = FormatOptions {
         dialect: Dialect::PostgreSql,
@@ -1563,10 +1621,13 @@ fn query_lines(details: &Details, size_limit: usize) -> Vec<String> {
     };
     sqlformat::format(raw, &QueryParams::None, &options)
         .lines()
-        .map(|line| line.chars().filter(|c| !c.is_control()).collect())
+        .map(single_line_keep_indent)
         .collect()
 }
 
+/// Decodes a server value for display: whitespace collapses to single spaces
+/// and control characters are dropped, so text from the server can neither
+/// break the layout nor send escape sequences to the terminal.
 fn text_of(value: &[u8]) -> String {
     single_line(&String::from_utf8_lossy(value))
 }
@@ -1595,6 +1656,7 @@ mod tests {
             wait_event: String::new(),
             duration_s: Some(0.115),
             query: query.to_owned(),
+            raw_query: query.to_owned(),
         }
     }
 
@@ -1645,11 +1707,14 @@ mod tests {
             raw_query: "select a from t where b = 1\x1b[2J".to_owned(),
             ..Details::default()
         };
-        let lines = query_lines(&details, 1024);
+        let lines = query_lines(&details.raw_query, &details.query, 1024);
         assert_eq!(lines[0], "select");
         assert!(lines.contains(&"  a".to_owned()), "{lines:?}");
         assert!(lines.iter().all(|line| !line.contains('\x1b')));
-        assert_eq!(query_lines(&details, 32), vec![details.query.clone()]);
+        assert_eq!(
+            query_lines(&details.raw_query, &details.query, 32),
+            vec![details.query.clone()]
+        );
     }
 
     #[test]
@@ -1736,6 +1801,24 @@ mod tests {
         assert!(legacy.ends_with("WHERE pid = 4242"));
         assert!(!legacy.contains("backend_xid"));
         assert!(details_sql(140005, "4242").unwrap().contains("backend_xid"));
+    }
+
+    #[test]
+    fn preview_formats_the_selected_query_under_the_list() {
+        let mut app = app(View::Running);
+        app.backends[0].raw_query = "select a, b from t".to_owned();
+        assert!(!screen(&mut app).contains("PID 101 ·"));
+        app.preview = true;
+        let mut terminal = Terminal::new(TestBackend::new(160, 24)).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let screen: String = buffer
+            .content()
+            .chunks(usize::from(buffer.area.width))
+            .map(|line| line.iter().map(|cell| cell.symbol()).collect::<String>() + "\n")
+            .collect();
+        assert!(screen.contains("PID 101 ·"), "{screen}");
+        assert!(screen.contains("│from "), "{screen}");
     }
 
     #[test]
