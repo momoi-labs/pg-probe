@@ -22,7 +22,7 @@ import {
   useOutcomes,
   useTable,
 } from '../artifact.ts'
-import { bytes, Bytes, Percent, Unknown } from '../format.tsx'
+import { bytes, Bytes, duration, Percent, Unknown } from '../format.tsx'
 import { deltas, lastValue, points, useSamples } from '../series.ts'
 import { isClientBackend, Postgres, useWalRate } from './postgres.tsx'
 import { System, useCpuShares, useDiskBusy } from './system.tsx'
@@ -30,14 +30,37 @@ import { System, useCpuShares, useDiskBusy } from './system.tsx'
 const NOT_RECORDED = 'not recorded in this artifact'
 const NEEDS_SAMPLES = 'a rate needs two or more samples, and this artifact holds one'
 
+type Trend = {
+  // One value per sample, or per interval for rates.
+  values: (number | null)[]
+  // A fixed scale keeps a small change small: percentages run 0 to 100.
+  min?: number
+  max?: number
+  format: (value: number) => string
+}
+
 type TileProps = {
   label: string
   loading?: boolean
   value: ReactNode
   meter?: ReactNode
   foot: ReactNode
-  // One value per sample. Drawn as a sparkline when there are two or more.
-  trend?: (number | null)[]
+  trend?: Trend
+}
+
+// Says what the sparkline covers: the session length and its lowest and
+// highest values, so the line reads as data rather than decoration.
+function TrendCaption({ trend }: { trend: Trend }) {
+  const samples = useSamples().data ?? []
+  const known = trend.values.filter((value): value is number => value != null)
+  if (known.length === 0 || samples.length < 2) return null
+  const span = duration(samples[0].taken_at_utc, samples[samples.length - 1].taken_at_utc)
+  return (
+    <StatFoot>
+      {span ? `Last ${span}` : 'Session'} · min {trend.format(Math.min(...known))} · max{' '}
+      {trend.format(Math.max(...known))}
+    </StatFoot>
+  )
 }
 
 function Tile({ label, loading, value, meter, foot, trend }: TileProps) {
@@ -53,8 +76,17 @@ function Tile({ label, loading, value, meter, foot, trend }: TileProps) {
               <StatValue>{value}</StatValue>
               {meter}
               <StatFoot>{foot}</StatFoot>
-              {trend && trend.length > 1 && (
-                <Sparkline values={trend} height={28} label={`${label} over the session`} />
+              {trend && trend.values.length > 1 && (
+                <>
+                  <Sparkline
+                    values={trend.values}
+                    height={28}
+                    min={trend.min}
+                    max={trend.max}
+                    label={`${label} over the session`}
+                  />
+                  <TrendCaption trend={trend} />
+                </>
               )}
             </>
           )}
@@ -63,6 +95,8 @@ function Tile({ label, loading, value, meter, foot, trend }: TileProps) {
     </DashboardPanel>
   )
 }
+
+const pct = (value: number) => `${value.toFixed(1)}%`
 
 function UnknownTile({ label, reason }: { label: string; reason: string }) {
   return <Tile label={label} value={<Unknown reason={reason} />} foot={`Unknown: ${reason}.`} />
@@ -84,7 +118,7 @@ function CpuTile() {
       label="CPU busy"
       value={<Percent value={current} />}
       foot="user + system + iowait + steal + nice, IRQ and softirq, last interval"
-      trend={trend.slice(1)}
+      trend={{ values: trend.slice(1), min: 0, max: 100, format: pct }}
     />
   )
 }
@@ -126,7 +160,16 @@ function MemoryTile() {
         />
       }
       foot="MemTotal − MemAvailable, last sample"
-      trend={chart.map((point) => point.values.used ?? null)}
+      trend={{
+        values: chart.map((point) => {
+          const used = point.values.used
+          const memTotal = point.values.total
+          return used == null || memTotal == null ? null : (used / memTotal) * 100
+        }),
+        min: 0,
+        max: 100,
+        format: pct,
+      }}
     />
   )
 }
@@ -149,7 +192,12 @@ function DiskTile() {
       label="Disk busy"
       value={<Percent value={current[1]} />}
       foot={`${current[0]}, the busiest disk in the last interval`}
-      trend={busiest.slice(1).map((entry) => entry?.[1] ?? null)}
+      trend={{
+        values: busiest.slice(1).map((entry) => entry?.[1] ?? null),
+        min: 0,
+        max: 100,
+        format: pct,
+      }}
     />
   )
 }
@@ -176,7 +224,11 @@ function LoadTile() {
           ? `${(load / online).toFixed(2)} per CPU · ${online} CPUs online`
           : 'Online CPU count not recorded'
       }
-      trend={chart.map((point) => point.values.load ?? null)}
+      trend={{
+        values: chart.map((point) => point.values.load ?? null),
+        min: 0,
+        format: (value) => value.toFixed(2),
+      }}
     />
   )
 }
@@ -210,7 +262,12 @@ function ConnectionsTile() {
         ) : undefined
       }
       foot="Client backends in pg_stat_activity, last sample"
-      trend={chart.map((point) => point.values.connections ?? null)}
+      trend={{
+        values: chart.map((point) => point.values.connections ?? null),
+        min: 0,
+        max: max ?? undefined,
+        format: integer,
+      }}
     />
   )
 }
@@ -243,7 +300,12 @@ function CacheHitTile() {
         label="Cache hit ratio"
         value={<Percent value={interval} />}
         foot="Δblks_hit ÷ (Δblks_hit + Δblks_read), all databases, last interval"
-        trend={chart.slice(1).map((point) => point.values.ratio ?? null)}
+        trend={{
+          values: chart.slice(1).map((point) => point.values.ratio ?? null),
+          min: 0,
+          max: 100,
+          format: pct,
+        }}
       />
     )
   }
@@ -273,7 +335,14 @@ function WalTile() {
       label="WAL generated"
       value={`${perSecond.number} ${perSecond.unit}/s`}
       foot={`Change in ${source} ÷ seconds, last interval`}
-      trend={chart.slice(1).map((point) => point.values.wal ?? null)}
+      trend={{
+        values: chart.slice(1).map((point) => point.values.wal ?? null),
+        min: 0,
+        format: (value) => {
+          const rate = bytes(value * 1024 ** 2)
+          return `${rate.number} ${rate.unit}/s`
+        },
+      }}
     />
   )
 }
