@@ -59,8 +59,11 @@ pub fn collect_activity_aggregates(
 
     for row in rows.rows {
         let database_name = parse_string_optional(&row[0]).map(|v| sanitize_identifier(&v).value);
+        // Backend types such as "client backend" contain spaces, which the
+        // identifier sanitizer rejects. Store them as `pg_stat_io` rows do,
+        // with underscores.
         let backend_type = match parse_text_string(&row[1]) {
-            Ok(v) => sanitize_identifier(&v).value,
+            Ok(v) => sanitize_identifier(&v.replace(' ', "_")).value,
             Err(_) => continue,
         };
         let state = parse_string_optional(&row[2]);
