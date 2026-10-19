@@ -4,6 +4,7 @@ mod identity;
 mod kernel;
 mod limits;
 mod memory;
+mod network;
 mod pressure;
 mod storage;
 
@@ -22,6 +23,7 @@ pub use memory::{
     parse_meminfo, MemoryCollector, MemoryEntry, MemoryObservations, MemoryUnit, VmEventEntry,
     VmEventUnit,
 };
+pub use network::{parse_net_dev, NetworkCollector, NetworkEntry, NetworkObservations};
 pub use pressure::{PressureCollector, PressureObservations, PsiEntry, PsiResource, PsiScope};
 pub use storage::{
     BlockDeviceEntry, BlockIoEntry, MountEntry, StorageCollector, StorageObservations,

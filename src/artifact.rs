@@ -16,7 +16,7 @@ use crate::contract::{
 };
 use crate::linux::{
     CgroupObservations, ComputeObservations, KernelObservations, LimitsObservations,
-    MemoryObservations, PressureObservations, StorageObservations,
+    MemoryObservations, NetworkObservations, PressureObservations, StorageObservations,
 };
 use crate::postgres::TargetInventory;
 
@@ -524,6 +524,29 @@ impl crate::collector::Sink for PartialWriter {
             &self.snapshot_id,
             self.sample_id,
             inventory,
+            &collected_at,
+        )?;
+        tx.commit().map_err(ArtifactError::Sqlite)?;
+        self.fsync_partial()
+    }
+
+    fn write_network(
+        &mut self,
+        network: &NetworkObservations,
+        outcomes: &[ComponentOutcome],
+    ) -> Result<(), ArtifactError> {
+        let tx = self
+            .connection
+            .transaction()
+            .map_err(ArtifactError::Sqlite)?;
+        let collected_at = format_timestamp(crate::contract::now_utc());
+        write_outcomes(&tx, &self.snapshot_id, self.next_sequence, outcomes)?;
+        self.next_sequence += outcome_count(outcomes)?;
+        write_network_io(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            network,
             &collected_at,
         )?;
         tx.commit().map_err(ArtifactError::Sqlite)?;
@@ -1205,6 +1228,44 @@ fn write_vm_events(
                 entry.key,
                 value,
                 entry.unit.as_str(),
+            ])
+            .map_err(ArtifactError::Sqlite)?;
+    }
+    Ok(())
+}
+
+fn write_network_io(
+    tx: &rusqlite::Transaction,
+    snapshot_id: &str,
+    sample_id: i64,
+    network: &NetworkObservations,
+    collected_at: &str,
+) -> Result<(), ArtifactError> {
+    let mut statement = tx
+        .prepare(
+            "INSERT INTO linux_network_io (
+                snapshot_id, sample_id, collected_at, interface,
+                rx_bytes, rx_packets, rx_errors, rx_dropped,
+                tx_bytes, tx_packets, tx_errors, tx_dropped
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        )
+        .map_err(ArtifactError::Sqlite)?;
+    let int = |value: u64| i64::try_from(value).map_err(|_| ArtifactError::ValueOutOfRange);
+    for entry in &network.interfaces {
+        statement
+            .execute(params![
+                snapshot_id,
+                sample_id,
+                collected_at,
+                entry.interface,
+                int(entry.rx_bytes)?,
+                int(entry.rx_packets)?,
+                int(entry.rx_errors)?,
+                int(entry.rx_dropped)?,
+                int(entry.tx_bytes)?,
+                int(entry.tx_packets)?,
+                int(entry.tx_errors)?,
+                int(entry.tx_dropped)?,
             ])
             .map_err(ArtifactError::Sqlite)?;
     }

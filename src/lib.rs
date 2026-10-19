@@ -19,7 +19,8 @@ use uuid::Uuid;
 use crate::collector::run_collector;
 use crate::linux::{
     CgroupsCollector, ComputeCollector, ComputeSampleCollector, IdentityCollector, KernelCollector,
-    LimitsCollector, MemoryCollector, PressureCollector, StorageCollector, StorageSampleCollector,
+    LimitsCollector, MemoryCollector, NetworkCollector, PressureCollector, StorageCollector,
+    StorageSampleCollector,
 };
 use crate::postgres::{PostgresCollector, PostgresSampler};
 
@@ -174,6 +175,11 @@ fn run_collection(
         if cancel.is_cancelled() {
             return Ok(interrupted_report(partial_path));
         }
+
+        has_failures |= run_collector(&NetworkCollector, &mut writer)?;
+        if cancel.is_cancelled() {
+            return Ok(interrupted_report(partial_path));
+        }
     }
 
     if domains.postgresql_enabled() {
@@ -249,6 +255,7 @@ fn run_samples(
             has_failures |= run_collector(&PressureCollector, writer)?;
             has_failures |= run_collector(&StorageSampleCollector, writer)?;
             has_failures |= run_collector(&CgroupsCollector, writer)?;
+            has_failures |= run_collector(&NetworkCollector, writer)?;
         }
         if let Some(postgres) = &postgres {
             has_failures |= run_collector(postgres, writer)?;

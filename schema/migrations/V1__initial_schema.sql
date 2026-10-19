@@ -197,6 +197,22 @@ CREATE TABLE linux_block_io (
     PRIMARY KEY (snapshot_id, sample_id, device_major, device_minor),
     FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 ) STRICT;
+CREATE TABLE linux_network_io (
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
+    collected_at TEXT NOT NULL,
+    interface TEXT NOT NULL,
+    rx_bytes INTEGER NOT NULL,
+    rx_packets INTEGER NOT NULL,
+    rx_errors INTEGER NOT NULL,
+    rx_dropped INTEGER NOT NULL,
+    tx_bytes INTEGER NOT NULL,
+    tx_packets INTEGER NOT NULL,
+    tx_errors INTEGER NOT NULL,
+    tx_dropped INTEGER NOT NULL,
+    PRIMARY KEY (snapshot_id, sample_id, interface),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
+) STRICT;
 CREATE TABLE linux_resource_limit (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
     collected_at TEXT NOT NULL,

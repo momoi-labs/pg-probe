@@ -7,6 +7,7 @@ const VARIANT: &[&str] = &[
     "linux_vm_event",
     "linux_psi",
     "linux_block_io",
+    "linux_network_io",
     "linux_cgroup_usage",
     "linux_cgroup_event",
     "linux_cgroup_io",

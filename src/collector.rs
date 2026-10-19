@@ -12,7 +12,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use crate::contract::{CollectionStatus, ComponentOutcome, LinuxIdentity};
 use crate::linux::{
     CgroupObservations, ComputeObservations, KernelObservations, LimitsObservations,
-    MemoryObservations, PressureObservations, StorageObservations,
+    MemoryObservations, NetworkObservations, PressureObservations, StorageObservations,
 };
 use crate::postgres::TargetInventory;
 
@@ -99,6 +99,12 @@ pub trait Sink {
     fn write_postgres(
         &mut self,
         inventory: &TargetInventory,
+        outcomes: &[ComponentOutcome],
+    ) -> Result<(), Self::Error>;
+
+    fn write_network(
+        &mut self,
+        network: &NetworkObservations,
         outcomes: &[ComponentOutcome],
     ) -> Result<(), Self::Error>;
 }
@@ -273,6 +279,14 @@ mod tests {
         fn write_postgres(
             &mut self,
             _inventory: &TargetInventory,
+            _outcomes: &[ComponentOutcome],
+        ) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn write_network(
+            &mut self,
+            _network: &NetworkObservations,
             _outcomes: &[ComponentOutcome],
         ) -> Result<(), Self::Error> {
             Ok(())
