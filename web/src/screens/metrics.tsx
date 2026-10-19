@@ -17,15 +17,14 @@ import {
   collected,
   integer,
   latest,
-  missingReason,
   num,
   sum,
   useOutcomes,
   useTable,
 } from '../artifact.ts'
 import { bytes, Bytes, Percent, Unknown } from '../format.tsx'
-import { deltas, lastValue, points, rates, useSamples } from '../series.ts'
-import { isClientBackend, Postgres } from './postgres.tsx'
+import { deltas, lastValue, points, useSamples } from '../series.ts'
+import { isClientBackend, Postgres, useWalRate } from './postgres.tsx'
 import { System, useCpuShares, useDiskBusy } from './system.tsx'
 
 const NOT_RECORDED = 'not recorded in this artifact'
@@ -263,34 +262,17 @@ function CacheHitTile() {
 }
 
 function WalTile() {
-  const samples = useSamples()
-  const outcomes = useOutcomes()
-  const { data, isPending } = useTable('postgres_wal_stats')
-  if (isPending || samples.isPending) {
-    return <Tile label="WAL generated" loading value={null} foot={null} />
-  }
-  if (!data?.length) {
-    const reason = missingReason(outcomes, 'postgres.stats.wal')
-    return (
-      <UnknownTile
-        label="WAL generated"
-        reason={
-          reason?.includes('not_in_server_version')
-            ? 'pg_stat_wal needs PostgreSQL 14'
-            : NOT_RECORDED
-        }
-      />
-    )
-  }
-  const chart = rates(samples.data ?? [], data, (rows) => ({ wal: num(rows[0], 'wal_bytes') }))
+  const { chart, source, isPending } = useWalRate()
+  if (isPending) return <Tile label="WAL generated" loading value={null} foot={null} />
+  if (source == null) return <UnknownTile label="WAL generated" reason={NOT_RECORDED} />
   const current = lastValue(chart, 'wal')
   if (current == null) return <UnknownTile label="WAL generated" reason={NEEDS_SAMPLES} />
-  const perSecond = bytes(current)
+  const perSecond = bytes(current * 1024 ** 2)
   return (
     <Tile
       label="WAL generated"
       value={`${perSecond.number} ${perSecond.unit}/s`}
-      foot="Δwal_bytes ÷ seconds, last interval"
+      foot={`Change in ${source} ÷ seconds, last interval`}
       trend={chart.slice(1).map((point) => point.values.wal ?? null)}
     />
   )

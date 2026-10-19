@@ -72,11 +72,20 @@ export const samplesQuery = (id: string) =>
 export const tableQuery = (id: string, table: string, filters: Record<string, string> = {}) =>
   queryOptions({
     queryKey: ['table', id, table, filters],
-    queryFn: () => {
+    queryFn: async () => {
       const search = new URLSearchParams(filters).toString()
-      return getJson<TableRows>(
-        `/api/snapshots/${encodeURIComponent(id)}/tables/${encodeURIComponent(table)}${search ? `?${search}` : ''}`,
-      )
+      try {
+        return await getJson<TableRows>(
+          `/api/snapshots/${encodeURIComponent(id)}/tables/${encodeURIComponent(table)}${search ? `?${search}` : ''}`,
+        )
+      } catch (error) {
+        // Artifacts from an older schema lack newer tables. Their panels show
+        // the value as not recorded, as for an empty table.
+        if (error instanceof Error && error.message === 'table not found') {
+          return { table, columns: [], rows: [], truncated: false }
+        }
+        throw error
+      }
     },
     select: (data) => data.rows,
   })

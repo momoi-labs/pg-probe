@@ -21,7 +21,7 @@ import {
 } from '../artifact.ts'
 import { bytes } from '../format.tsx'
 import { deltas, points, rates, useSamples, type Values } from '../series.ts'
-import { ChartPanel, GapPanel, Note, Panel } from './panels.tsx'
+import { ChartPanel, Note, Panel } from './panels.tsx'
 
 const MIB = 1024 ** 2
 const percent = (value: number) => `${value.toFixed(1)}%`
@@ -163,12 +163,32 @@ function TemporaryFiles() {
   )
 }
 
+// WAL generated per second. pg_stat_wal.wal_bytes from PostgreSQL 14, else
+// the change in the recorded WAL position, which works from 9.2.
+export function useWalRate() {
+  const samples = useSamples()
+  const wal = useTable('postgres_wal_stats')
+  const position = useTable('postgres_wal_position')
+  const fromStats = (wal.data?.length ?? 0) > 0
+  const rows = fromStats ? (wal.data ?? []) : (position.data ?? [])
+  const column = fromStats ? 'wal_bytes' : 'wal_position_bytes'
+  const chart = rates(samples.data ?? [], rows, (sampleRows) => ({
+    wal: sampleRows.length ? (num(sampleRows[0], column) ?? 0) / MIB : null,
+  }))
+  const source = rows.length === 0 ? null : fromStats ? 'pg_stat_wal.wal_bytes' : 'the WAL position'
+  return {
+    chart,
+    source,
+    isPending: samples.isPending || wal.isPending || position.isPending,
+  }
+}
+
 function WalAndCheckpoints() {
   const samples = useSamples()
   const target = useTable('postgres_target')
   const bgwriter = useTable('postgres_bgwriter_stats')
   const checkpointer = useTable('postgres_checkpointer_stats')
-  const wal = useTable('postgres_wal_stats')
+  const wal = useWalRate()
   const blockSize = num(target.data?.[0], 'block_size_bytes') ?? 8192
   const pages = (value: number | null) => (value == null ? null : (value * blockSize) / MIB)
   const sampleList = samples.data ?? []
@@ -182,10 +202,8 @@ function WalAndCheckpoints() {
   const checkpoints = rates(sampleList, checkpointer.data ?? [], (rows) => ({
     checkpoint: pages(num(rows[0], 'buffers_written')),
   }))
-  const walRates = rates(sampleList, wal.data ?? [], (rows) => ({
-    wal: rows.length ? (num(rows[0], 'wal_bytes') ?? 0) / MIB : null,
-  }))
-  const hasWal = (wal.data?.length ?? 0) > 0
+  const walRates = wal.chart
+  const hasWal = wal.source != null
   const chart = writers.map((point, index) => ({
     timestamp: point.timestamp,
     values: {
@@ -212,7 +230,7 @@ function WalAndCheckpoints() {
       formatValue={mibPerSecond}
       data={chart}
       series={series}
-      note={`Buffers written per second × block size (${blockSize} bytes).${hasWal ? ' WAL from pg_stat_wal.wal_bytes.' : ' pg_stat_wal needs PostgreSQL 14.'}`}
+      note={`Buffers written per second × block size (${blockSize} bytes).${hasWal ? ` WAL from the change in ${wal.source}.` : ' No WAL figure in this artifact.'}`}
     />
   )
 }
@@ -299,6 +317,110 @@ function DatabaseSize() {
   )
 }
 
+const relationName = (row: Row) => `${row.database_name}.${row.schema_name}.${row.relation_name}`
+
+function LargestTables() {
+  const target = useTable('postgres_target')
+  const { data, isPending } = useTable('postgres_relation')
+  const blockSize = num(target.data?.[0], 'block_size_bytes') ?? 8192
+  const pages = (row: Row) =>
+    (num(row, 'heap_pages') ?? 0) + (num(row, 'index_pages') ?? 0) + (num(row, 'toast_pages') ?? 0)
+  const largest = [...(data ?? [])].sort((a, b) => pages(b) - pages(a)).slice(0, 6)
+  const top = largest.length ? pages(largest[0]) * blockSize : 0
+  return (
+    <Panel title="Largest tables" sub="heap, indexes and TOAST, top 6" span={6} loading={isPending}>
+      {largest.length > 0 ? (
+        <>
+          <BarGauge
+            label="Size per table (GiB)"
+            max={top / 1024 ** 3}
+            formatValue={(value) => `${value.toFixed(2)} GiB`}
+            rows={largest.map((row) => ({
+              key: relationName(row),
+              label: relationName(row),
+              value: (pages(row) * blockSize) / 1024 ** 3,
+            }))}
+          />
+          <Note>
+            relpages × block size, as of the last ANALYZE or VACUUM, read once. Estimates, not
+            pg_total_relation_size().
+          </Note>
+        </>
+      ) : (
+        <Note>
+          Not recorded in this artifact. Captures before schema version 3 have no relations.
+        </Note>
+      )}
+    </Panel>
+  )
+}
+
+function DeadTuples() {
+  const { data, isPending } = useTable('postgres_relation')
+  const rows = [...(data ?? [])]
+    .filter((row) => (num(row, 'dead_tuples') ?? 0) > 0)
+    .sort((a, b) => (num(b, 'dead_tuples') ?? 0) - (num(a, 'dead_tuples') ?? 0))
+    .slice(0, 6)
+  let content
+  if (rows.length > 0) {
+    content = (
+      <>
+        <Table density="compact">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Table</TableHead>
+              <TableHead className="num">Dead tuples</TableHead>
+              <TableHead className="num">Live tuples</TableHead>
+              <TableHead className="num">Dead (%)</TableHead>
+              <TableHead>Last autovacuum</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => {
+              const dead = num(row, 'dead_tuples') ?? 0
+              const live = num(row, 'live_tuples')
+              return (
+                <TableRow key={relationName(row)}>
+                  <TableCell>
+                    <code>{relationName(row)}</code>
+                  </TableCell>
+                  <TableCell className="num">{dead.toLocaleString('en-US')}</TableCell>
+                  <TableCell className="num">
+                    {live == null ? 'NULL' : live.toLocaleString('en-US')}
+                  </TableCell>
+                  <TableCell className="num">
+                    {live == null || live + dead === 0
+                      ? '—'
+                      : ((dead / (live + dead)) * 100).toFixed(1)}
+                  </TableCell>
+                  <TableCell>{row.last_autovacuum ?? 'NULL'}</TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
+        <Note>
+          n_dead_tup and n_live_tup from pg_stat_user_tables, read once. These are estimates kept
+          by the statistics collector.
+        </Note>
+      </>
+    )
+  } else if (isPending) {
+    content = null
+  } else if (data?.length) {
+    content = <Note>No dead tuples in the recorded tables.</Note>
+  } else {
+    content = (
+      <Note>Not recorded in this artifact. Captures before schema version 3 have no relations.</Note>
+    )
+  }
+  return (
+    <Panel title="Dead tuples" sub="vacuum backlog, top 6" span={12} loading={isPending}>
+      {content}
+    </Panel>
+  )
+}
+
 export function Postgres() {
   return (
     <Disclosure summary="PostgreSQL" open>
@@ -310,12 +432,8 @@ export function Postgres() {
         <WalAndCheckpoints />
         <ReplicationLag />
         <DatabaseSize />
-        <GapPanel title="Largest tables" sub="heap, top 6" span={6} gap="no collector">
-          Only whole-database size exists. The plan is a new postgres.stats.relations collector.
-        </GapPanel>
-        <GapPanel title="Dead tuples" sub="vacuum backlog, top 6" span={12} gap="no collector">
-          Nothing reads pg_stat_user_tables yet. It comes with postgres.stats.relations.
-        </GapPanel>
+        <LargestTables />
+        <DeadTuples />
       </DashboardGrid>
     </Disclosure>
   )

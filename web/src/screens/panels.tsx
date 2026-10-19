@@ -89,6 +89,15 @@ export function ChartPanel({
   note,
   ...panel
 }: ChartPanelProps) {
+  // Kiso charts take one to five series. None means the artifact holds no
+  // data for this panel, for example PostgreSQL panels in a Linux capture.
+  if (series.length === 0) {
+    return (
+      <Panel {...panel}>
+        <Note>Not recorded in this artifact.</Note>
+      </Panel>
+    )
+  }
   return (
     <Panel {...panel}>
       <Chart

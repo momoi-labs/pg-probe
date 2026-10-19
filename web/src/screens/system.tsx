@@ -1,8 +1,8 @@
-import { DashboardGrid, Disclosure } from '@momoi-labs/kiso-react'
+import { DashboardGrid, Disclosure, Meter } from '@momoi-labs/kiso-react'
 import type { Row } from '../api.ts'
 import { missingReason, num, useOutcomes, useTable } from '../artifact.ts'
 import { deltas, points, rates, useSamples, type Values } from '../series.ts'
-import { ChartPanel, GapPanel, Note, Panel } from './panels.tsx'
+import { ChartPanel, Note, Panel } from './panels.tsx'
 
 const GIB = 1024 ** 3
 const MIB = 1024 ** 2
@@ -346,13 +346,80 @@ function PressureStall() {
 
 function FilesystemUsage() {
   const { data, isPending } = useTable('linux_mount')
-  const sized = data?.filter((row) => num(row, 'total_bytes') != null).length ?? 0
+  const mounts = (data ?? [])
+    .filter((row) => row.mount_point != null && num(row, 'total_bytes') != null)
+    .sort((a, b) => (num(b, 'total_bytes') ?? 0) - (num(a, 'total_bytes') ?? 0))
   return (
-    <GapPanel title="Filesystem usage" sub="point in time" span={6} gap="needs schema change">
-      {isPending
-        ? 'Loading.'
-        : `linux_mount has no mount path, so the console cannot name the data or WAL volume. ${sized} of ${data?.length ?? 0} mounts in this artifact have a size.`}
-    </GapPanel>
+    <Panel title="Filesystem usage" sub="point in time, local disks" span={6} loading={isPending}>
+      {mounts.length > 0 ? (
+        <>
+          <div className="stack-sm">
+            {mounts.map((row) => {
+              const total = num(row, 'total_bytes') ?? 0
+              const used = total - (num(row, 'available_bytes') ?? 0)
+              return (
+                <Meter
+                  key={String(row.mount_point)}
+                  label={`${row.mount_point} (${row.filesystem_type})`}
+                  value={used}
+                  max={total}
+                  valueText={`${gib(used / GIB)} of ${gib(total / GIB)}`}
+                />
+              )
+            })}
+          </div>
+          <Note>
+            statvfs on local disk filesystems, read once. Network filesystems and /home are not
+            recorded. Used counts space reserved for root.
+          </Note>
+        </>
+      ) : (
+        <Note>
+          Not recorded in this artifact. Captures before schema version 3 have no mount sizes.
+        </Note>
+      )}
+    </Panel>
+  )
+}
+
+function NetworkThroughput() {
+  const samples = useSamples()
+  const { data, isPending } = useTable('linux_network_io')
+  const interfaces = [...new Set((data ?? []).map((row) => String(row.interface)))]
+  if (!isPending && interfaces.length === 0) {
+    return (
+      <Panel title="Network throughput" sub="all interfaces" span={6}>
+        <Note>
+          Not recorded in this artifact. Captures before schema version 3 have no network
+          counters.
+        </Note>
+      </Panel>
+    )
+  }
+  const chart = rates(samples.data ?? [], data ?? [], (rows) =>
+    rows.length
+      ? {
+          received: rows.reduce((total, row) => total + (num(row, 'rx_bytes') ?? 0), 0) / MIB,
+          sent: rows.reduce((total, row) => total + (num(row, 'tx_bytes') ?? 0), 0) / MIB,
+        }
+      : { received: null, sent: null },
+  )
+  return (
+    <ChartPanel
+      title="Network throughput"
+      sub="all interfaces"
+      span={6}
+      loading={isPending || samples.isPending}
+      label="Network throughput (MiB/s)"
+      min={0}
+      formatValue={mibPerSecond}
+      data={chart}
+      series={[
+        { key: 'received', label: 'Received' },
+        { key: 'sent', label: 'Sent' },
+      ]}
+      note={`Change in /proc/net/dev bytes ÷ seconds, summed over ${interfaces.join(', ')}. Loopback and container links are not recorded.`}
+    />
   )
 }
 
@@ -392,9 +459,7 @@ export function System() {
         <Swap />
         <DiskThroughput />
         <DiskUtilization />
-        <GapPanel title="Network throughput" sub="primary interface" span={6} gap="no collector">
-          No collector reads /proc/net/dev yet. The plan is a new linux.network collector.
-        </GapPanel>
+        <NetworkThroughput />
         <PressureStall />
         <FilesystemUsage />
         <Processes />
