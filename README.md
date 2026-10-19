@@ -158,6 +158,11 @@ pg-probe top -h db.example.com -U monitor -d app -i 5
 | `?` | List every key |
 | `q` | Quit |
 
+The display options (`Tab`, `t`, `c`, `g`, `h`) are saved when they change
+and restored on the next run, in `$XDG_CONFIG_HOME/pg-probe/top.json` or
+`~/.config/pg-probe/top.json`. The view is not saved, so `top` always
+starts in the running queries view.
+
 The query page shows everything known about the selected backend: the full
 query, client, application, connection, transaction, and query ages, and
 `xid`/`xmin` on 9.4 and later. On the query page:

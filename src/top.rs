@@ -14,8 +14,10 @@
 mod explain;
 mod function;
 mod os;
+mod settings;
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -24,8 +26,11 @@ use ratatui::style::{Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Cell, Clear, Paragraph, Row, Table, TableState, Wrap};
 use ratatui::{DefaultTerminal, Frame};
+use serde::{Deserialize, Serialize};
 use sqlformat::{Dialect, FormatOptions, QueryParams};
 use thiserror::Error;
+
+use settings::Settings;
 
 use crate::postgres::stats::capability::{has_backend_type, has_wait_event_type};
 use crate::postgres::{
@@ -332,7 +337,8 @@ impl View {
 }
 
 /// What the list groups sessions by, cycled with `g`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 enum Group {
     #[default]
     None,
@@ -390,6 +396,9 @@ struct App {
     /// Active and waiting counts of the last refreshes, oldest first. Kept
     /// in memory only, for the compact header.
     history: VecDeque<(usize, usize)>,
+    /// Where display options are saved when they change. `None` keeps them
+    /// for this run only.
+    settings_path: Option<PathBuf>,
     popup: Option<Popup>,
     backends: Vec<Backend>,
     /// Blocker pid to the pids it blocks. Filled only in the blocking view.
@@ -478,6 +487,11 @@ pub fn run(params: &ConnectionParams, interval: Duration) -> Result<(), TopError
     let sql = backends_sql(server.version_num);
     let local = is_local(client.endpoint());
     let mut app = App::new(server, interval, local);
+    let settings_path = settings::path();
+    if let Some(path) = &settings_path {
+        app.apply(settings::load(path));
+    }
+    app.settings_path = settings_path;
     // The first fetch happens before raw mode, so a failure prints normally.
     app.refresh(&client, &sql)?;
 
@@ -501,6 +515,7 @@ impl App {
             group: Group::None,
             compact_header: false,
             history: VecDeque::new(),
+            settings_path: None,
             popup: None,
             backends: Vec::new(),
             blocks: HashMap::new(),
@@ -508,6 +523,24 @@ impl App {
             os: local.then(OsState::new),
             table: TableState::default().with_selected(Some(0)),
         }
+    }
+
+    fn settings(&self) -> Settings {
+        Settings {
+            preview: self.preview,
+            tree: self.tree,
+            compact: self.compact,
+            group: self.group,
+            compact_header: self.compact_header,
+        }
+    }
+
+    fn apply(&mut self, settings: Settings) {
+        self.preview = settings.preview;
+        self.tree = settings.tree;
+        self.compact = settings.compact;
+        self.group = settings.group;
+        self.compact_header = settings.compact_header;
     }
 
     fn event_loop(
@@ -622,6 +655,7 @@ impl App {
                     continue;
                 }
                 let view = self.view;
+                let before = self.settings();
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                     KeyCode::Char(' ') => self.paused = !self.paused,
@@ -649,6 +683,13 @@ impl App {
                     KeyCode::Home => self.table.select(Some(0)),
                     KeyCode::End => self.select_by(isize::MAX / 2),
                     _ => {}
+                }
+                let after = self.settings();
+                if after != before {
+                    if let Some(path) = &self.settings_path {
+                        // A read-only home must not stop the live view.
+                        let _ = settings::save(path, &after);
+                    }
                 }
                 if self.view != view {
                     self.table.select(Some(0));
