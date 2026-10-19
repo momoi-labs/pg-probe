@@ -42,8 +42,10 @@ file has a bug.
 - Charts use one point per sample, on the timestamps from `/samples`. Rates
   come from the change between samples. The first sample and any negative
   change, such as a counter reset, are gaps, never zero.
-- Tiles show the last sample, or the last interval for rates, with a
-  sparkline of the session.
+- Overview tiles summarize; the panels below explain. A tile shows the last
+  sample, or the last interval for rates, one line of context and the session
+  peak in text. It has no chart of its own: the whole tile links to the panel
+  with the full chart, as Kiso allows for a Card that is one destination.
 
 ## Pattern choices
 

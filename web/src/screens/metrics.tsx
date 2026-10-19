@@ -3,13 +3,12 @@ import {
   DashboardGrid,
   DashboardPanel,
   Disclosure,
-  Meter,
   Skeleton,
-  Sparkline,
   Stat,
   StatFoot,
   StatLabel,
   StatValue,
+  type ChartSample,
 } from '@momoi-labs/kiso-react'
 import type { ReactNode } from 'react'
 import type { Row } from '../api.ts'
@@ -22,89 +21,91 @@ import {
   useOutcomes,
   useTable,
 } from '../artifact.ts'
-import { bytes, Bytes, duration, Percent, Unknown } from '../format.tsx'
+import { bytes, Bytes, Percent, Unknown } from '../format.tsx'
 import { deltas, lastValue, points, useSamples } from '../series.ts'
+import { Note, panelId } from './panels.tsx'
 import { isClientBackend, Postgres, useWalRate } from './postgres.tsx'
 import { System, useCpuShares, useDiskBusy } from './system.tsx'
 
 const NOT_RECORDED = 'not recorded in this artifact'
 const NEEDS_SAMPLES = 'a rate needs two or more samples, and this artifact holds one'
 
-type Trend = {
-  // One value per sample, or per interval for rates.
+// A session series behind a tile: one value per sample or interval, with its
+// time. The tile names its highest point, or its lowest when lower is the
+// notable direction (cache hit ratio), so the incident is not lost behind a
+// calm last value.
+type Peak = {
   values: (number | null)[]
-  // A fixed scale keeps a small change small: percentages run 0 to 100.
-  min?: number
-  max?: number
+  at: number[]
   format: (value: number) => string
+  lowest?: boolean
 }
 
 type TileProps = {
   label: string
   loading?: boolean
   value: ReactNode
-  meter?: ReactNode
-  foot: ReactNode
-  trend?: Trend
+  context?: ReactNode
+  peak?: Peak
+  // Title of the panel with the full chart. The tile links to it.
+  chart?: string
 }
 
-// Says what the sparkline covers: the session length and its lowest and
-// highest values, so the line reads as data rather than decoration.
-function TrendCaption({ trend }: { trend: Trend }) {
-  const samples = useSamples().data ?? []
-  const known = trend.values.filter((value): value is number => value != null)
-  if (known.length === 0 || samples.length < 2) return null
-  const span = duration(samples[0].taken_at_utc, samples[samples.length - 1].taken_at_utc)
-  return (
-    <StatFoot>
-      {span ? `Last ${span}` : 'Session'} · min {trend.format(Math.min(...known))} · max{' '}
-      {trend.format(Math.max(...known))}
-    </StatFoot>
+function peakText(peak: Peak) {
+  let best: number | null = null
+  let when = 0
+  peak.values.forEach((value, index) => {
+    if (value == null) return
+    if (best == null || (peak.lowest ? value < best : value > best)) {
+      best = value
+      when = peak.at[index]
+    }
+  })
+  if (best == null || peak.values.filter((value) => value != null).length < 2) return null
+  const time = new Date(when).toISOString().slice(11, 16)
+  return `${peak.lowest ? 'Lowest' : 'Peak'} ${peak.format(best)} at ${time}`
+}
+
+function Tile({ label, loading, value, context, peak, chart }: TileProps) {
+  const card = (
+    <Card>
+      <Stat>
+        <StatLabel>{label}</StatLabel>
+        {loading ? (
+          <Skeleton variant="text" />
+        ) : (
+          <>
+            <StatValue>{value}</StatValue>
+            {context && <StatFoot>{context}</StatFoot>}
+            {peak && peakText(peak) && <StatFoot>{peakText(peak)}</StatFoot>}
+          </>
+        )}
+      </Stat>
+    </Card>
   )
-}
-
-function Tile({ label, loading, value, meter, foot, trend }: TileProps) {
   return (
     <DashboardPanel span={3}>
-      <Card>
-        <Stat>
-          <StatLabel>{label}</StatLabel>
-          {loading ? (
-            <Skeleton variant="text" />
-          ) : (
-            <>
-              <StatValue>{value}</StatValue>
-              {meter}
-              <StatFoot>{foot}</StatFoot>
-              {trend && trend.values.length > 1 && (
-                <>
-                  <Sparkline
-                    values={trend.values}
-                    height={28}
-                    min={trend.min}
-                    max={trend.max}
-                    label={`${label} over the session`}
-                  />
-                  <TrendCaption trend={trend} />
-                </>
-              )}
-            </>
-          )}
-        </Stat>
-      </Card>
+      {chart ? (
+        <a className="tile-link" href={`#${panelId(chart)}`} aria-label={`${label}: open the ${chart} chart`}>
+          {card}
+        </a>
+      ) : (
+        card
+      )}
     </DashboardPanel>
   )
 }
 
 const pct = (value: number) => `${value.toFixed(1)}%`
+const times = (data: ChartSample[]) => data.map((point) => point.timestamp)
 
 function UnknownTile({ label, reason }: { label: string; reason: string }) {
-  return <Tile label={label} value={<Unknown reason={reason} />} foot={`Unknown: ${reason}.`} />
+  return <Tile label={label} value={<Unknown reason={reason} />} context={`Unknown: ${reason}.`} />
 }
 
 function CpuTile() {
   const { chart, isPending } = useCpuShares()
-  if (isPending) return <Tile label="CPU busy" loading value={null} foot={null} />
+  if (isPending) return <Tile label="CPU busy" loading value={null}  />
   const trend = chart.map((point) => {
     const parts = Object.values(point.values)
     return parts.some((value) => value == null)
@@ -117,8 +118,8 @@ function CpuTile() {
     <Tile
       label="CPU busy"
       value={<Percent value={current} />}
-      foot="user + system + iowait + steal + nice, IRQ and softirq, last interval"
-      trend={{ values: trend.slice(1), min: 0, max: 100, format: pct }}
+      peak={{ values: trend, at: times(chart), format: pct }}
+      chart="CPU utilization"
     />
   )
 }
@@ -127,7 +128,7 @@ function MemoryTile() {
   const samples = useSamples()
   const { data, isPending } = useTable('linux_memory')
   if (isPending || samples.isPending) {
-    return <Tile label="Memory used" loading value={null} foot={null} />
+    return <Tile label="Memory used" loading value={null}  />
   }
   const value = (rows: Row[], key: string) =>
     num(
@@ -151,32 +152,24 @@ function MemoryTile() {
     <Tile
       label="Memory used"
       value={<Percent value={(used / total) * 100} />}
-      meter={
-        <Meter
-          label="Used of MemTotal"
-          value={used}
-          max={total}
-          valueText={`${usedText.number} ${usedText.unit} of ${totalText.number} ${totalText.unit}`}
-        />
-      }
-      foot="MemTotal − MemAvailable, last sample"
-      trend={{
+      context={`${usedText.number} of ${totalText.number} ${totalText.unit}`}
+      peak={{
         values: chart.map((point) => {
           const used = point.values.used
           const memTotal = point.values.total
           return used == null || memTotal == null ? null : (used / memTotal) * 100
         }),
-        min: 0,
-        max: 100,
+        at: times(chart),
         format: pct,
       }}
+      chart="Memory"
     />
   )
 }
 
 function DiskTile() {
   const { all, isPending } = useDiskBusy()
-  if (isPending) return <Tile label="Disk busy" loading value={null} foot={null} />
+  if (isPending) return <Tile label="Disk busy" loading value={null}  />
   // The busiest disk in each interval.
   const busiest = all.map((point) => {
     const entries = Object.entries(point.values).filter(
@@ -191,13 +184,9 @@ function DiskTile() {
     <Tile
       label="Disk busy"
       value={<Percent value={current[1]} />}
-      foot={`${current[0]}, the busiest disk in the last interval`}
-      trend={{
-        values: busiest.slice(1).map((entry) => entry?.[1] ?? null),
-        min: 0,
-        max: 100,
-        format: pct,
-      }}
+      context={`${current[0]}, the busiest disk`}
+      peak={{ values: busiest.map((entry) => entry?.[1] ?? null), at: times(all), format: pct }}
+      chart="Disk utilization"
     />
   )
 }
@@ -207,7 +196,7 @@ function LoadTile() {
   const scheduler = useTable('linux_scheduler')
   const cpus = useTable('linux_cpu_set')
   if (scheduler.isPending || cpus.isPending || samples.isPending) {
-    return <Tile label="Load, 1 minute" loading value={null} foot={null} />
+    return <Tile label="Load, 1 minute" loading value={null}  />
   }
   const chart = points(samples.data ?? [], scheduler.data ?? [], (rows) => ({
     load: num(rows[0], 'load_avg_1m'),
@@ -219,16 +208,13 @@ function LoadTile() {
     <Tile
       label="Load, 1 minute"
       value={load.toFixed(2)}
-      foot={
-        online > 0
-          ? `${(load / online).toFixed(2)} per CPU · ${online} CPUs online`
-          : 'Online CPU count not recorded'
-      }
-      trend={{
+      context={online > 0 ? `${online} CPUs online` : undefined}
+      peak={{
         values: chart.map((point) => point.values.load ?? null),
-        min: 0,
+        at: times(chart),
         format: (value) => value.toFixed(2),
       }}
+      chart="Load average"
     />
   )
 }
@@ -238,7 +224,7 @@ function ConnectionsTile() {
   const activity = useTable('postgres_activity_aggregates')
   const settings = useTable('postgres_setting')
   if (activity.isPending || settings.isPending || samples.isPending) {
-    return <Tile label="Connections" loading value={null} foot={null} />
+    return <Tile label="Connections" loading value={null}  />
   }
   if (!activity.data?.length) return <UnknownTile label="Connections" reason={NOT_RECORDED} />
   const chart = points(samples.data ?? [], activity.data.filter(isClientBackend), (rows) => ({
@@ -251,23 +237,13 @@ function ConnectionsTile() {
     <Tile
       label="Connections"
       value={integer(connections)}
-      meter={
-        max != null && max > 0 ? (
-          <Meter
-            label="Of max_connections"
-            value={connections}
-            max={max}
-            valueText={`${integer(connections)} of ${integer(max)}`}
-          />
-        ) : undefined
-      }
-      foot="Client backends in pg_stat_activity, last sample"
-      trend={{
+      context={max != null && max > 0 ? `of ${integer(max)} max_connections` : undefined}
+      peak={{
         values: chart.map((point) => point.values.connections ?? null),
-        min: 0,
-        max: max ?? undefined,
+        at: times(chart),
         format: integer,
       }}
+      chart="Connections by state"
     />
   )
 }
@@ -276,7 +252,7 @@ function CacheHitTile() {
   const samples = useSamples()
   const { data, isPending } = useTable('postgres_database_stats')
   if (isPending || samples.isPending) {
-    return <Tile label="Cache hit ratio" loading value={null} foot={null} />
+    return <Tile label="Cache hit ratio" loading value={null}  />
   }
   if (!data?.length) return <UnknownTile label="Cache hit ratio" reason={NOT_RECORDED} />
   const chart = deltas(
@@ -299,13 +275,13 @@ function CacheHitTile() {
       <Tile
         label="Cache hit ratio"
         value={<Percent value={interval} />}
-        foot="Δblks_hit ÷ (Δblks_hit + Δblks_read), all databases, last interval"
-        trend={{
-          values: chart.slice(1).map((point) => point.values.ratio ?? null),
-          min: 0,
-          max: 100,
+        peak={{
+          values: chart.map((point) => point.values.ratio ?? null),
+          at: times(chart),
           format: pct,
+          lowest: true,
         }}
+        chart="Cache hit ratio"
       />
     )
   }
@@ -318,14 +294,14 @@ function CacheHitTile() {
     <Tile
       label="Cache hit ratio"
       value={<Percent value={(hit / (hit + read)) * 100} />}
-      foot="blks_hit ÷ (blks_hit + blks_read), all databases, since the last statistics reset"
+      context="since the last statistics reset"
     />
   )
 }
 
 function WalTile() {
   const { chart, source, isPending } = useWalRate()
-  if (isPending) return <Tile label="WAL generated" loading value={null} foot={null} />
+  if (isPending) return <Tile label="WAL generated" loading value={null}  />
   if (source == null) return <UnknownTile label="WAL generated" reason={NOT_RECORDED} />
   const current = lastValue(chart, 'wal')
   if (current == null) return <UnknownTile label="WAL generated" reason={NEEDS_SAMPLES} />
@@ -334,15 +310,15 @@ function WalTile() {
     <Tile
       label="WAL generated"
       value={`${perSecond.number} ${perSecond.unit}/s`}
-      foot={`Change in ${source} ÷ seconds, last interval`}
-      trend={{
-        values: chart.slice(1).map((point) => point.values.wal ?? null),
-        min: 0,
+      peak={{
+        values: chart.map((point) => point.values.wal ?? null),
+        at: times(chart),
         format: (value) => {
           const rate = bytes(value * 1024 ** 2)
           return `${rate.number} ${rate.unit}/s`
         },
       }}
+      chart="WAL and checkpoint writes"
     />
   )
 }
@@ -350,7 +326,7 @@ function WalTile() {
 function ReplicaLagTile() {
   const outcomes = useOutcomes()
   const replication = useTable('postgres_replication_aggregates')
-  if (replication.isPending) return <Tile label="Replica lag" loading value={null} foot={null} />
+  if (replication.isPending) return <Tile label="Replica lag" loading value={null}  />
   const data = latest(replication.data)
   // No rows means no standby only when the collector ran.
   if (!data.length && !collected(outcomes, 'postgres.aggregates.replication')) {
@@ -361,7 +337,7 @@ function ReplicaLagTile() {
       <Tile
         label="Replica lag"
         value={<span className="muted">None</span>}
-        foot="No standby was connected in the last sample"
+        context="No standby connected"
       />
     )
   }
@@ -371,7 +347,8 @@ function ReplicaLagTile() {
     <Tile
       label="Replica lag"
       value={<Bytes value={Math.max(...lags)} />}
-      foot="Largest max_lag_bytes across standbys, last sample"
+      context="Worst standby"
+      chart="Replication lag"
     />
   )
 }
@@ -389,16 +366,22 @@ export function Metrics() {
 function Overview() {
   return (
     <Disclosure summary="Overview" open>
-      <DashboardGrid>
-        <CpuTile />
-        <MemoryTile />
-        <DiskTile />
-        <LoadTile />
-        <ConnectionsTile />
-        <CacheHitTile />
-        <WalTile />
-        <ReplicaLagTile />
-      </DashboardGrid>
+      <div className="stack-sm">
+        <Note>
+          Each value is the last sample, or the last interval for rates. Peaks cover the whole
+          session. Select a tile to open its chart.
+        </Note>
+        <DashboardGrid>
+          <CpuTile />
+          <MemoryTile />
+          <DiskTile />
+          <LoadTile />
+          <ConnectionsTile />
+          <CacheHitTile />
+          <WalTile />
+          <ReplicaLagTile />
+        </DashboardGrid>
+      </div>
     </Disclosure>
   )
 }

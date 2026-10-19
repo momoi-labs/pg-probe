@@ -26,9 +26,13 @@ type PanelProps = {
   children: ReactNode
 }
 
+// Anchor for a panel, from its title: "CPU utilization" -> "cpu-utilization".
+// Overview tiles link to it.
+export const panelId = (title: string) => title.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+
 export function Panel({ title, sub, span, badge, loading, children }: PanelProps) {
   return (
-    <DashboardPanel span={span}>
+    <DashboardPanel span={span} id={panelId(title)} className="panel-anchor">
       <Card>
         <CardHeader>
           <CardTitle>{title}</CardTitle>

@@ -1,1 +1,43 @@
 /* Product CSS. Loaded after the Kiso stylesheet. */
+
+/* A dashboard tile that links to its full chart. Kiso allows a whole Card as a
+   Link: elevated surface on hover, focus ring on focus. */
+.tile-link {
+  display: block;
+  height: 100%;
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--radius-lg);
+}
+.tile-link > [data-slot='card'] {
+  height: 100%;
+}
+.tile-link:hover > [data-slot='card'] {
+  background: var(--color-elevated-surface);
+}
+.tile-link:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+/* The panel a tile links to: clear the sticky header, and mark it briefly. */
+.panel-anchor {
+  scroll-margin-top: calc(var(--spacing-3xl) + var(--spacing-lg));
+}
+.panel-anchor:target > [data-slot='card'] {
+  animation: panel-arrival 1.6s var(--motion-easing-standard);
+}
+@keyframes panel-arrival {
+  from {
+    box-shadow: 0 0 0 2px var(--color-focus);
+  }
+  to {
+    box-shadow: 0 0 0 2px transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel-anchor:target > [data-slot='card'] {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--color-focus);
+  }
+}
