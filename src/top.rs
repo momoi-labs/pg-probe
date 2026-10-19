@@ -14,7 +14,7 @@ mod explain;
 mod function;
 mod os;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -308,6 +308,11 @@ struct App {
     /// more room. Toggled with `c`.
     compact: bool,
     group: Group,
+    /// A two-line header with session history. Toggled with `h`.
+    compact_header: bool,
+    /// Active and waiting counts of the last refreshes, oldest first. Kept
+    /// in memory only, for the compact header.
+    history: VecDeque<(usize, usize)>,
     popup: Option<Popup>,
     backends: Vec<Backend>,
     /// Blocker pid to the pids it blocks. Filled only in the blocking view.
@@ -415,6 +420,8 @@ impl App {
             tree: false,
             compact: false,
             group: Group::None,
+            compact_header: false,
+            history: VecDeque::new(),
             popup: None,
             backends: Vec::new(),
             blocks: HashMap::new(),
@@ -541,6 +548,7 @@ impl App {
                     KeyCode::Char('?') => self.help = true,
                     KeyCode::Tab => self.preview = !self.preview,
                     KeyCode::Char('c') => self.compact = !self.compact,
+                    KeyCode::Char('h') => self.compact_header = !self.compact_header,
                     KeyCode::Char('g') => {
                         self.group = self.group.next();
                         self.table.select(Some(0));
@@ -579,6 +587,11 @@ impl App {
 
     fn refresh(&mut self, client: &ConnectedClient, sql: &str) -> Result<(), TopError> {
         self.backends = fetch_backends(client, sql)?;
+        let counts = SessionCounts::of(&self.backends);
+        if self.history.len() == HISTORY {
+            self.history.pop_front();
+        }
+        self.history.push_back((counts.active, counts.waiting));
         if let Some(os) = &mut self.os {
             os.refresh(&self.backends);
         }
@@ -810,14 +823,19 @@ impl App {
 
     fn draw(&mut self, frame: &mut Frame) {
         let [header, title, body, footer] = Layout::vertical([
-            Constraint::Length(4),
+            Constraint::Length(if self.compact_header { 2 } else { 4 }),
             Constraint::Length(1),
             Constraint::Min(0),
             Constraint::Length(1),
         ])
         .areas(frame.area());
 
-        frame.render_widget(Paragraph::new(self.header_lines(header.width)), header);
+        let lines = if self.compact_header {
+            self.compact_header_lines()
+        } else {
+            self.header_lines(header.width)
+        };
+        frame.render_widget(Paragraph::new(lines), header);
         let count = self.visible().len();
         frame.render_widget(
             Line::from(match self.shown_group() {
@@ -905,6 +923,83 @@ impl App {
             ),
             area,
         );
+    }
+
+    fn compact_header_lines(&self) -> Vec<Line<'static>> {
+        let server = &self.server;
+        let value = |text: String| Span::styled(text, Style::new().bold().green());
+        let bar = || Span::styled(" │ ", Style::new().dark_gray());
+        let mut info = vec![
+            Span::styled(
+                concat!(" pg-probe ", env!("CARGO_PKG_VERSION"), " "),
+                Style::new().black().on_green().bold(),
+            ),
+            Span::styled(format!(" PG {} ", server.version), Style::new().bold()),
+            Span::styled(
+                format!("{}@{}/{}", server.user, server.endpoint, server.database),
+                Style::new().cyan(),
+            ),
+            Span::raw(format!(" {}s", self.interval.as_secs())),
+        ];
+        if self.paused {
+            info.push(Span::styled(" PAUSED", Style::new().bold().red()));
+        }
+        match self.os.as_ref().map(|os| &os.host) {
+            Some(host) => {
+                if let Some(load) = &host.load {
+                    info.extend([
+                        bar(),
+                        Span::raw("load "),
+                        value(format!("{:.2}", load.load_1m)),
+                    ]);
+                }
+                if let Some(memory) = host.memory {
+                    info.extend([
+                        bar(),
+                        Span::raw("mem "),
+                        value(format_bytes(memory.available as f64)),
+                        Span::raw(format!("/{} avail", format_bytes(memory.total as f64))),
+                        bar(),
+                        Span::raw("swap "),
+                        value(format_bytes(
+                            memory.swap_total.saturating_sub(memory.swap_free) as f64,
+                        )),
+                        Span::raw(" used"),
+                    ]);
+                }
+            }
+            None => info.extend([
+                bar(),
+                Span::styled("OS not on this host", Style::new().dark_gray()),
+            ]),
+        }
+
+        let counts = SessionCounts::of(&self.backends);
+        let active: Vec<usize> = self.history.iter().map(|(active, _)| *active).collect();
+        let waiting: Vec<usize> = self.history.iter().map(|(_, waiting)| *waiting).collect();
+        let sessions = Line::from(vec![
+            Span::raw(" sessions "),
+            value(counts.total.to_string()),
+            Span::raw(format!("/{}", server.max_connections)),
+            bar(),
+            Span::raw("active "),
+            value(counts.active.to_string()),
+            Span::styled(format!(" {}", sparkline(&active)), Style::new().green()),
+            bar(),
+            Span::raw("idle "),
+            value(counts.idle.to_string()),
+            bar(),
+            Span::raw("idle in txn "),
+            value(counts.idle_in_transaction.to_string()),
+            bar(),
+            Span::raw("abrt "),
+            value(counts.idle_in_transaction_aborted.to_string()),
+            bar(),
+            Span::raw("waiting "),
+            value(counts.waiting.to_string()),
+            Span::styled(format!(" {}", sparkline(&waiting)), Style::new().red()),
+        ]);
+        vec![Line::from(info), sessions]
     }
 
     fn header_lines(&self, width: u16) -> Vec<Line<'static>> {
@@ -1499,6 +1594,7 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
             ("t", "Blocking view as a list or a tree"),
             ("c", "Compact columns, more room for the query"),
             ("g", "Group by state, database, user, or none"),
+            ("h", "Two-line header with session history"),
             ("?", "This help"),
             ("q Esc", "Quit"),
         ],
@@ -1673,6 +1769,19 @@ fn footer_line(view: View) -> Line<'static> {
         spans.push(Span::styled(format!("{label:<18}"), style));
     }
     Line::from(spans)
+}
+
+/// Refreshes the compact header's sparklines cover.
+const HISTORY: usize = 24;
+
+/// One block per value, scaled so the largest value fills the cell.
+fn sparkline(values: &[usize]) -> String {
+    const BLOCKS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let max = values.iter().copied().max().unwrap_or(0).max(1);
+    values
+        .iter()
+        .map(|value| BLOCKS[value * (BLOCKS.len() - 1) / max])
+        .collect()
 }
 
 /// The compact list's states. The legend under the list spells them out.
@@ -2094,6 +2203,20 @@ mod tests {
         let lines: Vec<&str> = screen.lines().collect();
         let reports = lines.iter().position(|l| l.contains("▾ reports")).unwrap();
         assert!(lines[reports + 1].starts_with("101"), "{screen}");
+    }
+
+    #[test]
+    fn compact_header_fits_two_lines_with_history() {
+        assert_eq!(sparkline(&[0, 1, 2, 4]), "▁▂▄█");
+        assert_eq!(sparkline(&[0, 0]), "▁▁");
+        let mut app = app(View::Running);
+        app.history = VecDeque::from([(1, 0), (2, 1)]);
+        app.compact_header = true;
+        let screen = screen(&mut app);
+        let lines: Vec<&str> = screen.lines().collect();
+        assert!(lines[1].contains("active 2 ▄█"), "{screen}");
+        assert!(lines[1].contains("waiting 1 ▁█"), "{screen}");
+        assert!(lines[2].contains("RUNNING QUERIES"), "{screen}");
     }
 
     #[test]
