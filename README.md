@@ -103,30 +103,66 @@ sqlite3 snapshot.sqlite 'SELECT status FROM snapshot;'
 ### Live view
 
 `pg-probe top` shows the queries running now, longest first, in the style of
-pg_activity. It takes the same connection options as `capture`:
+pg_activity. It works with PostgreSQL 9.3 and later and takes the same
+connection options as `capture`:
 
 ```bash
 pg-probe top -U postgres -h /var/run/postgresql
+pg-probe top -h db.example.com -U monitor -d app -i 5
 ```
 
-`F1`, `F2`, and `F3` switch between running, waiting, and blocking queries.
-`v` opens a full-screen page with the details of the selected backend. There,
-`f` shows the definition and call statistics of the functions its query calls,
-and `e` shows its estimated plan. `Space` pauses, and `q` quits.
-`-i` sets the refresh interval in seconds (default 2).
+`-i`/`--interval` sets the refresh interval in seconds (default 2).
 
-The session is read-only: it starts with `default_transaction_read_only=on`
-and a 5-second `statement_timeout`. Each refresh sends one `SELECT` over
-`pg_stat_activity`. The blocking view and the details panel add one query each,
-and only while they are open. The function and plan popups run one query when
-opened, through a short session in the query's database when that differs.
-The plan comes from `EXPLAIN` without `ANALYZE`, sent as a single statement:
-the query is planned, never run. Query text appears on the terminal only and
-is never written to disk.
+| Key | Action |
+|---|---|
+| `F1` or `1` | Running queries |
+| `F2` or `2` | Queries waiting on a lock |
+| `F3` or `3` | Queries that block others |
+| `↑` `↓`, `PgUp` `PgDn` | Select a query |
+| `v` or `Enter` | Open the query page |
+| `Space` | Pause or resume the refresh |
+| `q` | Quit |
 
-When the server runs on the same host, the view adds load, memory, and
-per-backend CPU and I/O from `/proc`. Reading another process's I/O counters
-needs root or the `postgres` user.
+The query page shows everything known about the selected backend: the full
+query, client, application, connection, transaction, and query ages, and
+`xid`/`xmin` on 9.4 and later. On the query page:
+
+| Key | Action |
+|---|---|
+| `f` | Definition and call statistics of the functions the query calls, as `\df+` and `\sf` show them |
+| `e` | Estimated plan of the query |
+| `←` `→` | Other functions, when the query calls more than one |
+| `v` or `Esc` | Back to the list |
+
+Function statistics need `track_functions` set to `pl` or `all`. The plan
+comes from `EXPLAIN` without `ANALYZE`, so it may differ from the plan the
+backend runs. Queries cut at `track_activity_query_size` or with `$1`
+parameters cannot be planned, and the popup says why.
+
+When the server runs on the same host and you connect through a socket or
+`localhost`, the view adds host load, memory, and swap, and per-backend CPU,
+I/O, and I/O wait from `/proc`. Run it as root or as the `postgres` user to
+read the I/O of every backend.
+
+To see other users' query text, connect as a superuser or, on PostgreSQL 10
+and later, as a member of `pg_read_all_stats`.
+
+#### Cost and safety
+
+- One connection, opened with `default_transaction_read_only=on` and a
+  5-second `statement_timeout`. The session cannot write.
+- One `SELECT` over `pg_stat_activity` per refresh. On a test server with 206
+  connections under pgbench, it took 0.7 ms per call and 0.15% of one core.
+- The blocking view, the query page, and the function and plan popups each add
+  one query, only while open. The blocking view on 9.3 to 9.5 reads `pg_locks`
+  once per refresh, because `pg_blocking_pids` arrived in 9.6.
+- The function and plan popups query the database the backend runs in. When it
+  differs from `-d`, they open a short read-only session there and close it.
+- `EXPLAIN` goes over the extended query protocol, which accepts a single
+  command, so query text such as `select 1; delete ...` cannot run its second
+  part. `EXPLAIN ANALYZE` is never sent.
+- Query text and function source appear on the terminal only. They are never
+  written to disk.
 
 ## Artifact format
 
