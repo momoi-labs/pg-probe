@@ -1124,14 +1124,8 @@ impl App {
             Span::raw(format!("/{}", server.max_connections)),
             bar(),
             Span::raw("active "),
-            Span::styled(
-                counts.active.to_string(),
-                Style::new().fg(palette::CHART[0]).bold(),
-            ),
-            Span::styled(
-                format!(" {}", sparkline(&active)),
-                Style::new().fg(palette::CHART[0]),
-            ),
+            Span::styled(counts.active.to_string(), palette::series(0).bold()),
+            Span::styled(format!(" {}", sparkline(&active)), palette::series(0)),
             bar(),
             Span::raw("idle "),
             value(counts.idle.to_string()),
@@ -1139,21 +1133,15 @@ impl App {
             Span::raw("idle in txn "),
             Span::styled(
                 counts.idle_in_transaction.to_string(),
-                Style::new().fg(palette::CHART[1]).bold(),
+                palette::series(1).bold(),
             ),
             bar(),
             Span::raw("abrt "),
             value(counts.idle_in_transaction_aborted.to_string()),
             bar(),
             Span::raw("waiting "),
-            Span::styled(
-                counts.waiting.to_string(),
-                Style::new().fg(palette::CHART[2]).bold(),
-            ),
-            Span::styled(
-                format!(" {}", sparkline(&waiting)),
-                Style::new().fg(palette::CHART[2]),
-            ),
+            Span::styled(counts.waiting.to_string(), palette::series(2).bold()),
+            Span::styled(format!(" {}", sparkline(&waiting)), palette::series(2)),
         ]);
         vec![Line::from(info), sessions]
     }
@@ -1187,10 +1175,7 @@ impl App {
         let counts = SessionCounts::of(&self.backends);
         let number = |value: usize| Span::styled(value.to_string(), palette::strong());
         let series = |value: usize, slot: usize| {
-            Span::styled(
-                value.to_string(),
-                Style::new().fg(palette::CHART[slot]).bold(),
-            )
+            Span::styled(value.to_string(), palette::series(slot).bold())
         };
         let dot = || Span::raw(" · ");
         let sessions = Line::from(vec![
@@ -1983,12 +1968,9 @@ fn session_bar(counts: &SessionCounts, max_connections: usize, width: usize) -> 
 
     Line::from(vec![
         Span::styled(label, palette::muted()),
-        Span::styled("|".repeat(waiting), Style::new().fg(palette::CHART[2])),
-        Span::styled("|".repeat(active), Style::new().fg(palette::CHART[0])),
-        Span::styled(
-            "|".repeat(in_transaction),
-            Style::new().fg(palette::CHART[1]),
-        ),
+        Span::styled("|".repeat(waiting), palette::series(2)),
+        Span::styled("|".repeat(active), palette::series(0)),
+        Span::styled("|".repeat(in_transaction), palette::series(1)),
         Span::styled("|".repeat(idle), palette::subtle()),
         Span::raw(" ".repeat(inner - used)),
         Span::styled(suffix, palette::muted()),

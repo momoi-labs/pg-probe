@@ -66,7 +66,9 @@ file has a bug.
 dark theme values with the gold accent from `tokens/build/tokens.css` and
 keeps them as RGB in `src/top/palette.rs`. Kiso keeps terminals dark in both
 themes, so `top` paints its own `background` and uses the `*-on-dark` status
-values. The product rules above apply here too: no health colors, `—` for an
+values. A terminal that does not set `COLORTERM` to `truecolor` or
+`24bit` gets the nearest of the 256 xterm colors, since an older tmux misreads
+RGB codes. The product rules above apply here too: no health colors, `—` for an
 unknown value, IEC units, and numeric columns aligned right. Change the
 palette with the package version, and record the version in the module doc.
 
