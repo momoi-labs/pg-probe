@@ -60,6 +60,16 @@ file has a bug.
 | Logs (`screens/not-collected.tsx`) | Empty states, informational |
 | No snapshots, list error (`screens/start.tsx`) | Empty states, first run; Errors |
 
+## Terminal view
+
+`pg-probe top` is a terminal UI, so it cannot load Kiso's CSS. It takes the
+dark theme values with the gold accent from `tokens/build/tokens.css` and
+keeps them as RGB in `src/top/palette.rs`. Kiso keeps terminals dark in both
+themes, so `top` paints its own `background` and uses the `*-on-dark` status
+values. The product rules above apply here too: no health colors, `—` for an
+unknown value, IEC units, and numeric columns aligned right. Change the
+palette with the package version, and record the version in the module doc.
+
 ## Exceptions
 
 None.

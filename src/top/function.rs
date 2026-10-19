@@ -2,9 +2,9 @@
 //! of the user functions a query calls, in the spirit of psql's `\df+` and
 //! `\sf`. It runs one catalog query, only when the operator asks for it.
 
-use ratatui::style::{Style, Stylize};
 use ratatui::text::{Line, Span};
 
+use super::palette;
 use crate::postgres::{AdapterError, ConnectedClient};
 
 const SOURCE: &str = "postgres.top.function";
@@ -178,13 +178,13 @@ fn source_text(value: &[u8]) -> String {
 
 /// The lines of the function panel for one definition.
 pub fn lines(function: &FunctionDef) -> Vec<Line<'static>> {
-    let label = |text: &str| Span::styled(format!("{text:<16}"), Style::new().cyan().bold());
+    let label = |text: &str| Span::styled(format!("{text:<16}"), palette::muted());
     let field = |name: &str, value: String| Line::from(vec![label(name), Span::raw(value)]);
 
     let mut lines = vec![
         Line::from(Span::styled(
             format!("{}.{}", function.schema, function.name),
-            Style::new().bold().green(),
+            palette::strong(),
         )),
         Line::default(),
         field("Arguments", or_none(&function.arguments)),
@@ -218,7 +218,7 @@ pub fn lines(function: &FunctionDef) -> Vec<Line<'static>> {
                         "   (self {}, the rest in queries it runs)",
                         super::format_duration(self_ms / 1000.0)
                     ),
-                    Style::new().dark_gray(),
+                    palette::muted(),
                 ),
             ]));
             if calls > 0 {
@@ -230,19 +230,16 @@ pub fn lines(function: &FunctionDef) -> Vec<Line<'static>> {
         }
         _ if function.track_functions == "none" => lines.push(Line::from(Span::styled(
             "Function stats off (track_functions = none)",
-            Style::new().yellow(),
+            palette::info(),
         ))),
         _ => lines.push(Line::from(Span::styled(
             "No calls recorded since the last stats reset",
-            Style::new().dark_gray(),
+            palette::muted(),
         ))),
     }
 
     lines.push(Line::default());
-    lines.push(Line::from(Span::styled(
-        "Source",
-        Style::new().cyan().bold(),
-    )));
+    lines.push(Line::from(Span::styled("Source", palette::strong())));
     if matches!(function.language.as_str(), "c" | "internal") {
         lines.push(Line::from(format!(
             "{} function: symbol {} in {}",
@@ -255,10 +252,7 @@ pub fn lines(function: &FunctionDef) -> Vec<Line<'static>> {
         let width = source.lines().count().to_string().len();
         for (number, line) in source.lines().enumerate() {
             lines.push(Line::from(vec![
-                Span::styled(
-                    format!("{:>width$}  ", number + 1),
-                    Style::new().dark_gray(),
-                ),
+                Span::styled(format!("{:>width$}  ", number + 1), palette::muted()),
                 Span::raw(line.to_owned()),
             ]));
         }

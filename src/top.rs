@@ -14,6 +14,7 @@
 mod explain;
 mod function;
 mod os;
+mod palette;
 mod settings;
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -22,7 +23,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style, Stylize};
+use ratatui::style::{Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Cell, Clear, Paragraph, Row, Table, TableState, Wrap};
 use ratatui::{DefaultTerminal, Frame};
@@ -262,7 +263,7 @@ impl Vacuum {
             (Some(scanned), Some(total)) if total > 0.0 => {
                 format!("{:.1}%", scanned / total * 100.0)
             }
-            _ => "-".to_owned(),
+            _ => "—".to_owned(),
         }
     }
 }
@@ -970,6 +971,7 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
+        frame.render_widget(Block::new().style(palette::base()), frame.area());
         let [header, title, body, footer] = Layout::vertical([
             Constraint::Length(if self.compact_header { 2 } else { 4 }),
             Constraint::Length(1),
@@ -994,8 +996,7 @@ impl App {
                     group.name().to_uppercase()
                 ),
             })
-            .bold()
-            .green()
+            .style(palette::strong())
             .alignment(Alignment::Center),
             title,
         );
@@ -1008,7 +1009,7 @@ impl App {
                 " STATE: act = active · txn = idle in transaction · \
                  abrt = idle in transaction (aborted)"
             };
-            frame.render_widget(Line::from(text).dark_gray(), legend);
+            frame.render_widget(Line::from(text).style(palette::muted()), legend);
             body
         } else {
             body
@@ -1063,10 +1064,9 @@ impl App {
             .unwrap_or_default();
         frame.render_widget(
             Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>()).block(
-                Block::bordered()
-                    .border_style(Style::new().cyan())
+                palette::panel()
                     .title(Line::from(title).bold())
-                    .title_bottom(Line::from(" Tab hides ").dark_gray()),
+                    .title_bottom(Line::from(" Tab hides ").style(palette::muted())),
             ),
             area,
         );
@@ -1074,22 +1074,22 @@ impl App {
 
     fn compact_header_lines(&self) -> Vec<Line<'static>> {
         let server = &self.server;
-        let value = |text: String| Span::styled(text, Style::new().bold().green());
-        let bar = || Span::styled(" │ ", Style::new().dark_gray());
+        let value = |text: String| Span::styled(text, palette::strong());
+        let bar = || Span::styled(" │ ", palette::subtle());
         let mut info = vec![
             Span::styled(
                 concat!(" pg-probe ", env!("CARGO_PKG_VERSION"), " "),
-                Style::new().black().on_green().bold(),
+                palette::brand(),
             ),
             Span::styled(format!(" PG {} ", server.version), Style::new().bold()),
             Span::styled(
                 format!("{}@{}/{}", server.user, server.endpoint, server.database),
-                Style::new().cyan(),
+                palette::link(),
             ),
-            Span::raw(format!(" {}s", self.interval.as_secs())),
+            Span::styled(format!(" {}s", self.interval.as_secs()), palette::muted()),
         ];
         if self.paused {
-            info.push(Span::styled(" PAUSED", Style::new().bold().red()));
+            info.push(Span::styled(" PAUSED", palette::link().bold()));
         }
         match self.os.as_ref().map(|os| &os.host) {
             Some(host) => {
@@ -1115,10 +1115,7 @@ impl App {
                     ]);
                 }
             }
-            None => info.extend([
-                bar(),
-                Span::styled("OS not on this host", Style::new().dark_gray()),
-            ]),
+            None => info.extend([bar(), Span::styled("OS not on this host", palette::muted())]),
         }
 
         let counts = SessionCounts::of(&self.backends);
@@ -1130,21 +1127,36 @@ impl App {
             Span::raw(format!("/{}", server.max_connections)),
             bar(),
             Span::raw("active "),
-            value(counts.active.to_string()),
-            Span::styled(format!(" {}", sparkline(&active)), Style::new().green()),
+            Span::styled(
+                counts.active.to_string(),
+                Style::new().fg(palette::CHART[0]).bold(),
+            ),
+            Span::styled(
+                format!(" {}", sparkline(&active)),
+                Style::new().fg(palette::CHART[0]),
+            ),
             bar(),
             Span::raw("idle "),
             value(counts.idle.to_string()),
             bar(),
             Span::raw("idle in txn "),
-            value(counts.idle_in_transaction.to_string()),
+            Span::styled(
+                counts.idle_in_transaction.to_string(),
+                Style::new().fg(palette::CHART[1]).bold(),
+            ),
             bar(),
             Span::raw("abrt "),
             value(counts.idle_in_transaction_aborted.to_string()),
             bar(),
             Span::raw("waiting "),
-            value(counts.waiting.to_string()),
-            Span::styled(format!(" {}", sparkline(&waiting)), Style::new().red()),
+            Span::styled(
+                counts.waiting.to_string(),
+                Style::new().fg(palette::CHART[2]).bold(),
+            ),
+            Span::styled(
+                format!(" {}", sparkline(&waiting)),
+                Style::new().fg(palette::CHART[2]),
+            ),
         ]);
         vec![Line::from(info), sessions]
     }
@@ -1154,7 +1166,7 @@ impl App {
         let mut info = vec![
             Span::styled(
                 concat!(" pg-probe ", env!("CARGO_PKG_VERSION"), " "),
-                Style::new().black().on_green().bold(),
+                palette::brand(),
             ),
             Span::raw(" "),
             Span::styled(
@@ -1164,35 +1176,44 @@ impl App {
             Span::raw(" - "),
             Span::styled(
                 format!("{}@{}/{}", server.user, server.endpoint, server.database),
-                Style::new().cyan(),
+                palette::link(),
             ),
-            Span::raw(format!(" - Ref.: {}s", self.interval.as_secs())),
+            Span::styled(
+                format!(" - Ref.: {}s", self.interval.as_secs()),
+                palette::muted(),
+            ),
         ];
         if self.paused {
-            info.push(Span::styled(" - PAUSED", Style::new().bold().red()));
+            info.push(Span::styled(" - PAUSED", palette::link().bold()));
         }
 
         let counts = SessionCounts::of(&self.backends);
-        let number = |value: usize| Span::styled(value.to_string(), Style::new().bold().green());
+        let number = |value: usize| Span::styled(value.to_string(), palette::strong());
+        let series = |value: usize, slot: usize| {
+            Span::styled(
+                value.to_string(),
+                Style::new().fg(palette::CHART[slot]).bold(),
+            )
+        };
         let dot = || Span::raw(" · ");
         let sessions = Line::from(vec![
             Span::raw(" * Sessions: "),
             number(counts.total),
             Span::raw(format!("/{} total", server.max_connections)),
             dot(),
-            number(counts.active),
+            series(counts.active, 0),
             Span::raw(" active"),
             dot(),
             number(counts.idle),
             Span::raw(" idle"),
             dot(),
-            number(counts.idle_in_transaction),
+            series(counts.idle_in_transaction, 1),
             Span::raw(" idle in txn"),
             dot(),
             number(counts.idle_in_transaction_aborted),
             Span::raw(" idle in txn abrt"),
             dot(),
-            number(counts.waiting),
+            series(counts.waiting, 2),
             Span::raw(" waiting"),
         ]);
 
@@ -1208,10 +1229,10 @@ impl App {
         let Some(os) = &self.os else {
             return Line::from(Span::styled(
                 " * OS: not shown, the server is not on this host",
-                Style::new().dark_gray(),
+                palette::muted(),
             ));
         };
-        let value = |text: String| Span::styled(text, Style::new().bold().green());
+        let value = |text: String| Span::styled(text, palette::strong());
         let dot = || Span::raw(" · ");
         let mut spans = vec![Span::raw(" * Load: ")];
         match &os.host.load {
@@ -1219,7 +1240,7 @@ impl App {
                 "{:.2} {:.2} {:.2}",
                 load.load_1m, load.load_5m, load.load_15m
             ))),
-            None => spans.push(Span::raw("-")),
+            None => spans.push(Span::styled("—", palette::muted())),
         }
         if let Some(memory) = os.host.memory {
             spans.extend([
@@ -1244,7 +1265,7 @@ impl App {
         if os.io_denied() {
             spans.push(Span::styled(
                 " · per-backend I/O needs root or the postgres user",
-                Style::new().yellow(),
+                palette::warning(),
             ));
         }
         Line::from(spans)
@@ -1274,8 +1295,8 @@ impl App {
             titles.extend(["CPU%", "READ/s", "WRITE/s", "IOW"]);
             widths.extend([
                 Constraint::Length(6),
-                Constraint::Length(9),
-                Constraint::Length(9),
+                Constraint::Length(10),
+                Constraint::Length(10),
                 Constraint::Length(3),
             ]);
         }
@@ -1286,8 +1307,7 @@ impl App {
             Constraint::Length(22),
             Constraint::Fill(1),
         ]);
-        let header = Row::new(titles.into_iter().map(Cell::from))
-            .style(Style::new().black().on_green().bold());
+        let header = Row::new(titles.into_iter().map(header_cell)).style(palette::table_header());
 
         let entries = self.rows();
         let sessions: Vec<Row> = entries
@@ -1299,22 +1319,16 @@ impl App {
                             .get(&backend.pid)
                             .map(|pids| pids.join(","))
                             .unwrap_or_default(),
-                        Style::new().red().bold(),
+                        Style::new(),
                     )
                 } else {
-                    let style = if backend.waits_on_lock() {
-                        Style::new().red().bold()
-                    } else {
-                        Style::new().yellow()
-                    };
-                    Span::styled(backend.wait_label(), style)
+                    Span::raw(backend.wait_label())
                 };
                 let mut cells = vec![Cell::from(Line::from(vec![
-                    Span::styled(branch.clone(), Style::new().dark_gray()),
-                    Span::styled(backend.pid.clone(), Style::new().cyan()),
+                    Span::styled(branch.clone(), palette::subtle()),
+                    Span::raw(backend.pid.clone()),
                 ]))];
-                let database =
-                    Span::styled(backend.database.clone(), Style::new().dark_gray().bold());
+                let database = Span::styled(backend.database.clone(), palette::muted());
                 if self.compact {
                     cells.push(Cell::from(Line::from(vec![
                         Span::raw(format!("{}@", backend.user)),
@@ -1328,20 +1342,20 @@ impl App {
                     let right =
                         |text: String| Cell::from(Line::from(text).alignment(Alignment::Right));
                     let bytes = |value: Option<f64>| {
-                        value.map(format_bytes).unwrap_or_else(|| "-".to_owned())
+                        value.map(format_bytes).unwrap_or_else(|| "—".to_owned())
                     };
                     cells.extend([
                         right(
                             rate.and_then(|rate| rate.cpu_percent)
                                 .map(|cpu| format!("{cpu:.1}"))
-                                .unwrap_or_else(|| "-".to_owned()),
+                                .unwrap_or_else(|| "—".to_owned()),
                         ),
                         right(bytes(rate.and_then(|rate| rate.read_per_s))),
                         right(bytes(rate.and_then(|rate| rate.write_per_s))),
                         match rate.map(|rate| rate.io_wait) {
-                            Some(true) => Cell::from(Span::styled(" Y", Style::new().red().bold())),
-                            Some(false) => Cell::from(Span::styled(" N", Style::new().green())),
-                            None => Cell::from(" -"),
+                            Some(true) => Cell::from(" Y"),
+                            Some(false) => Cell::from(" N"),
+                            None => Cell::from(" —"),
                         },
                     ]);
                 }
@@ -1352,12 +1366,12 @@ impl App {
                         } else {
                             backend.state.clone()
                         },
-                        state_style(&backend.state),
+                        Style::new(),
                     )),
                     Cell::from(
                         Line::from(Span::styled(
                             backend.duration_s.map(format_duration).unwrap_or_default(),
-                            duration_style(backend.duration_s),
+                            Style::new(),
                         ))
                         .alignment(Alignment::Right),
                     ),
@@ -1382,12 +1396,7 @@ impl App {
                     .filter(|(_, backend)| group.key(backend) == key)
                     .count();
                 let key = key.unwrap_or_default();
-                let style = if group == Group::State {
-                    state_style(key)
-                } else {
-                    Style::new().cyan()
-                };
-                titles.push((rows.len(), format!("▾ {} ({count})", or_dash(key)), style));
+                titles.push((rows.len(), format!("▾ {} ({count})", or_dash(key))));
                 rows.push(Row::new(Vec::<Cell>::new()));
             }
             positions.push(rows.len());
@@ -1396,7 +1405,7 @@ impl App {
 
         let table = Table::new(rows, widths)
             .header(header)
-            .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED));
+            .row_highlight_style(palette::selected());
         let selected = self
             .table
             .selected()
@@ -1406,13 +1415,13 @@ impl App {
             .with_selected(selected);
         frame.render_stateful_widget(table, area, &mut state);
         *self.table.offset_mut() = state.offset();
-        for (position, title, style) in titles {
+        for (position, title) in titles {
             let Some(line) = position.checked_sub(state.offset()) else {
                 continue;
             };
             if line + 1 < usize::from(area.height) {
                 let row = Rect::new(area.x, area.y + 1 + line as u16, area.width, 1);
-                frame.render_widget(Line::from(title).style(style.bold()), row);
+                frame.render_widget(Line::from(title).style(palette::strong()), row);
             }
         }
     }
@@ -1442,8 +1451,8 @@ impl App {
             titles.extend(["CPU%", "READ/s", "WRITE/s"]);
             widths.extend([
                 Constraint::Length(6),
-                Constraint::Length(9),
-                Constraint::Length(9),
+                Constraint::Length(10),
+                Constraint::Length(10),
             ]);
         }
         if progress {
@@ -1456,38 +1465,28 @@ impl App {
             Constraint::Length(22),
             Constraint::Fill(1),
         ]);
-        let header = Row::new(titles.into_iter().map(Cell::from))
-            .style(Style::new().black().on_green().bold());
+        let header = Row::new(titles.into_iter().map(header_cell)).style(palette::table_header());
         let right = |text: String| Cell::from(Line::from(text).alignment(Alignment::Right));
         let rows: Vec<Row> = self
             .vacuums
             .iter()
             .map(|vacuum| {
                 let backend = &vacuum.backend;
-                let kind_style = match vacuum.kind.as_str() {
-                    "wraparound" => Style::new().red().bold(),
-                    "auto" => Style::new().yellow(),
-                    _ => Style::new(),
-                };
-                let mut cells = vec![Cell::from(Span::styled(
-                    backend.pid.clone(),
-                    Style::new().cyan(),
-                ))];
-                let database =
-                    Span::styled(backend.database.clone(), Style::new().dark_gray().bold());
+                let mut cells = vec![Cell::from(backend.pid.clone())];
+                let database = Span::styled(backend.database.clone(), palette::muted());
                 if self.compact {
                     cells.extend([
                         Cell::from(Line::from(vec![
                             Span::raw(format!("{}@", or_dash(&vacuum.table))),
                             database,
                         ])),
-                        Cell::from(Span::styled(short_kind(&vacuum.kind), kind_style)),
+                        Cell::from(short_kind(&vacuum.kind).to_owned()),
                     ]);
                 } else {
                     cells.extend([
                         Cell::from(database),
                         Cell::from(or_dash(&vacuum.table).to_owned()),
-                        Cell::from(Span::styled(vacuum.kind.clone(), kind_style)),
+                        Cell::from(vacuum.kind.clone()),
                     ]);
                 }
                 if progress {
@@ -1496,13 +1495,13 @@ impl App {
                 if let Some(os) = &self.os {
                     let rate = os.rates.get(&backend.pid);
                     let bytes = |value: Option<f64>| {
-                        value.map(format_bytes).unwrap_or_else(|| "-".to_owned())
+                        value.map(format_bytes).unwrap_or_else(|| "—".to_owned())
                     };
                     cells.extend([
                         right(
                             rate.and_then(|rate| rate.cpu_percent)
                                 .map(|cpu| format!("{cpu:.1}"))
-                                .unwrap_or_else(|| "-".to_owned()),
+                                .unwrap_or_else(|| "—".to_owned()),
                         ),
                         right(bytes(rate.and_then(|rate| rate.read_per_s))),
                         right(bytes(rate.and_then(|rate| rate.write_per_s))),
@@ -1518,11 +1517,11 @@ impl App {
                     Cell::from(
                         Line::from(Span::styled(
                             backend.duration_s.map(format_duration).unwrap_or_default(),
-                            duration_style(backend.duration_s),
+                            Style::new(),
                         ))
                         .alignment(Alignment::Right),
                     ),
-                    Cell::from(Span::styled(backend.wait_label(), Style::new().yellow())),
+                    Cell::from(backend.wait_label()),
                     Cell::from(backend.query.clone()),
                 ]);
                 Row::new(cells)
@@ -1530,7 +1529,7 @@ impl App {
             .collect();
         let table = Table::new(rows, widths)
             .header(header)
-            .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED));
+            .row_highlight_style(palette::selected());
         frame.render_stateful_widget(table, area, &mut self.table);
     }
 
@@ -1540,7 +1539,7 @@ impl App {
         };
         let backend = self.backend_by_pid(&popup.pid);
         let details = popup.details.clone().unwrap_or_default();
-        let label = |text: &str| Span::styled(format!("{text:<16}"), Style::new().cyan().bold());
+        let label = |text: &str| Span::styled(format!("{text:<16}"), palette::muted());
         let field = |name: &str, value: Vec<Span<'static>>| {
             let mut spans = vec![label(name)];
             spans.extend(value);
@@ -1551,14 +1550,11 @@ impl App {
             let mut spans = vec![Span::styled(
                 seconds
                     .map(format_duration)
-                    .unwrap_or_else(|| "-".to_owned()),
-                duration_style(seconds).bold(),
+                    .unwrap_or_else(|| "—".to_owned()),
+                palette::strong(),
             )];
             if !since.is_empty() {
-                spans.push(Span::styled(
-                    format!("  (since {since})"),
-                    Style::new().dark_gray(),
-                ));
+                spans.push(Span::styled(format!("  (since {since})"), palette::muted()));
             }
             spans
         };
@@ -1567,7 +1563,7 @@ impl App {
         if popup.ended {
             lines.push(Line::from(Span::styled(
                 "This backend has ended. Showing its last known details.",
-                Style::new().yellow().bold(),
+                palette::warning(),
             )));
             lines.push(Line::default());
         }
@@ -1593,16 +1589,10 @@ impl App {
                 }),
             ),
             field("Backend type", plain(details.backend_type.clone())),
-            field(
-                "State",
-                vec![Span::styled(state.clone(), state_style(&state))],
-            ),
+            field("State", plain(state.clone())),
             field(
                 "Waiting",
-                vec![Span::styled(
-                    backend.map(Backend::wait_label).unwrap_or_default(),
-                    Style::new().red().bold(),
-                )],
+                plain(backend.map(Backend::wait_label).unwrap_or_default()),
             ),
             Line::default(),
             field(
@@ -1637,12 +1627,12 @@ impl App {
                     "{} now · {} total",
                     rate.and_then(|rate| rate.cpu_percent)
                         .map(|cpu| format!("{cpu:.1}%"))
-                        .unwrap_or_else(|| "-".to_owned()),
+                        .unwrap_or_else(|| "—".to_owned()),
                     sample
                         .map(|sample| format_duration(
                             sample.cpu_ticks as f64 / os.ticks_per_second
                         ))
-                        .unwrap_or_else(|| "-".to_owned()),
+                        .unwrap_or_else(|| "—".to_owned()),
                 )),
             ));
             lines.push(field(
@@ -1659,13 +1649,13 @@ impl App {
                             format_bytes(memory.rss as f64)
                         ),
                     },
-                    None => "-".to_owned(),
+                    None => "—".to_owned(),
                 }),
             ));
             let per_second = |value: Option<f64>| {
                 value
                     .map(|value| format!("{}/s", format_bytes(value)))
-                    .unwrap_or_else(|| "-".to_owned())
+                    .unwrap_or_else(|| "—".to_owned())
             };
             lines.push(field(
                 "I/O now",
@@ -1683,24 +1673,21 @@ impl App {
                         format_bytes(read as f64),
                         format_bytes(written as f64)
                     ),
-                    None => "-".to_owned(),
+                    None => "—".to_owned(),
                 }),
             ));
             lines.push(field(
                 "I/O wait",
                 match rate.map(|rate| rate.io_wait) {
-                    Some(true) => vec![Span::styled("yes", Style::new().red().bold())],
+                    Some(true) => plain("yes".to_owned()),
                     Some(false) => plain("no".to_owned()),
-                    None => plain("-".to_owned()),
+                    None => plain("—".to_owned()),
                 },
             ));
         }
 
         lines.push(Line::default());
-        lines.push(Line::from(Span::styled(
-            "Query",
-            Style::new().cyan().bold(),
-        )));
+        lines.push(Line::from(Span::styled("Query", palette::strong())));
         lines.extend(
             query_lines(
                 &details.raw_query,
@@ -1718,20 +1705,20 @@ impl App {
                 .wrap(Wrap { trim: false })
                 .scroll((popup.scroll, 0))
                 .block(
-                    Block::bordered()
+                    palette::popup()
                         .title(Line::from(vec![
                             Span::styled(
                                 concat!(" pg-probe ", env!("CARGO_PKG_VERSION"), " "),
-                                Style::new().black().on_green().bold(),
+                                palette::brand(),
                             ),
                             Span::styled(
                                 format!(" query details · PID {} ", popup.pid),
-                                Style::new().bold().green(),
+                                palette::strong(),
                             ),
                         ]))
                         .title_bottom(
                             Line::from(" v/Esc back · f function · e explain · ↑↓ scroll ")
-                                .dark_gray(),
+                                .style(palette::muted()),
                         ),
                 ),
             area,
@@ -1750,10 +1737,7 @@ impl App {
         };
         let (lines, position) = match &panel.result {
             Err(message) => (
-                vec![Line::from(Span::styled(
-                    message.clone(),
-                    Style::new().red(),
-                ))],
+                vec![Line::from(Span::styled(message.clone(), palette::danger()))],
                 String::new(),
             ),
             Ok(functions) if functions.is_empty() => (
@@ -1776,14 +1760,14 @@ impl App {
                 .wrap(Wrap { trim: false })
                 .scroll((panel.scroll, 0))
                 .block(
-                    Block::bordered()
+                    palette::popup()
                         .title(
                             Line::from(format!(" function in {} ", panel.database))
-                                .bold()
-                                .green(),
+                                .style(palette::strong()),
                         )
                         .title_bottom(
-                            Line::from(format!(" f/Esc back · ↑↓ scroll{position} ")).dark_gray(),
+                            Line::from(format!(" f/Esc back · ↑↓ scroll{position} "))
+                                .style(palette::muted()),
                         ),
                 ),
             area,
@@ -1797,16 +1781,13 @@ impl App {
             return;
         };
         let lines: Vec<Line> = match &panel.result {
-            Err(message) => vec![Line::from(Span::styled(
-                message.clone(),
-                Style::new().red(),
-            ))],
+            Err(message) => vec![Line::from(Span::styled(message.clone(), palette::danger()))],
             Ok(plan) => {
                 let mut lines = vec![
                     Line::from(Span::styled(
                         "Estimated plan (EXPLAIN without ANALYZE). The query was not run, \
                          and the plan may differ from the one the backend is running.",
-                        Style::new().yellow(),
+                        palette::info(),
                     )),
                     Line::default(),
                 ];
@@ -1824,13 +1805,14 @@ impl App {
                 .wrap(Wrap { trim: false })
                 .scroll((panel.scroll, 0))
                 .block(
-                    Block::bordered()
+                    palette::popup()
                         .title(
                             Line::from(format!(" explain in {} ", panel.database))
-                                .bold()
-                                .green(),
+                                .style(palette::strong()),
                         )
-                        .title_bottom(Line::from(" e/Esc back · ↑↓ scroll ").dark_gray()),
+                        .title_bottom(
+                            Line::from(" e/Esc back · ↑↓ scroll ").style(palette::muted()),
+                        ),
                 ),
             area,
         );
@@ -1882,13 +1864,10 @@ fn draw_help(frame: &mut Frame) {
         if !lines.is_empty() {
             lines.push(Line::default());
         }
-        lines.push(Line::from(Span::styled(
-            *section,
-            Style::new().cyan().bold(),
-        )));
+        lines.push(Line::from(Span::styled(*section, palette::strong())));
         for (key, action) in *keys {
             lines.push(Line::from(vec![
-                Span::styled(format!("  {key:<16}"), Style::new().bold()),
+                Span::styled(format!("  {key:<16}"), palette::link()),
                 Span::raw(*action),
             ]));
         }
@@ -1897,9 +1876,9 @@ fn draw_help(frame: &mut Frame) {
     frame.render_widget(Clear, area);
     frame.render_widget(
         Paragraph::new(lines).block(
-            Block::bordered()
-                .title(Line::from(" keys ").bold().green())
-                .title_bottom(Line::from(" any key closes ").dark_gray()),
+            palette::popup()
+                .title(Line::from(" Keyboard shortcuts ").style(palette::strong()))
+                .title_bottom(Line::from(" any key closes ").style(palette::muted())),
         ),
         area,
     );
@@ -1913,7 +1892,7 @@ fn single_line_keep_indent(line: &str) -> String {
 
 fn or_dash(value: &str) -> &str {
     if value.is_empty() {
-        "-"
+        "—"
     } else {
         value
     }
@@ -1943,7 +1922,7 @@ fn is_local(endpoint: &EndpointIdentity) -> bool {
 
 /// Bytes with a binary unit suffix, as top tools print them.
 fn format_bytes(bytes: f64) -> String {
-    const UNITS: [&str; 5] = ["B", "K", "M", "G", "T"];
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes.max(0.0);
     let mut unit = 0;
     while value >= 1024.0 && unit < UNITS.len() - 1 {
@@ -1951,9 +1930,9 @@ fn format_bytes(bytes: f64) -> String {
         unit += 1;
     }
     if unit == 0 {
-        format!("{value:.0}B")
+        format!("{value:.0} B")
     } else {
-        format!("{value:.2}{}", UNITS[unit])
+        format!("{value:.1} {}", UNITS[unit])
     }
 }
 
@@ -2005,13 +1984,16 @@ fn session_bar(counts: &SessionCounts, max_connections: usize, width: usize) -> 
     let used = (waiting + active + in_transaction + idle).min(inner);
 
     Line::from(vec![
-        Span::styled(label, Style::new().cyan().bold()),
-        Span::styled("|".repeat(waiting), Style::new().red()),
-        Span::styled("|".repeat(active), Style::new().green()),
-        Span::styled("|".repeat(in_transaction), Style::new().yellow()),
-        Span::styled("|".repeat(idle), Style::new().dark_gray()),
+        Span::styled(label, palette::muted()),
+        Span::styled("|".repeat(waiting), Style::new().fg(palette::CHART[2])),
+        Span::styled("|".repeat(active), Style::new().fg(palette::CHART[0])),
+        Span::styled(
+            "|".repeat(in_transaction),
+            Style::new().fg(palette::CHART[1]),
+        ),
+        Span::styled("|".repeat(idle), palette::subtle()),
         Span::raw(" ".repeat(inner - used)),
-        Span::styled(suffix, Style::new().dark_gray()),
+        Span::styled(suffix, palette::muted()),
     ])
 }
 
@@ -2028,14 +2010,26 @@ fn footer_line(view: View) -> Line<'static> {
     ];
     let mut spans = Vec::new();
     for (key, label, target) in keys {
-        spans.push(Span::raw(key));
-        let mut style = Style::new().black().on_cyan();
-        if target == Some(view) {
-            style = style.bold();
-        }
-        spans.push(Span::styled(format!("{label:<18}"), style));
+        let style = if target == Some(view) {
+            palette::strong()
+        } else {
+            palette::muted()
+        };
+        spans.push(Span::styled(key, palette::link()));
+        spans.push(Span::styled(format!(" {label:<17}"), style));
     }
     Line::from(spans)
+}
+
+/// A table header cell. Numeric columns align right, like their values.
+fn header_cell(title: &'static str) -> Cell<'static> {
+    const NUMERIC: [&str; 6] = ["CPU%", "READ/s", "WRITE/s", "TIME+", "SCANNED", "IDX"];
+    let line = Line::from(title);
+    Cell::from(if NUMERIC.contains(&title) {
+        line.alignment(Alignment::Right)
+    } else {
+        line
+    })
 }
 
 /// Refreshes the compact header's sparklines cover.
@@ -2068,23 +2062,6 @@ fn short_kind(kind: &str) -> &str {
         "wraparound" => "wrap",
         "manual" => "man",
         other => other,
-    }
-}
-
-fn state_style(state: &str) -> Style {
-    match state {
-        "active" => Style::new().green(),
-        "idle in transaction" => Style::new().yellow(),
-        "idle in transaction (aborted)" => Style::new().red(),
-        _ => Style::new(),
-    }
-}
-
-fn duration_style(duration_s: Option<f64>) -> Style {
-    match duration_s {
-        Some(seconds) if seconds >= 3.0 => Style::new().red(),
-        Some(seconds) if seconds >= 1.0 => Style::new().yellow(),
-        _ => Style::new().green(),
     }
 }
 
@@ -2427,7 +2404,7 @@ mod tests {
         let screen = screen(&mut app);
         assert!(screen.contains("CPU%"), "{screen}");
         assert!(screen.contains("12.5"));
-        assert!(screen.contains("2.00K"));
+        assert!(screen.contains("2.0 KiB"));
         assert!(screen.contains(" Y"));
     }
 
@@ -2440,9 +2417,9 @@ mod tests {
 
     #[test]
     fn bytes_use_binary_units() {
-        assert_eq!(format_bytes(512.0), "512B");
-        assert_eq!(format_bytes(378_572.8), "369.70K");
-        assert_eq!(format_bytes(6_098_812_928.0), "5.68G");
+        assert_eq!(format_bytes(512.0), "512 B");
+        assert_eq!(format_bytes(378_572.8), "369.7 KiB");
+        assert_eq!(format_bytes(6_098_812_928.0), "5.7 GiB");
     }
 
     #[test]
