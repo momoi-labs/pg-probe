@@ -149,6 +149,7 @@ pg-probe top -h db.example.com -U monitor -d app -i 5
 | `↑` `↓`, `PgUp` `PgDn` | Select a query |
 | `v` or `Enter` | Open the query page |
 | `Space` | Pause or resume the refresh |
+| `?` | List every key |
 | `q` | Quit |
 
 The query page shows everything known about the selected backend: the full

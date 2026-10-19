@@ -257,6 +257,8 @@ struct App {
     interval: Duration,
     view: View,
     paused: bool,
+    /// The key list, opened with `?`.
+    help: bool,
     popup: Option<Popup>,
     backends: Vec<Backend>,
     /// Blocker pid to the pids it blocks. Filled only in the blocking view.
@@ -359,6 +361,7 @@ impl App {
             interval,
             view: View::Running,
             paused: false,
+            help: false,
             popup: None,
             backends: Vec::new(),
             blocks: HashMap::new(),
@@ -386,6 +389,13 @@ impl App {
                 }
                 if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     return Ok(());
+                }
+                if self.help {
+                    match key.code {
+                        KeyCode::Char('q') => return Ok(()),
+                        _ => self.help = false,
+                    }
+                    continue;
                 }
                 if let Some(panel) = self
                     .popup
@@ -475,6 +485,7 @@ impl App {
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                     KeyCode::Char(' ') => self.paused = !self.paused,
+                    KeyCode::Char('?') => self.help = true,
                     KeyCode::Char('v') | KeyCode::Enter => self.open_popup(client)?,
                     KeyCode::F(1) | KeyCode::Char('1') => self.view = View::Running,
                     KeyCode::F(2) | KeyCode::Char('2') => self.view = View::Waiting,
@@ -684,6 +695,9 @@ impl App {
             self.draw_popup(frame);
             self.draw_function_panel(frame);
             self.draw_explain_panel(frame);
+        }
+        if self.help {
+            draw_help(frame);
         }
     }
 
@@ -1196,6 +1210,68 @@ impl App {
     }
 }
 
+/// Every key, grouped by where it works. The footer has room for a few.
+const HELP: &[(&str, &[(&str, &str)])] = &[
+    (
+        "Views",
+        &[
+            ("F1 1", "Running queries"),
+            ("F2 2", "Waiting queries"),
+            ("F3 3", "Blocking queries"),
+        ],
+    ),
+    (
+        "List",
+        &[
+            ("↑ ↓ j k", "Move the selection"),
+            ("PgUp PgDn", "Move one page"),
+            ("Home End", "First or last row"),
+            ("v Enter", "Query details"),
+            ("Space", "Pause or resume refreshes"),
+            ("?", "This help"),
+            ("q Esc", "Quit"),
+        ],
+    ),
+    (
+        "Query details",
+        &[
+            ("f", "Functions the query calls"),
+            ("e", "Estimated plan (EXPLAIN)"),
+            ("↑ ↓ PgUp PgDn", "Scroll"),
+            ("v Esc Enter", "Back to the list"),
+        ],
+    ),
+];
+
+fn draw_help(frame: &mut Frame) {
+    let mut lines = Vec::new();
+    for (section, keys) in HELP {
+        if !lines.is_empty() {
+            lines.push(Line::default());
+        }
+        lines.push(Line::from(Span::styled(
+            *section,
+            Style::new().cyan().bold(),
+        )));
+        for (key, action) in *keys {
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {key:<16}"), Style::new().bold()),
+                Span::raw(*action),
+            ]));
+        }
+    }
+    let area = centered(frame.area(), 60, 80);
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Paragraph::new(lines).block(
+            Block::bordered()
+                .title(Line::from(" keys ").bold().green())
+                .title_bottom(Line::from(" any key closes ").dark_gray()),
+        ),
+        area,
+    );
+}
+
 /// Drops control characters from one plan line but keeps its leading
 /// spaces, which carry the plan's tree shape.
 fn single_line_keep_indent(line: &str) -> String {
@@ -1313,6 +1389,7 @@ fn footer_line(view: View) -> Line<'static> {
         ("F3", "Blocking queries", Some(View::Blocking)),
         ("v", "Query details", None),
         ("Space", "Pause/unpause", None),
+        ("?", "Help", None),
         ("q", "Quit", None),
     ];
     let mut spans = Vec::new();
@@ -1659,6 +1736,22 @@ mod tests {
         assert!(legacy.ends_with("WHERE pid = 4242"));
         assert!(!legacy.contains("backend_xid"));
         assert!(details_sql(140005, "4242").unwrap().contains("backend_xid"));
+    }
+
+    #[test]
+    fn help_lists_every_key() {
+        let mut app = app(View::Running);
+        app.help = true;
+        let mut terminal = Terminal::new(TestBackend::new(160, 40)).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let screen: String = buffer
+            .content()
+            .chunks(usize::from(buffer.area.width))
+            .map(|line| line.iter().map(|cell| cell.symbol()).collect::<String>() + "\n")
+            .collect();
+        assert!(screen.contains("Blocking queries"), "{screen}");
+        assert!(screen.contains("Estimated plan (EXPLAIN)"), "{screen}");
     }
 
     #[test]
