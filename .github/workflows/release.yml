@@ -8,16 +8,29 @@ on:
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
+  # The Version workflow calls this after it tags a merged version PR, since
+  # a tag pushed with GITHUB_TOKEN does not trigger the push event.
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to retry
+        required: true
 
 permissions: {}
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 env:
   # goreleaser/goreleaser v2.17.1
   GORELEASER_VERSION: v2.17.1
+  TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   validate:
@@ -32,14 +45,14 @@ jobs:
         # actions/checkout@v4.2.2
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ github.sha }}
+          ref: refs/tags/${{ env.TAG }}
           fetch-depth: 0
 
       - name: Verify tag matches Cargo.toml version
         id: version
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
+          tag="${TAG}"
           case "$tag" in
             v[0-9]*.[0-9]*.[0-9]*) ;;
             *)
@@ -53,6 +66,8 @@ jobs:
             echo "tag version ${version} does not match Cargo.toml version ${cargo_version}" >&2
             exit 1
           fi
+          # Changesets keeps package.json, Cargo.toml and Cargo.lock in step.
+          node scripts/release-version.mjs check "$version"
           echo "version=${version}" >>"$GITHUB_OUTPUT"
 
       - name: Install toolchain from rust-toolchain.toml
@@ -99,7 +114,7 @@ jobs:
         # actions/checkout@v4.2.2
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ github.sha }}
+          ref: refs/tags/${{ env.TAG }}
           fetch-depth: 0
 
       - name: Install toolchain from rust-toolchain.toml
@@ -127,10 +142,25 @@ jobs:
           version: ${{ env.GORELEASER_VERSION }}
           install-only: true
 
+      - name: Install Node
+        # actions/setup-node@v7.1.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+
+      # pg-probe analyze embeds web/dist at compile time, so the console is
+      # built once, before GoReleaser compiles either target.
+      - name: Build the review console
+        run: |
+          set -euo pipefail
+          npm install --global pnpm@12.14.0
+          pnpm --dir web install --frozen-lockfile
+          pnpm --dir web build
+
       - name: Build and archive with GoReleaser
         run: |
           set -euo pipefail
-          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct "${GITHUB_SHA}")"
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
           # release.disable in .goreleaser.yaml prevents publication here.
           goreleaser release --clean --skip=publish
 
@@ -146,6 +176,10 @@ jobs:
             binary="verify/${target}/pg-probe-v${version}-${target}/pg-probe"
             test -x "$binary"
             file "$binary"
+            if ! grep -aq "/console/assets/" "$binary"; then
+              echo "the review console is not embedded in ${binary}" >&2
+              exit 1
+            fi
             if [[ "$target" == "x86_64-unknown-linux-musl" ]]; then
               if ldd "$binary" >/tmp/ldd.out 2>&1; then
                 echo "expected a static musl binary, but ldd reported dynamic libs:" >&2
@@ -187,7 +221,7 @@ jobs:
         # actions/checkout@v4.2.2
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ github.sha }}
+          ref: refs/tags/${{ env.TAG }}
 
       - name: Download GoReleaser dist
         # actions/download-artifact@v4.3.0
@@ -249,14 +283,14 @@ jobs:
         # actions/checkout@v4.2.2
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ref: ${{ github.sha }}
+          ref: refs/tags/${{ env.TAG }}
 
       - name: Fail if the release already exists
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
+          tag="${TAG}"
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "release ${tag} already exists" >&2
             exit 1
@@ -302,10 +336,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
+          tag="${TAG}"
           version="${{ needs.validate.outputs.version }}"
+          changes="$(node scripts/release-version.mjs notes)"
           notes="$(cat <<EOF
           ## pg-probe ${tag}
+
+          ${changes}
 
           Self-contained musl Linux builds with bundled libpq and vendored OpenSSL,
           produced by GoReleaser's Rust builder.
@@ -349,7 +386,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
+          tag="${TAG}"
           mapfile -t assets < <(gh release view "$tag" --json assets --jq '.assets[].name' | LC_ALL=C sort)
           expected_arm="pg-probe-v${{ needs.validate.outputs.version }}-aarch64-unknown-linux-musl.tar.gz"
           expected_sum="SHA256SUMS"

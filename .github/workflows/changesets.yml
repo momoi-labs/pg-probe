@@ -1,0 +1,84 @@
+name: Version
+
+# Changesets keeps one version PR open on main. Merging it tags the version
+# and calls the release workflow. See docs/releases.md.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: changesets-main
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Check out repository
+        # actions/checkout@v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+
+      - name: Install Node
+        # actions/setup-node@v7.1.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Open or update the version PR
+        id: changesets
+        # changesets/action@v1.9.0
+        uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d
+        with:
+          version: npm run version:packages
+          title: "chore: release pg-probe"
+          commit: "chore: release pg-probe"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Bot-created PRs do not trigger pull_request workflows with this token.
+      - name: Run CI on the version PR
+        if: steps.changesets.outputs.pullRequestNumber != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run ci.yml --ref changeset-release/main
+
+      # The action's publish detection expects CLI v2 output. Keep tagging
+      # explicit so CLI v3 output and GitHub release creation are independent.
+      - name: Tag the merged version
+        id: tag
+        if: steps.changesets.outputs.hasChangesets == 'false'
+        run: |
+          node scripts/release-version.mjs check
+          tag="v$(node -p 'require("./package.json").version')"
+          if git show-ref --verify --quiet "refs/tags/$tag"; then
+            echo "Tag $tag already exists; use the Release workflow to retry it."
+            exit 0
+          fi
+          npm run release:tag
+          git push origin "refs/tags/$tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  # Tags pushed with GITHUB_TOKEN do not trigger the tag-push workflow.
+  release:
+    needs: version
+    if: needs.version.outputs.tag != ''
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write

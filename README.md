@@ -15,8 +15,9 @@ portable SQLite file.
 
 ## Install (release binaries)
 
-Protected `vMAJOR.MINOR.PATCH` tags publish self-contained static musl archives
-that use the Rust-native PostgreSQL client and rustls:
+Each `vMAJOR.MINOR.PATCH` release publishes self-contained static musl
+archives that use the Rust-native PostgreSQL client and rustls, with the
+review console embedded:
 
 - `pg-probe-v<VERSION>-x86_64-unknown-linux-musl.tar.gz`
 - `pg-probe-v<VERSION>-aarch64-unknown-linux-musl.tar.gz`
@@ -242,8 +243,9 @@ cargo test --all-targets --locked
 ```
 
 CI also builds both static musl release targets and exercises the packaging
-scripts. Creating a protected `vMAJOR.MINOR.PATCH` tag whose version matches
-`Cargo.toml` runs the attested release workflow.
+scripts. Releases come from a Changesets version PR: add a changeset with
+`npm run changeset` for each user-visible change. See
+[docs/releases.md](docs/releases.md).
 
 ## License
 

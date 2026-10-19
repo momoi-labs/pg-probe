@@ -21,3 +21,6 @@ target
 #.idea/
 web/dev-artifacts/*
 !web/dev-artifacts/.keep
+
+# Changesets, installed from the root package.json
+/node_modules
