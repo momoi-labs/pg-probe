@@ -508,6 +508,11 @@ impl App {
         let server = &self.server;
         let mut info = vec![
             Span::styled(
+                concat!(" pg-probe ", env!("CARGO_PKG_VERSION"), " "),
+                Style::new().black().on_green().bold(),
+            ),
+            Span::raw(" "),
+            Span::styled(
                 format!("PostgreSQL {}", server.version),
                 Style::new().bold(),
             ),
@@ -1253,6 +1258,7 @@ mod tests {
         assert!(screen.contains("SELECT pg_sleep(5)"));
         assert!(!screen.contains("103"));
         assert!(screen.contains("3/100 total"));
+        assert!(screen.contains(concat!(" pg-probe ", env!("CARGO_PKG_VERSION"))));
     }
 
     #[test]
