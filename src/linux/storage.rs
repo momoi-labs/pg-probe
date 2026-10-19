@@ -91,6 +91,34 @@ impl Collector for StorageCollector {
     }
 }
 
+/// The variant part of [`StorageCollector`], read once per later sample:
+/// block I/O counters. Mounts and block devices stay with the first sample.
+pub struct StorageSampleCollector;
+
+impl Collector for StorageSampleCollector {
+    type Output = StorageObservations;
+
+    fn source(&self) -> &'static str {
+        "linux.storage"
+    }
+
+    fn collect(&self) -> (Self::Output, Vec<ComponentOutcome>) {
+        let mut observations = StorageObservations::default();
+        let mut outcomes = Vec::new();
+        collect_block_io(&mut observations, &mut outcomes);
+        (observations, outcomes)
+    }
+
+    fn write<S: Sink>(
+        &self,
+        sink: &mut S,
+        output: &Self::Output,
+        outcomes: &[ComponentOutcome],
+    ) -> Result<(), S::Error> {
+        sink.write_storage(output, outcomes)
+    }
+}
+
 fn collect_storage() -> (StorageObservations, Vec<ComponentOutcome>) {
     let mut observations = StorageObservations::default();
     let mut outcomes = Vec::new();

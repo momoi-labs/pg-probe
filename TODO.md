@@ -24,13 +24,6 @@ for Linux metrics that require root or additional capabilities. Privileged
 collectors must never prevent an otherwise valid unprivileged collection run;
 the output must record that those metrics were unavailable and why.
 
-## Time-bounded collection
-
-Add a `--duration <duration>` mode that samples Linux and PostgreSQL metrics for
-a limited period before producing the final `.sqlite.gz` artifact. Define the
-sampling interval, backpressure behavior, and partial-result semantics as part
-of that work.
-
 ## Artifact encryption
 
 Add password-based encryption for diagnostic artifacts. Define the file format,

@@ -12,8 +12,8 @@ pub use cgroups::{
     CgroupObservations, CgroupVersion, CgroupsCollector,
 };
 pub use cpu::{
-    parse_loadavg, ComputeCollector, ComputeObservations, CpuSet, CpuTimeEntry, CpuTopologyEntry,
-    LoadAverages, NumaNode, SchedulerCounters,
+    parse_loadavg, ComputeCollector, ComputeObservations, ComputeSampleCollector, CpuSet,
+    CpuTimeEntry, CpuTopologyEntry, LoadAverages, NumaNode, SchedulerCounters,
 };
 pub use identity::{collector_hostname, read_bounded, IdentityCollector};
 pub use kernel::{KernelCollector, KernelIpcEntry, KernelObservations, KernelVmEntry, ThpEntry};
@@ -25,4 +25,5 @@ pub use memory::{
 pub use pressure::{PressureCollector, PressureObservations, PsiEntry, PsiResource, PsiScope};
 pub use storage::{
     BlockDeviceEntry, BlockIoEntry, MountEntry, StorageCollector, StorageObservations,
+    StorageSampleCollector,
 };

@@ -2,6 +2,7 @@ mod signal;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use pg_probe::artifact::{self, ArtifactError};
@@ -80,6 +81,21 @@ struct CaptureArgs {
     #[arg(long, value_name = "DOMAIN", default_value = "all")]
     domain: String,
 
+    /// Keep sampling for this long, for example `90s`, `5m` or `1h`. Without
+    /// it, the capture takes a single sample.
+    #[arg(long, value_name = "DURATION", value_parser = parse_duration)]
+    duration: Option<Duration>,
+
+    /// Time between samples during `--duration`. At least `1s`.
+    #[arg(
+        long,
+        value_name = "INTERVAL",
+        value_parser = parse_duration,
+        default_value = "10s",
+        requires = "duration"
+    )]
+    interval: Duration,
+
     /// Suppress progress and warning messages on stderr.
     #[arg(short, long)]
     quiet: bool,
@@ -91,6 +107,26 @@ struct CaptureArgs {
     /// Print help.
     #[arg(short = '?', long = "help", action = clap::ArgAction::Help)]
     help: Option<bool>,
+}
+
+/// Parses a whole number followed by `s`, `m` or `h`.
+fn parse_duration(value: &str) -> Result<Duration, String> {
+    let split = value
+        .find(|c: char| !c.is_ascii_digit())
+        .ok_or_else(|| format!("'{value}' needs a unit: s, m or h"))?;
+    let (number, unit) = value.split_at(split);
+    let number: u64 = number
+        .parse()
+        .map_err(|_| format!("'{value}' does not start with a whole number"))?;
+    let seconds = match unit {
+        "s" => Some(number),
+        "m" => number.checked_mul(60),
+        "h" => number.checked_mul(3600),
+        _ => return Err(format!("'{value}' has an unknown unit; use s, m or h")),
+    };
+    seconds
+        .map(Duration::from_secs)
+        .ok_or_else(|| format!("'{value}' is too long"))
 }
 
 #[derive(Debug, Args)]
@@ -209,6 +245,17 @@ fn capture(cli: CaptureArgs) -> ExitCode {
         }
     };
 
+    let sampling = match cli.duration {
+        Some(duration) => match pg_probe::Sampling::new(duration, cli.interval) {
+            Ok(sampling) => Some(sampling),
+            Err(msg) => {
+                tracing::error!("invalid --duration or --interval: {msg}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        },
+        None => None,
+    };
+
     let data_dir = cli.data_directory.clone();
 
     if !data_dir.is_dir() {
@@ -228,7 +275,7 @@ fn capture(cli: CaptureArgs) -> ExitCode {
         dbname: cli.dbname,
     };
 
-    let result = pg_probe::capture_with_cancellation(&data_dir, signal::flag(), domains, &params);
+    let result = pg_probe::capture_session(&data_dir, signal::flag(), domains, &params, sampling);
 
     report_exit(result)
 }
@@ -327,5 +374,24 @@ fn report_exit(result: Result<CaptureReport, ArtifactError>) -> ExitCode {
             tracing::error!("{error}");
             ExitCode::from(EXIT_PERSIST)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_duration_reads_seconds_minutes_and_hours() {
+        assert_eq!(parse_duration("90s"), Ok(Duration::from_secs(90)));
+        assert_eq!(parse_duration("5m"), Ok(Duration::from_secs(300)));
+        assert_eq!(parse_duration("1h"), Ok(Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn parse_duration_rejects_missing_or_unknown_units() {
+        assert!(parse_duration("10").is_err());
+        assert!(parse_duration("10d").is_err());
+        assert!(parse_duration("s").is_err());
     }
 }

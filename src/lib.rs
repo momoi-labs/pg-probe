@@ -10,6 +10,7 @@ pub mod sanitize;
 pub mod top;
 
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 pub use cancel::CancelFlag;
 use contract::{now_utc, SnapshotStatus};
@@ -17,10 +18,10 @@ use uuid::Uuid;
 
 use crate::collector::run_collector;
 use crate::linux::{
-    CgroupsCollector, ComputeCollector, IdentityCollector, KernelCollector, LimitsCollector,
-    MemoryCollector, PressureCollector, StorageCollector,
+    CgroupsCollector, ComputeCollector, ComputeSampleCollector, IdentityCollector, KernelCollector,
+    LimitsCollector, MemoryCollector, PressureCollector, StorageCollector, StorageSampleCollector,
 };
-use crate::postgres::PostgresCollector;
+use crate::postgres::{PostgresCollector, PostgresSampler};
 
 pub use artifact::ArtifactError;
 pub use postgres::ConnectionParams;
@@ -40,6 +41,30 @@ impl DomainSelection {
 
     pub fn postgresql_enabled(self) -> bool {
         matches!(self, Self::All | Self::PostgreSql)
+    }
+}
+
+/// A sampling session: how long a capture keeps taking samples, and how far
+/// apart. Without one, a capture takes a single sample.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sampling {
+    duration: Duration,
+    interval: Duration,
+}
+
+impl Sampling {
+    /// The shortest interval allowed. Sampling faster adds load to a server
+    /// that may already be in trouble (principle 1).
+    pub const MIN_INTERVAL: Duration = Duration::from_secs(1);
+
+    pub fn new(duration: Duration, interval: Duration) -> Result<Self, &'static str> {
+        if interval < Self::MIN_INTERVAL {
+            return Err("the interval must be at least 1 second");
+        }
+        if duration < interval {
+            return Err("the duration must be at least one interval");
+        }
+        Ok(Self { duration, interval })
     }
 }
 
@@ -68,6 +93,19 @@ pub fn capture_with_cancellation(
     domains: DomainSelection,
     params: &ConnectionParams,
 ) -> Result<CaptureReport, ArtifactError> {
+    capture_session(data_dir, cancel, domains, params, None)
+}
+
+/// Captures a snapshot like [`capture_with_cancellation`]. With `sampling`, it
+/// then keeps taking samples of the variant observations until the duration
+/// ends, all in the same artifact.
+pub fn capture_session(
+    data_dir: &Path,
+    cancel: &CancelFlag,
+    domains: DomainSelection,
+    params: &ConnectionParams,
+    sampling: Option<Sampling>,
+) -> Result<CaptureReport, ArtifactError> {
     let hostname = linux::collector_hostname();
     let sanitized = sanitize::sanitize_hostname(&hostname);
     let base_name = artifact::format_base_name(&sanitized, now_utc());
@@ -77,7 +115,7 @@ pub fn capture_with_cancellation(
     let writer =
         artifact::PartialWriter::create(data_dir, &base_name, snapshot_id, started_at_utc)?;
 
-    run_collection(writer, cancel, domains, params)
+    run_collection(writer, cancel, domains, params, sampling)
 }
 
 fn run_collection(
@@ -85,8 +123,10 @@ fn run_collection(
     cancel: &CancelFlag,
     domains: DomainSelection,
     params: &ConnectionParams,
+    sampling: Option<Sampling>,
 ) -> Result<CaptureReport, ArtifactError> {
     let partial_path = writer.partial_path().to_path_buf();
+    let session_start = Instant::now();
 
     if cancel.is_cancelled() {
         return Ok(interrupted_report(partial_path));
@@ -144,6 +184,20 @@ fn run_collection(
         }
     }
 
+    if let Some(sampling) = sampling {
+        match run_samples(
+            &mut writer,
+            cancel,
+            domains,
+            params,
+            sampling,
+            session_start,
+        )? {
+            Some(failed) => has_failures |= failed,
+            None => return Ok(interrupted_report(partial_path)),
+        }
+    }
+
     if cancel.is_cancelled() {
         return Ok(interrupted_report(partial_path));
     }
@@ -165,6 +219,69 @@ fn run_collection(
     })
 }
 
+/// Takes the samples after the first, one per interval from the session
+/// start, until the duration ends. Only variant observations are read again.
+/// A sample that runs past the next tick skips that tick rather than queueing
+/// a burst. Returns whether any sample failed, or `None` when cancelled.
+fn run_samples(
+    writer: &mut artifact::PartialWriter,
+    cancel: &CancelFlag,
+    domains: DomainSelection,
+    params: &ConnectionParams,
+    sampling: Sampling,
+    session_start: Instant,
+) -> Result<Option<bool>, ArtifactError> {
+    let postgres = domains
+        .postgresql_enabled()
+        .then(|| PostgresSampler::new(params.clone()));
+    let mut has_failures = false;
+    let mut due = sampling.interval;
+
+    while due <= sampling.duration {
+        if !sleep_until(session_start + due, cancel) {
+            return Ok(None);
+        }
+        writer.begin_sample(now_utc())?;
+
+        if domains.linux_enabled() {
+            has_failures |= run_collector(&ComputeSampleCollector, writer)?;
+            has_failures |= run_collector(&MemoryCollector, writer)?;
+            has_failures |= run_collector(&PressureCollector, writer)?;
+            has_failures |= run_collector(&StorageSampleCollector, writer)?;
+            has_failures |= run_collector(&CgroupsCollector, writer)?;
+        }
+        if let Some(postgres) = &postgres {
+            has_failures |= run_collector(postgres, writer)?;
+        }
+        if cancel.is_cancelled() {
+            return Ok(None);
+        }
+
+        let elapsed = session_start.elapsed();
+        due += sampling.interval;
+        while due <= elapsed {
+            due += sampling.interval;
+        }
+    }
+    Ok(Some(has_failures))
+}
+
+/// Sleeps until `deadline`, waking every 200 ms to honor cancellation.
+/// Returns false when cancelled.
+fn sleep_until(deadline: Instant, cancel: &CancelFlag) -> bool {
+    const STEP: Duration = Duration::from_millis(200);
+    loop {
+        if cancel.is_cancelled() {
+            return false;
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return true;
+        }
+        std::thread::sleep((deadline - now).min(STEP));
+    }
+}
+
 fn interrupted_report(partial_path: PathBuf) -> CaptureReport {
     CaptureReport {
         status: SnapshotStatus::Partial,
@@ -177,6 +294,17 @@ fn interrupted_report(partial_path: PathBuf) -> CaptureReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sampling_rejects_an_interval_under_one_second() {
+        assert!(Sampling::new(Duration::from_secs(60), Duration::from_millis(500)).is_err());
+    }
+
+    #[test]
+    fn sampling_rejects_a_duration_shorter_than_the_interval() {
+        assert!(Sampling::new(Duration::from_secs(5), Duration::from_secs(10)).is_err());
+        assert!(Sampling::new(Duration::from_secs(10), Duration::from_secs(10)).is_ok());
+    }
 
     #[test]
     fn domain_selection_all_enables_both() {

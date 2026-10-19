@@ -544,3 +544,58 @@ fn regex_like_matches(s: &str) -> bool {
 fn find_timestamp_start(s: &str) -> Option<usize> {
     s.len().checked_sub(20)
 }
+
+#[test]
+fn a_sampling_session_writes_one_sample_per_interval() {
+    let directory = tempdir().unwrap();
+
+    let output = cargo_bin_cmd!("pg-probe")
+        .args([
+            "capture",
+            "--domain",
+            "linux",
+            "--duration",
+            "2s",
+            "--interval",
+            "1s",
+        ])
+        .arg("--data-directory")
+        .arg(directory.path())
+        .assert();
+    let code = output.get_output().status.code().unwrap();
+    assert!(code == 0 || code == 1, "unexpected exit {code}");
+
+    let mut decoder = GzDecoder::new(fs::File::open(sole_gzip(directory.path())).unwrap());
+    let mut bytes = Vec::new();
+    decoder.read_to_end(&mut bytes).unwrap();
+    let sqlite_path = directory.path().join("decompressed.sqlite");
+    fs::write(&sqlite_path, bytes).unwrap();
+    let conn = Connection::open(&sqlite_path).unwrap();
+    let count = |sql: &str| conn.query_row(sql, [], |row| row.get::<_, i64>(0)).unwrap();
+
+    assert_eq!(
+        count("SELECT count(*) FROM sample"),
+        3,
+        "samples at 0s, 1s and 2s"
+    );
+    assert_eq!(count("SELECT count(*) FROM linux_scheduler"), 3);
+    assert_eq!(
+        count("SELECT count(DISTINCT sample_id) FROM linux_cpu_time"),
+        3
+    );
+    assert_eq!(
+        count("SELECT count(*) FROM linux_identity"),
+        1,
+        "invariant observations are read once"
+    );
+}
+
+#[test]
+fn interval_without_duration_is_a_usage_error() {
+    let directory = tempdir().unwrap();
+    cargo_bin_cmd!("pg-probe")
+        .args(["capture", "--interval", "5s", "--data-directory"])
+        .arg(directory.path())
+        .assert()
+        .code(2);
+}

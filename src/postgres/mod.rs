@@ -36,7 +36,10 @@ pub use stats::{
 };
 pub use target::Target;
 
+use std::cell::RefCell;
+
 use crate::collector::{Collector, Sink};
+use connection::parse_text_i32;
 
 use crate::contract::{now_utc, CollectionStatus, ComponentOutcome};
 
@@ -71,6 +74,73 @@ impl Collector for PostgresCollector {
 
     fn collect(&self) -> (Self::Output, Vec<ComponentOutcome>) {
         collect_target_inventory(&self.params)
+    }
+
+    fn write<S: Sink>(
+        &self,
+        sink: &mut S,
+        output: &Self::Output,
+        outcomes: &[ComponentOutcome],
+    ) -> Result<(), S::Error> {
+        sink.write_postgres(output, outcomes)
+    }
+}
+
+/// Collects the variant PostgreSQL statistics for samples after the first.
+///
+/// The first sample runs [`PostgresCollector`], which also reads the target,
+/// settings, database sizes and extensions. Those are invariant, so later
+/// samples skip them. The sampler opens one connection on its first sample and
+/// keeps it for the whole session instead of opening one per sample. If that
+/// first open fails, the next sample tries again.
+pub struct PostgresSampler {
+    params: ConnectionParams,
+    session: RefCell<Option<(ConnectedClient, i32)>>,
+}
+
+impl PostgresSampler {
+    pub fn new(params: ConnectionParams) -> Self {
+        Self {
+            params,
+            session: RefCell::new(None),
+        }
+    }
+}
+
+const VERSION_QUERY: &str = "SELECT current_setting('server_version_num')";
+
+impl Collector for PostgresSampler {
+    type Output = TargetInventory;
+
+    fn source(&self) -> &'static str {
+        "postgres"
+    }
+
+    fn collect(&self) -> (Self::Output, Vec<ComponentOutcome>) {
+        let mut outcomes = Vec::new();
+        let mut inventory = TargetInventory::default();
+        let mut session = self.session.borrow_mut();
+
+        if session.is_none() {
+            let source = "postgres.connection";
+            let Ok(client) = ConnectedClient::open(&self.params, source, &mut outcomes) else {
+                return (inventory, outcomes);
+            };
+            let version = client
+                .exec_bounded_row(VERSION_QUERY, source, &mut outcomes)
+                .ok()
+                .and_then(|row| row.first().and_then(|raw| parse_text_i32(raw).ok()));
+            let Some(version) = version else {
+                return (inventory, outcomes);
+            };
+            *session = Some((client, version));
+        }
+
+        let (client, version) = session.as_ref().expect("session opened above");
+        let (pg_stats, stats_outcomes) = stats::collect_postgres_stats_isolated(client, *version);
+        outcomes.extend(stats_outcomes);
+        inventory.stats = pg_stats;
+        (inventory, outcomes)
     }
 
     fn write<S: Sink>(

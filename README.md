@@ -83,6 +83,25 @@ environment variables: `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`,
 (`pg_service.conf`), passfiles (`.pgpass`), and multi-host connection strings
 are intentionally unsupported.
 
+### Sampling over time
+
+By default a capture takes one sample. Add `--duration` to keep sampling and
+record how values change:
+
+```bash
+pg-probe capture --duration 5m --interval 10s
+```
+
+The first sample reads everything. Each later sample, one per `--interval`
+(default `10s`, at least `1s`), reads only the values that change: CPU,
+memory, pressure, disk I/O and cgroup counters, and the PostgreSQL statistics
+and activity aggregates. Settings, database sizes, extensions and host
+identity are read once. PostgreSQL sampling holds one connection for the whole
+session. If a sample takes longer than the interval, the next tick is skipped
+instead of queued. All samples go into one artifact, written when the duration
+ends. Ctrl+C stops the session early and keeps the samples taken so far in the
+`.sqlite.partial` file.
+
 All diagnostics go to stderr as structured log lines: the default keeps errors
 and warnings, `--quiet` keeps only errors, and `--verbose` adds per-collector
 progress. The published artifact path is reported as the `artifact` field of

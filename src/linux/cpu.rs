@@ -106,6 +106,37 @@ impl Collector for ComputeCollector {
     }
 }
 
+/// The variant part of [`ComputeCollector`], read once per later sample: CPU
+/// time counters, scheduler counters and load averages. CPU sets and
+/// topology are invariant and stay with the first sample.
+pub struct ComputeSampleCollector;
+
+impl Collector for ComputeSampleCollector {
+    type Output = ComputeObservations;
+
+    fn source(&self) -> &'static str {
+        "linux.compute"
+    }
+
+    fn collect(&self) -> (Self::Output, Vec<ComponentOutcome>) {
+        let mut observations = ComputeObservations::default();
+        let mut outcomes = Vec::new();
+        collect_cpu_times(&mut observations, &mut outcomes);
+        collect_scheduler(&mut observations, &mut outcomes);
+        collect_load_averages(&mut observations, &mut outcomes);
+        (observations, outcomes)
+    }
+
+    fn write<S: Sink>(
+        &self,
+        sink: &mut S,
+        output: &Self::Output,
+        outcomes: &[ComponentOutcome],
+    ) -> Result<(), S::Error> {
+        sink.write_compute(output, outcomes)
+    }
+}
+
 fn collect_compute() -> (ComputeObservations, Vec<ComponentOutcome>) {
     let mut observations = ComputeObservations::default();
     let mut outcomes = Vec::new();

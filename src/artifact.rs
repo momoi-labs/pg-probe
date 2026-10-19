@@ -148,6 +148,7 @@ pub struct PartialWriter {
     final_path: PathBuf,
     snapshot_id: String,
     sample_id: i64,
+    next_sequence: i64,
 }
 
 impl PartialWriter {
@@ -170,6 +171,7 @@ impl PartialWriter {
             final_path: final_path.to_owned(),
             snapshot_id: snapshot_id_str.clone(),
             sample_id: FIRST_SAMPLE,
+            next_sequence: 0,
         };
         writer.init_schema()?;
         writer.write_envelope(started_at_utc)?;
@@ -232,7 +234,8 @@ impl crate::collector::Sink for PartialWriter {
             .connection
             .transaction()
             .map_err(ArtifactError::Sqlite)?;
-        write_outcomes(&tx, &self.snapshot_id, outcomes)?;
+        write_outcomes(&tx, &self.snapshot_id, self.next_sequence, outcomes)?;
+        self.next_sequence += outcome_count(outcomes)?;
         write_identity_row(&tx, &self.snapshot_id, identity)?;
         tx.commit().map_err(ArtifactError::Sqlite)?;
         self.fsync_partial()
@@ -248,7 +251,8 @@ impl crate::collector::Sink for PartialWriter {
             .transaction()
             .map_err(ArtifactError::Sqlite)?;
         let collected_at = format_timestamp(crate::contract::now_utc());
-        write_outcomes(&tx, &self.snapshot_id, outcomes)?;
+        write_outcomes(&tx, &self.snapshot_id, self.next_sequence, outcomes)?;
+        self.next_sequence += outcome_count(outcomes)?;
         write_cpu_sets(&tx, &self.snapshot_id, compute, &collected_at)?;
         write_cpu_topology(&tx, &self.snapshot_id, compute, &collected_at)?;
         write_numa_nodes(&tx, &self.snapshot_id, compute, &collected_at)?;
@@ -280,7 +284,8 @@ impl crate::collector::Sink for PartialWriter {
             .transaction()
             .map_err(ArtifactError::Sqlite)?;
         let collected_at = format_timestamp(crate::contract::now_utc());
-        write_outcomes(&tx, &self.snapshot_id, outcomes)?;
+        write_outcomes(&tx, &self.snapshot_id, self.next_sequence, outcomes)?;
+        self.next_sequence += outcome_count(outcomes)?;
         write_memory_rows(
             &tx,
             &self.snapshot_id,
@@ -309,7 +314,8 @@ impl crate::collector::Sink for PartialWriter {
             .transaction()
             .map_err(ArtifactError::Sqlite)?;
         let collected_at = format_timestamp(crate::contract::now_utc());
-        write_outcomes(&tx, &self.snapshot_id, outcomes)?;
+        write_outcomes(&tx, &self.snapshot_id, self.next_sequence, outcomes)?;
+        self.next_sequence += outcome_count(outcomes)?;
         write_psi(
             &tx,
             &self.snapshot_id,
@@ -331,7 +337,8 @@ impl crate::collector::Sink for PartialWriter {
             .transaction()
             .map_err(ArtifactError::Sqlite)?;
         let collected_at = format_timestamp(crate::contract::now_utc());
-        write_outcomes(&tx, &self.snapshot_id, outcomes)?;
+        write_outcomes(&tx, &self.snapshot_id, self.next_sequence, outcomes)?;
+        self.next_sequence += outcome_count(outcomes)?;
         write_mounts(&tx, &self.snapshot_id, storage, &collected_at)?;
         write_block_devices(&tx, &self.snapshot_id, storage, &collected_at)?;
         write_block_io(
@@ -355,7 +362,8 @@ impl crate::collector::Sink for PartialWriter {
             .transaction()
             .map_err(ArtifactError::Sqlite)?;
         let collected_at = format_timestamp(crate::contract::now_utc());
-        write_outcomes(&tx, &self.snapshot_id, outcomes)?;
+        write_outcomes(&tx, &self.snapshot_id, self.next_sequence, outcomes)?;
+        self.next_sequence += outcome_count(outcomes)?;
         write_resource_limits(&tx, &self.snapshot_id, limits, &collected_at)?;
         tx.commit().map_err(ArtifactError::Sqlite)?;
         self.fsync_partial()
@@ -371,7 +379,8 @@ impl crate::collector::Sink for PartialWriter {
             .transaction()
             .map_err(ArtifactError::Sqlite)?;
         let collected_at = format_timestamp(crate::contract::now_utc());
-        write_outcomes(&tx, &self.snapshot_id, outcomes)?;
+        write_outcomes(&tx, &self.snapshot_id, self.next_sequence, outcomes)?;
+        self.next_sequence += outcome_count(outcomes)?;
         write_cgroup_limits(&tx, &self.snapshot_id, cgroups, &collected_at)?;
         write_cgroup_usage(
             &tx,
@@ -408,7 +417,8 @@ impl crate::collector::Sink for PartialWriter {
             .transaction()
             .map_err(ArtifactError::Sqlite)?;
         let collected_at = format_timestamp(crate::contract::now_utc());
-        write_outcomes(&tx, &self.snapshot_id, outcomes)?;
+        write_outcomes(&tx, &self.snapshot_id, self.next_sequence, outcomes)?;
+        self.next_sequence += outcome_count(outcomes)?;
         write_kernel_vm(&tx, &self.snapshot_id, kernel, &collected_at)?;
         write_kernel_ipc(&tx, &self.snapshot_id, kernel, &collected_at)?;
         write_thp(&tx, &self.snapshot_id, kernel, &collected_at)?;
@@ -426,7 +436,8 @@ impl crate::collector::Sink for PartialWriter {
             .transaction()
             .map_err(ArtifactError::Sqlite)?;
         let collected_at = format_timestamp(crate::contract::now_utc());
-        write_outcomes(&tx, &self.snapshot_id, outcomes)?;
+        write_outcomes(&tx, &self.snapshot_id, self.next_sequence, outcomes)?;
+        self.next_sequence += outcome_count(outcomes)?;
         write_postgres_target(&tx, &self.snapshot_id, inventory, &collected_at)?;
         write_postgres_settings(&tx, &self.snapshot_id, inventory, &collected_at)?;
         write_postgres_databases(&tx, &self.snapshot_id, inventory, &collected_at)?;
@@ -571,6 +582,20 @@ impl PartialWriter {
         Ok(final_path)
     }
 
+    /// Starts the next sample. Variant observations written after this call
+    /// are keyed to it.
+    pub fn begin_sample(&mut self, taken_at_utc: DateTime<Utc>) -> Result<(), ArtifactError> {
+        let next = self.sample_id + 1;
+        let tx = self
+            .connection
+            .transaction()
+            .map_err(ArtifactError::Sqlite)?;
+        write_sample(&tx, &self.snapshot_id, next, taken_at_utc)?;
+        tx.commit().map_err(ArtifactError::Sqlite)?;
+        self.sample_id = next;
+        self.fsync_partial()
+    }
+
     pub fn partial_path(&self) -> &Path {
         &self.partial_path
     }
@@ -640,7 +665,7 @@ pub fn publish(snapshot: &Snapshot, output: &Path) -> Result<(), ArtifactError> 
         .map_err(ArtifactError::Sqlite)?;
 
         write_sample(&tx, &snapshot_id, FIRST_SAMPLE, snapshot.started_at_utc)?;
-        write_outcomes(&tx, &snapshot_id, &snapshot.outcomes)?;
+        write_outcomes(&tx, &snapshot_id, 0, &snapshot.outcomes)?;
         write_identity_row(&tx, &snapshot_id, &snapshot.identity)?;
 
         let collected_at = format_timestamp(snapshot.finished_at_utc);
@@ -831,9 +856,17 @@ fn write_sample(
     Ok(())
 }
 
+fn outcome_count(outcomes: &[ComponentOutcome]) -> Result<i64, ArtifactError> {
+    i64::try_from(outcomes.len()).map_err(|_| ArtifactError::ValueOutOfRange)
+}
+
+/// Writes outcomes numbered from `first_sequence`. The writer keeps one
+/// running sequence for the whole snapshot, so a source that reports again in
+/// a later sample does not collide with its earlier outcome.
 fn write_outcomes(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    first_sequence: i64,
     outcomes: &[ComponentOutcome],
 ) -> Result<(), ArtifactError> {
     let mut statement = tx
@@ -850,7 +883,8 @@ fn write_outcomes(
             .execute(params![
                 snapshot_id,
                 outcome.source,
-                i64::try_from(sequence).map_err(|_| ArtifactError::ValueOutOfRange)?,
+                first_sequence
+                    + i64::try_from(sequence).map_err(|_| ArtifactError::ValueOutOfRange)?,
                 format_timestamp(outcome.started_at_utc),
                 format_timestamp(outcome.finished_at_utc),
                 outcome.status.as_str(),
