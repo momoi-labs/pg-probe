@@ -472,6 +472,60 @@ fn verbose_reports_error_code_for_failed_collector() {
 }
 
 #[test]
+fn cleanup_deletes_listed_partials_after_yes_and_captures() {
+    let directory = tempdir().unwrap();
+    let partial = directory
+        .path()
+        .join("oldhost-2026-01-01-00h00m00s.sqlite.partial");
+    fs::write(&partial, b"pre-existing partial data").unwrap();
+
+    let output = cargo_bin_cmd!("pg-probe")
+        .arg("capture")
+        .arg("--data-directory")
+        .arg(directory.path())
+        .arg("--domain")
+        .arg("linux")
+        .arg("--cleanup")
+        .write_stdin("y\n")
+        .assert();
+
+    let code = output.get_output().status.code().unwrap();
+    assert!(
+        code == 0 || code == 1,
+        "expected a capture, got exit {code}"
+    );
+    let stderr = String::from_utf8_lossy(&output.get_output().stderr);
+    assert!(stderr.contains("oldhost-2026-01-01-00h00m00s.sqlite.partial"));
+    assert!(stderr.contains("[y/N]"));
+    assert!(!partial.exists());
+    sole_gzip(directory.path());
+}
+
+#[test]
+fn cleanup_aborts_without_deleting_unless_the_answer_is_yes() {
+    let directory = tempdir().unwrap();
+    let partial = directory
+        .path()
+        .join("oldhost-2026-01-01-00h00m00s.sqlite.partial");
+    fs::write(&partial, b"pre-existing partial data").unwrap();
+
+    for answer in ["n\n", ""] {
+        cargo_bin_cmd!("pg-probe")
+            .arg("capture")
+            .arg("--data-directory")
+            .arg(directory.path())
+            .arg("--cleanup")
+            .write_stdin(answer)
+            .assert()
+            .code(2)
+            .stderr(predicate::str::contains("no files were deleted"));
+    }
+
+    assert_eq!(fs::read(&partial).unwrap(), b"pre-existing partial data");
+    assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+}
+
+#[test]
 fn existing_partial_files_are_warned_about_and_left_untouched() {
     let directory = tempdir().unwrap();
     let partial = directory

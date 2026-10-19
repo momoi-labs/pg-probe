@@ -29,7 +29,7 @@ const EXIT_INTERRUPTED: u8 = 130;
         Exit codes:\n  \
         0   complete snapshot published\n  \
         1   partial snapshot published (a source failed)\n  \
-        2   usage error: invalid arguments or bad data directory\n  \
+        2   usage error: invalid arguments, bad data directory, or --cleanup declined\n  \
         3   storage or finalization failure; no usable artifact\n  \
         130 interrupted by Ctrl+C (SIGINT)\n\n\
         A single Ctrl+C stops the run cooperatively, preserving committed\n\
@@ -109,6 +109,12 @@ struct CaptureArgs {
     /// Print detailed progress messages on stderr.
     #[arg(short, long)]
     verbose: bool,
+
+    /// Delete the .sqlite.partial files left in the data directory by earlier
+    /// captures before this one starts. Lists them and asks to confirm. Make
+    /// sure no other capture is writing to the same directory.
+    #[arg(long)]
+    cleanup: bool,
 
     /// Print help.
     #[arg(short = '?', long = "help", action = clap::ArgAction::Help)]
@@ -291,7 +297,14 @@ fn capture(cli: CaptureArgs) -> ExitCode {
         progress::header(cli.duration.map(|duration| (duration, cli.interval)));
     }
 
-    warn_about_existing_partials(&data_dir);
+    if cli.cleanup {
+        let stdin = std::io::stdin();
+        if let Err(code) = cleanup_partials(&data_dir, &mut stdin.lock()) {
+            return code;
+        }
+    } else {
+        warn_about_existing_partials(&data_dir);
+    }
 
     let params = pg_probe::ConnectionParams {
         host: cli.host,
@@ -359,11 +372,52 @@ fn warn_about_existing_partials(data_dir: &std::path::Path) {
         .collect::<Vec<_>>()
         .join("\n  ");
     tracing::warn!(
-        "found {} existing .sqlite.partial file(s) in {}:\n  {}\nleft untouched; a future --cleanup option will manage them",
+        "found {} existing .sqlite.partial file(s) in {}:\n  {}\nleft untouched; run with --cleanup to delete them",
         partials.len(),
         data_dir.display(),
         listing,
     );
+}
+
+/// Lists the partial files in `data_dir` and deletes them once the operator
+/// answers yes. Any other answer, or no answer, aborts the run with nothing
+/// deleted. The prompt goes to stderr, since stdout carries only the artifact
+/// path.
+fn cleanup_partials(
+    data_dir: &std::path::Path,
+    answers: &mut impl std::io::BufRead,
+) -> Result<(), ExitCode> {
+    let partials = artifact::scan_for_partials(data_dir);
+    if partials.is_empty() {
+        eprintln!(
+            "no .sqlite.partial files to clean up in {}",
+            data_dir.display()
+        );
+        return Ok(());
+    }
+
+    progress::cleanup_page(data_dir, &partials);
+    let mut answer = String::new();
+    let _ = answers.read_line(&mut answer);
+    let answer = answer.trim();
+    if !matches!(answer.to_lowercase().as_str(), "y" | "yes") {
+        progress::cleanup_answered(answer, "aborted; no files were deleted", false);
+        return Err(ExitCode::from(EXIT_USAGE));
+    }
+
+    for path in &partials {
+        if let Err(error) = std::fs::remove_file(path) {
+            let result = format!("could not delete {}: {error}", path.display());
+            progress::cleanup_answered(answer, &result, true);
+            return Err(ExitCode::from(EXIT_USAGE));
+        }
+    }
+    progress::cleanup_answered(
+        answer,
+        &format!("deleted {} file(s)", partials.len()),
+        false,
+    );
+    Ok(())
 }
 
 fn report_exit(result: Result<CaptureReport, ArtifactError>) -> ExitCode {

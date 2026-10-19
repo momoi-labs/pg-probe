@@ -1076,8 +1076,8 @@ fn terminal_width() -> usize {
         .max(40)
 }
 
-/// Prints the page title once, when stderr is a terminal. The live block and
-/// any messages before it are sections below it.
+/// Prints the page title once, when stderr is a terminal. The actions, such
+/// as `--cleanup`, and the live block are sections below it.
 pub fn header(sampling: Option<(Duration, Duration)>) {
     if !std::io::stderr().is_terminal() {
         return;
@@ -1103,6 +1103,157 @@ pub fn header(sampling: Option<(Duration, Duration)>) {
     let mut text = String::new();
     write_line(&mut text, &title, width, color);
     write_line(&mut text, &Line::default(), width, color);
+    let mut out = std::io::stderr().lock();
+    let _ = out.write_all(text.as_bytes());
+    let _ = out.flush();
+}
+
+const CLEANUP_QUESTION: &str = "Delete them and continue?";
+
+fn cleanup_label(text: &str) -> Span<'static> {
+    Span::styled(format!(" {text:<16}"), palette::muted())
+}
+
+/// Prints the `--cleanup` section: the partial files about to be deleted,
+/// then the confirmation prompt. The prompt ends without a newline and leaves
+/// the page colors on, so the typed answer reads as part of the page.
+pub fn cleanup_page(data_dir: &Path, partials: &[PathBuf]) {
+    let width = terminal_width();
+    let color = use_color();
+    let muted = |text: String| Span::styled(text, palette::muted());
+    let rows: Vec<(String, String, String)> = partials
+        .iter()
+        .map(|path| {
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.display().to_string());
+            let metadata = std::fs::metadata(path).ok();
+            let size = metadata
+                .as_ref()
+                .map_or_else(|| "—".to_string(), |metadata| iec(metadata.len()));
+            let modified = metadata
+                .and_then(|metadata| metadata.modified().ok())
+                .map_or_else(
+                    || "—".to_string(),
+                    |time| {
+                        chrono::DateTime::<chrono::Utc>::from(time)
+                            .format("%Y-%m-%d %H:%M:%S UTC")
+                            .to_string()
+                    },
+                );
+            (name, size, modified)
+        })
+        .collect();
+    let name_width = rows
+        .iter()
+        .map(|(name, _, _)| name.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(4);
+    let total: u64 = partials
+        .iter()
+        .filter_map(|path| std::fs::metadata(path).ok())
+        .map(|metadata| metadata.len())
+        .sum();
+
+    let mut lines = vec![
+        Line::from(format!(
+            " {:<width$}",
+            format!(
+                "Cleanup · partial files from earlier captures in {}",
+                data_dir.display()
+            )
+        ))
+        .style(palette::table_header()),
+        Line::from(muted(format!(
+            " {:<name_width$}  {:>10}  {}",
+            "File", "Size", "Modified"
+        ))),
+    ];
+    for (name, size, modified) in rows {
+        lines.push(Line::from(vec![
+            Span::raw(format!(" {name:<name_width$}  ")),
+            Span::styled(format!("{size:>10}"), palette::strong()),
+            muted(format!("  {modified}")),
+        ]));
+    }
+    lines.push(Line::from(vec![
+        muted(format!(" {} files, ", partials.len())),
+        Span::styled(iec(total), palette::strong()),
+        muted(" in total".to_string()),
+    ]));
+    lines.push(Line::default());
+
+    let mut text = String::new();
+    for line in &lines {
+        write_line(&mut text, line, width, color);
+    }
+    let base = palette::base();
+    write_styled(
+        &mut text,
+        base.patch(palette::muted()),
+        &format!(" {:<16}", "Confirm"),
+        color,
+    );
+    write_styled(
+        &mut text,
+        base.patch(palette::strong()),
+        CLEANUP_QUESTION,
+        color,
+    );
+    write_styled(&mut text, base.patch(palette::muted()), " [y/N] ", color);
+    if color {
+        let _ =
+            SetForegroundColor(CColor::from(base.fg.unwrap_or(Color::Reset))).write_ansi(&mut text);
+        let _ =
+            SetBackgroundColor(CColor::from(base.bg.unwrap_or(Color::Reset))).write_ansi(&mut text);
+    }
+    let mut out = std::io::stderr().lock();
+    let _ = out.write_all(text.as_bytes());
+    let _ = out.flush();
+}
+
+/// Ends the `--cleanup` section: redraws the prompt line with the answer,
+/// then the result.
+pub fn cleanup_answered(answer: &str, result: &str, failed: bool) {
+    let mut text = String::new();
+    let result_style = if failed {
+        palette::danger()
+    } else {
+        palette::strong()
+    };
+    if std::io::stderr().is_terminal() {
+        let width = terminal_width();
+        let color = use_color();
+        if color {
+            let _ = SetAttribute(Attribute::Reset).write_ansi(&mut text);
+        }
+        // A terminal echoed the answer and its newline; a pipe did not.
+        text.push_str(if std::io::stdin().is_terminal() {
+            "\x1b[1A\r\x1b[K"
+        } else {
+            "\r\x1b[K"
+        });
+        let prompt = Line::from(vec![
+            cleanup_label("Confirm"),
+            Span::styled(CLEANUP_QUESTION, palette::strong()),
+            Span::styled(" [y/N] ", palette::muted()),
+            Span::styled(answer.to_string(), palette::strong()),
+        ]);
+        let outcome = Line::from(vec![
+            cleanup_label("Result"),
+            Span::styled(result.to_string(), result_style),
+        ]);
+        for line in [&prompt, &outcome, &Line::default()] {
+            write_line(&mut text, line, width, color);
+        }
+    } else {
+        if !std::io::stdin().is_terminal() {
+            text.push('\n');
+        }
+        let _ = writeln!(text, " {:<16}{result}", "Result");
+    }
     let mut out = std::io::stderr().lock();
     let _ = out.write_all(text.as_bytes());
     let _ = out.flush();

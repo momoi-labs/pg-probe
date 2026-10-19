@@ -123,6 +123,11 @@ of queued. All samples go into one artifact, written when the duration ends.
 Ctrl+C stops the session early and keeps the samples taken so far in the
 `.sqlite.partial` file.
 
+A capture warns about `.sqlite.partial` files left in the data directory and
+never touches them. `--cleanup` lists them and asks to confirm: `y` deletes them
+and the capture continues; any other answer aborts with exit code `2` and
+deletes nothing. Make sure no other capture is writing to the same directory.
+
 All diagnostics go to stderr. By default a capture shows its progress: on a
 terminal, a summary redrawn in place with the samples taken, collector counts
 per domain, sample time without the snapshot (p95 and p99, updated every 10
