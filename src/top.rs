@@ -5,7 +5,8 @@
 //! terminal: nothing is persisted. The session is opened read-only with a
 //! statement timeout, and each refresh runs one constant `SELECT` over
 //! `pg_stat_activity`. The blocking view adds `pg_blocking_pids`, which takes
-//! lock-manager locks, so it only runs while that view is open.
+//! lock-manager locks, so it only runs while that view is open. The vacuum
+//! view reads `pg_stat_progress_vacuum`, also only while it is open.
 //!
 //! When the server runs on this host, host load and memory and per-backend
 //! CPU and I/O come from the local `/proc`, which costs the server nothing.
@@ -110,6 +111,49 @@ WHERE pid = {pid}",
     ))
 }
 
+/// Builds the vacuum view's `SELECT`: every manual and autovacuum run in
+/// progress. The table name resolves only in the connected database, since
+/// `regclass` reads the local catalog; other databases show the table OID.
+/// Before PG 9.6 there is no progress view, so the sessions come from
+/// `pg_stat_activity` without phase or progress.
+fn vacuum_sql(server_version_num: i32) -> String {
+    let duration = "round(EXTRACT(EPOCH FROM (clock_timestamp() - a.query_start))::numeric, 3)";
+    let autovacuum = if has_backend_type(server_version_num).is_supported() {
+        "a.backend_type = 'autovacuum worker'"
+    } else {
+        "a.query LIKE 'autovacuum:%'"
+    };
+    let kind = format!(
+        "CASE WHEN {autovacuum} THEN \
+            CASE WHEN a.query LIKE '%(to prevent wraparound)' THEN 'wraparound' ELSE 'auto' END \
+        ELSE 'manual' END"
+    );
+    // pg_stat_progress_vacuum arrived in PG 9.6, with wait_event_type.
+    if has_wait_event_type(server_version_num).is_supported() {
+        format!(
+            "\
+SELECT a.pid, a.datname, a.usename, a.state, a.wait_event_type, a.wait_event, \
+    {duration}, a.query, \
+    CASE WHEN p.datname = current_database() THEN p.relid::regclass::text \
+        ELSE p.relid::text END, \
+    {kind}, p.phase, p.heap_blks_scanned, p.heap_blks_total, p.index_vacuum_count \
+FROM pg_stat_progress_vacuum p \
+JOIN pg_stat_activity a ON a.pid = p.pid \
+ORDER BY a.query_start ASC NULLS LAST"
+        )
+    } else {
+        format!(
+            "\
+SELECT a.pid, a.datname, a.usename, a.state, \
+    CASE WHEN a.waiting THEN 'Lock' END, NULL::text, \
+    {duration}, a.query, NULL::text, {kind}, NULL::text, NULL, NULL, NULL \
+FROM pg_stat_activity a \
+WHERE a.query LIKE 'autovacuum:%' OR a.query ~* '^[[:space:]]*vacuum' \
+ORDER BY a.query_start ASC NULLS LAST"
+        )
+    }
+}
+
 /// Builds the backend `SELECT` for the given server version. Idle backends
 /// are kept for the session counts, but without their last query text.
 /// Before PG 10 `pg_stat_activity` lists only client backends and has no
@@ -159,7 +203,7 @@ pub struct Server {
 }
 
 /// One client backend from `pg_stat_activity`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Backend {
     pub pid: String,
     pub database: String,
@@ -183,6 +227,33 @@ impl Backend {
             ("", _) => String::new(),
             (kind, "") => kind.to_owned(),
             (kind, event) => format!("{kind}:{event}"),
+        }
+    }
+}
+
+/// One vacuum in progress. Its session fields fill `backend`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Vacuum {
+    pub backend: Backend,
+    /// The table name in the connected database, its OID in any other.
+    pub table: String,
+    /// `auto`, `wraparound`, or `manual`.
+    pub kind: String,
+    pub phase: String,
+    pub heap_scanned: Option<f64>,
+    pub heap_total: Option<f64>,
+    pub index_passes: String,
+}
+
+impl Vacuum {
+    /// The share of heap blocks scanned, as `pg_stat_progress_vacuum`
+    /// counts them: `heap_blks_scanned / heap_blks_total`.
+    fn scanned(&self) -> String {
+        match (self.heap_scanned, self.heap_total) {
+            (Some(scanned), Some(total)) if total > 0.0 => {
+                format!("{:.1}%", scanned / total * 100.0)
+            }
+            _ => "-".to_owned(),
         }
     }
 }
@@ -242,6 +313,7 @@ enum View {
     Running,
     Waiting,
     Blocking,
+    Vacuum,
 }
 
 impl View {
@@ -250,6 +322,7 @@ impl View {
             Self::Running => "RUNNING QUERIES",
             Self::Waiting => "WAITING QUERIES",
             Self::Blocking => "BLOCKING QUERIES",
+            Self::Vacuum => "VACUUM",
         }
     }
 }
@@ -317,6 +390,8 @@ struct App {
     backends: Vec<Backend>,
     /// Blocker pid to the pids it blocks. Filled only in the blocking view.
     blocks: HashMap<String, Vec<String>>,
+    /// Vacuums in progress. Filled only in the vacuum view.
+    vacuums: Vec<Vacuum>,
     /// Local `/proc` metrics, present only when the server runs on this host.
     os: Option<OsState>,
     table: TableState,
@@ -425,6 +500,7 @@ impl App {
             popup: None,
             backends: Vec::new(),
             blocks: HashMap::new(),
+            vacuums: Vec::new(),
             os: local.then(OsState::new),
             table: TableState::default().with_selected(Some(0)),
         }
@@ -561,6 +637,7 @@ impl App {
                     KeyCode::F(1) | KeyCode::Char('1') => self.view = View::Running,
                     KeyCode::F(2) | KeyCode::Char('2') => self.view = View::Waiting,
                     KeyCode::F(3) | KeyCode::Char('3') => self.view = View::Blocking,
+                    KeyCode::F(4) | KeyCode::Char('4') => self.view = View::Vacuum,
                     KeyCode::Down | KeyCode::Char('j') => self.select_by(1),
                     KeyCode::Up | KeyCode::Char('k') => self.select_by(-1),
                     KeyCode::PageDown => self.select_by(PAGE as isize),
@@ -592,8 +669,21 @@ impl App {
             self.history.pop_front();
         }
         self.history.push_back((counts.active, counts.waiting));
+        self.vacuums = if self.view == View::Vacuum {
+            fetch_vacuums(client, &vacuum_sql(self.server.version_num))?
+        } else {
+            Vec::new()
+        };
         if let Some(os) = &mut self.os {
-            os.refresh(&self.backends);
+            // Autovacuum workers are not client backends, so they are not
+            // in the backend list.
+            let observed: Vec<Backend> = self
+                .backends
+                .iter()
+                .chain(self.vacuums.iter().map(|vacuum| &vacuum.backend))
+                .cloned()
+                .collect();
+            os.refresh(&observed);
         }
         self.refresh_popup(client)?;
         self.blocks = if self.view == View::Blocking {
@@ -632,10 +722,7 @@ impl App {
         let Some(popup) = &self.popup else {
             return;
         };
-        let backend = self
-            .backends
-            .iter()
-            .find(|backend| backend.pid == popup.pid);
+        let backend = self.backend_by_pid(&popup.pid);
         let query = popup
             .details
             .as_ref()
@@ -665,9 +752,7 @@ impl App {
             return;
         };
         let database = self
-            .backends
-            .iter()
-            .find(|backend| backend.pid == popup.pid)
+            .backend_by_pid(&popup.pid)
             .map(|backend| backend.database.clone())
             .unwrap_or_default();
         let raw_query = popup
@@ -732,9 +817,19 @@ impl App {
             .collect()
     }
 
-    /// The grouping in effect. The blocking tree has its own order.
+    /// A backend of the list or a vacuum session, which may be an
+    /// autovacuum worker outside the list.
+    fn backend_by_pid(&self, pid: &str) -> Option<&Backend> {
+        self.backends
+            .iter()
+            .chain(self.vacuums.iter().map(|vacuum| &vacuum.backend))
+            .find(|backend| backend.pid == pid)
+    }
+
+    /// The grouping in effect. The blocking tree and the vacuum view have
+    /// their own order.
     fn shown_group(&self) -> Group {
-        if self.view == View::Blocking && self.tree {
+        if self.view == View::Vacuum || self.view == View::Blocking && self.tree {
             Group::None
         } else {
             self.group
@@ -746,6 +841,13 @@ impl App {
         if self.view == View::Blocking && self.tree {
             return self.blocking_tree();
         }
+        if self.view == View::Vacuum {
+            return self
+                .vacuums
+                .iter()
+                .map(|vacuum| (String::new(), &vacuum.backend))
+                .collect();
+        }
         let mut rows = self
             .backends
             .iter()
@@ -753,6 +855,7 @@ impl App {
                 View::Running => !backend.state.is_empty() && backend.state != "idle",
                 View::Waiting => backend.waits_on_lock(),
                 View::Blocking => self.blocks.contains_key(&backend.pid),
+                View::Vacuum => false,
             })
             .map(|backend| (String::new(), backend))
             .collect::<Vec<_>>();
@@ -1104,6 +1207,10 @@ impl App {
     }
 
     fn draw_table(&mut self, frame: &mut Frame, area: Rect) {
+        if self.view == View::Vacuum {
+            self.draw_vacuum_table(frame, area);
+            return;
+        }
         let tree = self.view == View::Blocking && self.tree;
         let last_column = if self.view == View::Blocking && !tree {
             "BLOCKS"
@@ -1266,14 +1373,96 @@ impl App {
         }
     }
 
+    fn draw_vacuum_table(&mut self, frame: &mut Frame, area: Rect) {
+        let mut titles = vec!["PID", "DATABASE", "TABLE", "TYPE", "PHASE"];
+        let mut widths = vec![
+            Constraint::Length(7),
+            Constraint::Length(16),
+            Constraint::Length(24),
+            Constraint::Length(10),
+            Constraint::Length(24),
+        ];
+        if self.os.is_some() {
+            titles.extend(["CPU%", "READ/s", "WRITE/s"]);
+            widths.extend([
+                Constraint::Length(6),
+                Constraint::Length(9),
+                Constraint::Length(9),
+            ]);
+        }
+        titles.extend(["SCANNED", "IDX", "TIME+", "WAITING", "QUERY"]);
+        widths.extend([
+            Constraint::Length(7),
+            Constraint::Length(3),
+            Constraint::Length(10),
+            Constraint::Length(22),
+            Constraint::Fill(1),
+        ]);
+        let header = Row::new(titles.into_iter().map(Cell::from))
+            .style(Style::new().black().on_green().bold());
+        let right = |text: String| Cell::from(Line::from(text).alignment(Alignment::Right));
+        let rows: Vec<Row> = self
+            .vacuums
+            .iter()
+            .map(|vacuum| {
+                let backend = &vacuum.backend;
+                let kind_style = match vacuum.kind.as_str() {
+                    "wraparound" => Style::new().red().bold(),
+                    "auto" => Style::new().yellow(),
+                    _ => Style::new(),
+                };
+                let mut cells = vec![
+                    Cell::from(Span::styled(backend.pid.clone(), Style::new().cyan())),
+                    Cell::from(Span::styled(
+                        backend.database.clone(),
+                        Style::new().dark_gray().bold(),
+                    )),
+                    Cell::from(or_dash(&vacuum.table).to_owned()),
+                    Cell::from(Span::styled(vacuum.kind.clone(), kind_style)),
+                    Cell::from(or_dash(&vacuum.phase).to_owned()),
+                ];
+                if let Some(os) = &self.os {
+                    let rate = os.rates.get(&backend.pid);
+                    let bytes = |value: Option<f64>| {
+                        value.map(format_bytes).unwrap_or_else(|| "-".to_owned())
+                    };
+                    cells.extend([
+                        right(
+                            rate.and_then(|rate| rate.cpu_percent)
+                                .map(|cpu| format!("{cpu:.1}"))
+                                .unwrap_or_else(|| "-".to_owned()),
+                        ),
+                        right(bytes(rate.and_then(|rate| rate.read_per_s))),
+                        right(bytes(rate.and_then(|rate| rate.write_per_s))),
+                    ]);
+                }
+                cells.extend([
+                    right(vacuum.scanned()),
+                    right(or_dash(&vacuum.index_passes).to_owned()),
+                    Cell::from(
+                        Line::from(Span::styled(
+                            backend.duration_s.map(format_duration).unwrap_or_default(),
+                            duration_style(backend.duration_s),
+                        ))
+                        .alignment(Alignment::Right),
+                    ),
+                    Cell::from(Span::styled(backend.wait_label(), Style::new().yellow())),
+                    Cell::from(backend.query.clone()),
+                ]);
+                Row::new(cells)
+            })
+            .collect();
+        let table = Table::new(rows, widths)
+            .header(header)
+            .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED));
+        frame.render_stateful_widget(table, area, &mut self.table);
+    }
+
     fn draw_popup(&self, frame: &mut Frame) {
         let Some(popup) = &self.popup else {
             return;
         };
-        let backend = self
-            .backends
-            .iter()
-            .find(|backend| backend.pid == popup.pid);
+        let backend = self.backend_by_pid(&popup.pid);
         let details = popup.details.clone().unwrap_or_default();
         let label = |text: &str| Span::styled(format!("{text:<16}"), Style::new().cyan().bold());
         let field = |name: &str, value: Vec<Span<'static>>| {
@@ -1580,6 +1769,7 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
             ("F1 1", "Running queries"),
             ("F2 2", "Waiting queries"),
             ("F3 3", "Blocking queries"),
+            ("F4 4", "Vacuum in progress, manual and autovacuum"),
         ],
     ),
     (
@@ -1754,6 +1944,7 @@ fn footer_line(view: View) -> Line<'static> {
         ("F1", "Running queries", Some(View::Running)),
         ("F2", "Waiting queries", Some(View::Waiting)),
         ("F3", "Blocking queries", Some(View::Blocking)),
+        ("F4", "Vacuum", Some(View::Vacuum)),
         ("v", "Query details", None),
         ("Space", "Pause/unpause", None),
         ("?", "Help", None),
@@ -1853,28 +2044,52 @@ fn read_server(client: &ConnectedClient) -> Result<Server, AdapterError> {
 
 fn fetch_backends(client: &ConnectedClient, sql: &str) -> Result<Vec<Backend>, AdapterError> {
     let rows = client.exec_bounded_rows(sql, SOURCE, &mut Vec::new())?;
+    Ok(rows.rows.iter().map(|row| backend_of(row)).collect())
+}
+
+/// Decodes the first eight columns, which the backend and vacuum `SELECT`s
+/// share.
+fn backend_of(row: &[Vec<u8>]) -> Backend {
+    let text = |index: usize| {
+        row.get(index)
+            .map(|value| text_of(value))
+            .unwrap_or_default()
+    };
+    Backend {
+        pid: text(0),
+        database: text(1),
+        user: text(2),
+        state: text(3),
+        wait_type: text(4),
+        wait_event: text(5),
+        duration_s: text(6).parse().ok(),
+        query: text(7),
+        raw_query: row
+            .get(7)
+            .map(|value| String::from_utf8_lossy(value).into_owned())
+            .unwrap_or_default(),
+    }
+}
+
+fn fetch_vacuums(client: &ConnectedClient, sql: &str) -> Result<Vec<Vacuum>, AdapterError> {
+    let rows = client.exec_bounded_rows(sql, SOURCE, &mut Vec::new())?;
     Ok(rows
         .rows
-        .into_iter()
+        .iter()
         .map(|row| {
             let text = |index: usize| {
                 row.get(index)
                     .map(|value| text_of(value))
                     .unwrap_or_default()
             };
-            Backend {
-                pid: text(0),
-                database: text(1),
-                user: text(2),
-                state: text(3),
-                wait_type: text(4),
-                wait_event: text(5),
-                duration_s: text(6).parse().ok(),
-                query: text(7),
-                raw_query: row
-                    .get(7)
-                    .map(|value| String::from_utf8_lossy(value).into_owned())
-                    .unwrap_or_default(),
+            Vacuum {
+                backend: backend_of(row),
+                table: text(8),
+                kind: text(9),
+                phase: text(10),
+                heap_scanned: text(11).parse().ok(),
+                heap_total: text(12).parse().ok(),
+                index_passes: text(13),
             }
         })
         .collect())
@@ -2217,6 +2432,42 @@ mod tests {
         assert!(lines[1].contains("active 2 ▄█"), "{screen}");
         assert!(lines[1].contains("waiting 1 ▁█"), "{screen}");
         assert!(lines[2].contains("RUNNING QUERIES"), "{screen}");
+    }
+
+    #[test]
+    fn vacuum_sql_follows_the_server_version() {
+        let legacy = vacuum_sql(90325);
+        assert!(!legacy.contains("pg_stat_progress_vacuum"));
+        assert!(legacy.contains("a.query LIKE 'autovacuum:%'"));
+        let progress = vacuum_sql(90600);
+        assert!(progress.contains("pg_stat_progress_vacuum"));
+        assert!(!progress.contains("backend_type"));
+        assert!(vacuum_sql(170000).contains("a.backend_type = 'autovacuum worker'"));
+    }
+
+    #[test]
+    fn vacuum_view_lists_progress_and_finds_autovacuum_workers() {
+        let mut app = app(View::Vacuum);
+        app.vacuums = vec![Vacuum {
+            backend: Backend {
+                pid: "900".to_owned(),
+                database: "bench".to_owned(),
+                query: "autovacuum: VACUUM public.accounts".to_owned(),
+                ..Backend::default()
+            },
+            table: "accounts".to_owned(),
+            kind: "auto".to_owned(),
+            phase: "scanning heap".to_owned(),
+            heap_scanned: Some(250.0),
+            heap_total: Some(1000.0),
+            index_passes: "0".to_owned(),
+        }];
+        assert_eq!(app.visible().len(), 1);
+        assert!(app.backend_by_pid("900").is_some());
+        let screen = screen(&mut app);
+        assert!(screen.contains("VACUUM (1)"), "{screen}");
+        assert!(screen.contains("scanning heap"), "{screen}");
+        assert!(screen.contains("25.0%"), "{screen}");
     }
 
     #[test]

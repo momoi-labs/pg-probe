@@ -146,6 +146,7 @@ pg-probe top -h db.example.com -U monitor -d app -i 5
 | `F1` or `1` | Running queries |
 | `F2` or `2` | Queries waiting on a lock |
 | `F3` or `3` | Queries that block others |
+| `F4` or `4` | Vacuums in progress, manual and autovacuum |
 | `↑` `↓`, `PgUp` `PgDn` | Select a query |
 | `v` or `Enter` | Open the query page |
 | `Space` | Pause or resume the refresh |
