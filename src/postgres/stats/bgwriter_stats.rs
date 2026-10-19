@@ -19,14 +19,21 @@ pub struct BgWriterStats {
     pub stats_reset: Option<String>,
 }
 
+// Before PostgreSQL 17, pg_stat_bgwriter also carries the checkpoint
+// counters. From 17 on they live in pg_stat_checkpointer, so both queries
+// return the same columns and the 17 query fills the moved ones with NULL.
 const BGWRITER_QUERY_PG16: &str = "\
 SELECT \
+    checkpoints_timed, checkpoints_req, checkpoint_write_time, \
+    checkpoint_sync_time, buffers_checkpoint, \
     buffers_clean, maxwritten_clean, buffers_backend, \
     buffers_backend_fsync, buffers_alloc, stats_reset \
 FROM pg_stat_bgwriter";
 
 const BGWRITER_QUERY_PG17: &str = "\
 SELECT \
+    NULL::bigint, NULL::bigint, NULL::double precision, \
+    NULL::double precision, NULL::bigint, \
     buffers_clean, maxwritten_clean, NULL::bigint, \
     NULL::bigint, buffers_alloc, stats_reset \
 FROM pg_stat_bgwriter";
@@ -67,19 +74,24 @@ pub fn collect_bgwriter_stats(
     }
 
     let row = &rows.rows[0];
-    let buffers_clean = parse_text_i64(&row[0]).ok();
-    let maxwritten_clean = parse_text_i64(&row[1]).ok();
-    let buffers_backend = parse_text_i64(&row[2]).ok();
-    let buffers_backend_fsync = parse_text_i64(&row[3]).ok();
-    let buffers_alloc = parse_text_i64(&row[4]).ok();
-    let stats_reset = parse_string_optional(&row[5]);
+    let checkpoints_timed = parse_text_i64(&row[0]).ok();
+    let checkpoints_req = parse_text_i64(&row[1]).ok();
+    let checkpoint_write_time_ms = parse_f64_optional(&row[2]);
+    let checkpoint_sync_time_ms = parse_f64_optional(&row[3]);
+    let buffers_checkpoint = parse_text_i64(&row[4]).ok();
+    let buffers_clean = parse_text_i64(&row[5]).ok();
+    let maxwritten_clean = parse_text_i64(&row[6]).ok();
+    let buffers_backend = parse_text_i64(&row[7]).ok();
+    let buffers_backend_fsync = parse_text_i64(&row[8]).ok();
+    let buffers_alloc = parse_text_i64(&row[9]).ok();
+    let stats_reset = parse_string_optional(&row[10]);
 
     Ok(BgWriterStats {
-        checkpoints_timed: None,
-        checkpoints_req: None,
-        checkpoint_write_time_ms: None,
-        checkpoint_sync_time_ms: None,
-        buffers_checkpoint: None,
+        checkpoints_timed,
+        checkpoints_req,
+        checkpoint_write_time_ms,
+        checkpoint_sync_time_ms,
+        buffers_checkpoint,
         buffers_clean,
         maxwritten_clean,
         buffers_backend,
