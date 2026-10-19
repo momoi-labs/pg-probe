@@ -8,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
   DashboardPanel,
+  Disclosure,
   Skeleton,
   type ChartSample,
   type ChartSeries,
@@ -63,9 +64,19 @@ export function GapPanel({
   )
 }
 
-// Text that explains a value: its formula or why it is missing.
+// Text that explains why a value is missing. It stays in view.
 export function Note({ children }: { children: ReactNode }) {
   return <p className="muted">{children}</p>
+}
+
+// How a value is derived. Collapsed, like the exact values: it answers a
+// reader who wants to check the number without crowding every panel.
+export function Formula({ children }: { children: ReactNode }) {
+  return (
+    <Disclosure summary="How it's calculated">
+      <p className="muted">{children}</p>
+    </Disclosure>
+  )
 }
 
 type ChartPanelProps = {
@@ -130,7 +141,7 @@ export function ChartPanel({
               formatValue={formatValue}
             />
           )}
-          {note && <Note>{note}</Note>}
+          {note && <Formula>{note}</Formula>}
         </CardContent>
       </Card>
     </DashboardPanel>

@@ -2,7 +2,7 @@ import { DashboardGrid, Disclosure, Meter } from '@momoi-labs/kiso-react'
 import type { Row } from '../api.ts'
 import { missingReason, num, useOutcomes, useTable } from '../artifact.ts'
 import { deltas, points, rates, useSamples, type Values } from '../series.ts'
-import { ChartPanel, Note, Panel } from './panels.tsx'
+import { ChartPanel, Formula, Note, Panel } from './panels.tsx'
 
 const GIB = 1024 ** 3
 const MIB = 1024 ** 2
@@ -361,10 +361,10 @@ function FilesystemUsage() {
               )
             })}
           </div>
-          <Note>
+          <Formula>
             statvfs on local disk filesystems, read once. Network filesystems and /home are not
             recorded. Used counts space reserved for root.
-          </Note>
+          </Formula>
         </>
       ) : (
         <Note>

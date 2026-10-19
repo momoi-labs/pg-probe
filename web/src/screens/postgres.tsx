@@ -21,7 +21,7 @@ import {
 } from '../artifact.ts'
 import { bytes } from '../format.tsx'
 import { deltas, points, rates, useSamples, type Values } from '../series.ts'
-import { ChartPanel, Note, Panel } from './panels.tsx'
+import { ChartPanel, Formula, Note, Panel } from './panels.tsx'
 
 const MIB = 1024 ** 2
 const oneDecimal = (value: number) => value.toFixed(1)
@@ -304,7 +304,7 @@ function DatabaseSize() {
               value: num(row, 'size_bytes'),
             }))}
           />
-          <Note>pg_database_size(), read once per snapshot</Note>
+          <Formula>pg_database_size(), read once per snapshot</Formula>
         </>
       ) : (
         <Note>Not recorded in this artifact.</Note>
@@ -337,10 +337,10 @@ function LargestTables() {
               value: (pages(row) * blockSize) / 1024 ** 3,
             }))}
           />
-          <Note>
+          <Formula>
             relpages × block size, as of the last ANALYZE or VACUUM, read once. Estimates, not
             pg_total_relation_size().
-          </Note>
+          </Formula>
         </>
       ) : (
         <Note>
@@ -395,10 +395,10 @@ function DeadTuples() {
             })}
           </TableBody>
         </Table>
-        <Note>
+        <Formula>
           n_dead_tup and n_live_tup from pg_stat_user_tables, read once. These are estimates kept
           by the statistics collector.
-        </Note>
+        </Formula>
       </>
     )
   } else if (isPending) {
