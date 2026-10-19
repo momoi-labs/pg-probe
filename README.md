@@ -149,6 +149,7 @@ pg-probe top -h db.example.com -U monitor -d app -i 5
 | `↑` `↓`, `PgUp` `PgDn` | Select a query |
 | `v` or `Enter` | Open the query page |
 | `Space` | Pause or resume the refresh |
+| `g` | Group the list by state, database, user, or none |
 | `c` | Compact columns: user@database and short states, more room for the query |
 | `t` | Show the blocking view as a tree of who waits on whom |
 | `Tab` | Show the selected query, formatted, under the list |

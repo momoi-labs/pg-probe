@@ -254,6 +254,45 @@ impl View {
     }
 }
 
+/// What the list groups sessions by, cycled with `g`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum Group {
+    #[default]
+    None,
+    State,
+    Database,
+    User,
+}
+
+impl Group {
+    const fn next(self) -> Self {
+        match self {
+            Self::None => Self::State,
+            Self::State => Self::Database,
+            Self::Database => Self::User,
+            Self::User => Self::None,
+        }
+    }
+
+    const fn name(self) -> &'static str {
+        match self {
+            Self::None => "",
+            Self::State => "state",
+            Self::Database => "database",
+            Self::User => "user",
+        }
+    }
+
+    fn key(self, backend: &Backend) -> Option<&str> {
+        match self {
+            Self::None => None,
+            Self::State => Some(&backend.state),
+            Self::Database => Some(&backend.database),
+            Self::User => Some(&backend.user),
+        }
+    }
+}
+
 struct App {
     server: Server,
     interval: Duration,
@@ -268,6 +307,7 @@ struct App {
     /// USER and DATABASE in one column and short states, so the query gets
     /// more room. Toggled with `c`.
     compact: bool,
+    group: Group,
     popup: Option<Popup>,
     backends: Vec<Backend>,
     /// Blocker pid to the pids it blocks. Filled only in the blocking view.
@@ -374,6 +414,7 @@ impl App {
             preview: false,
             tree: false,
             compact: false,
+            group: Group::None,
             popup: None,
             backends: Vec::new(),
             blocks: HashMap::new(),
@@ -500,6 +541,10 @@ impl App {
                     KeyCode::Char('?') => self.help = true,
                     KeyCode::Tab => self.preview = !self.preview,
                     KeyCode::Char('c') => self.compact = !self.compact,
+                    KeyCode::Char('g') => {
+                        self.group = self.group.next();
+                        self.table.select(Some(0));
+                    }
                     KeyCode::Char('t') => {
                         self.tree = !self.tree;
                         self.table.select(Some(0));
@@ -674,12 +719,22 @@ impl App {
             .collect()
     }
 
+    /// The grouping in effect. The blocking tree has its own order.
+    fn shown_group(&self) -> Group {
+        if self.view == View::Blocking && self.tree {
+            Group::None
+        } else {
+            self.group
+        }
+    }
+
     /// The list rows, each with the tree branch drawn before its PID.
     fn rows(&self) -> Vec<(String, &Backend)> {
         if self.view == View::Blocking && self.tree {
             return self.blocking_tree();
         }
-        self.backends
+        let mut rows = self
+            .backends
             .iter()
             .filter(|backend| match self.view {
                 View::Running => !backend.state.is_empty() && backend.state != "idle",
@@ -687,7 +742,10 @@ impl App {
                 View::Blocking => self.blocks.contains_key(&backend.pid),
             })
             .map(|backend| (String::new(), backend))
-            .collect()
+            .collect::<Vec<_>>();
+        // The sort is stable, so each group keeps the oldest query first.
+        rows.sort_by_key(|(_, backend)| self.shown_group().key(backend));
+        rows
     }
 
     /// Blockers that wait on no one are roots, and each session hangs under
@@ -762,10 +820,17 @@ impl App {
         frame.render_widget(Paragraph::new(self.header_lines(header.width)), header);
         let count = self.visible().len();
         frame.render_widget(
-            Line::from(format!("{} ({count})", self.view.title()))
-                .bold()
-                .green()
-                .alignment(Alignment::Center),
+            Line::from(match self.shown_group() {
+                Group::None => format!("{} ({count})", self.view.title()),
+                group => format!(
+                    "{} ({count}) · GROUPED BY {}",
+                    self.view.title(),
+                    group.name().to_uppercase()
+                ),
+            })
+            .bold()
+            .green()
+            .alignment(Alignment::Center),
             title,
         );
         let body = if self.compact {
@@ -978,9 +1043,9 @@ impl App {
         let header = Row::new(titles.into_iter().map(Cell::from))
             .style(Style::new().black().on_green().bold());
 
-        let rows: Vec<Row> = self
-            .rows()
-            .into_iter()
+        let entries = self.rows();
+        let sessions: Vec<Row> = entries
+            .iter()
             .map(|(branch, backend)| {
                 let wait = if self.view == View::Blocking && !tree {
                     Span::styled(
@@ -999,7 +1064,7 @@ impl App {
                     Span::styled(backend.wait_label(), style)
                 };
                 let mut cells = vec![Cell::from(Line::from(vec![
-                    Span::styled(branch, Style::new().dark_gray()),
+                    Span::styled(branch.clone(), Style::new().dark_gray()),
                     Span::styled(backend.pid.clone(), Style::new().cyan()),
                 ]))];
                 let database =
@@ -1057,10 +1122,53 @@ impl App {
             })
             .collect();
 
+        // A group title is an empty table row, painted over full width
+        // after the table is drawn, since table cells cannot span columns.
+        let group = self.shown_group();
+        let mut rows = Vec::new();
+        let mut titles = Vec::new();
+        let mut positions = Vec::new();
+        for (index, row) in sessions.into_iter().enumerate() {
+            let key = group.key(entries[index].1);
+            if key.is_some() && (index == 0 || group.key(entries[index - 1].1) != key) {
+                let count = entries
+                    .iter()
+                    .filter(|(_, backend)| group.key(backend) == key)
+                    .count();
+                let key = key.unwrap_or_default();
+                let style = if group == Group::State {
+                    state_style(key)
+                } else {
+                    Style::new().cyan()
+                };
+                titles.push((rows.len(), format!("▾ {} ({count})", or_dash(key)), style));
+                rows.push(Row::new(Vec::<Cell>::new()));
+            }
+            positions.push(rows.len());
+            rows.push(row);
+        }
+
         let table = Table::new(rows, widths)
             .header(header)
             .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED));
-        frame.render_stateful_widget(table, area, &mut self.table);
+        let selected = self
+            .table
+            .selected()
+            .and_then(|index| positions.get(index).copied());
+        let mut state = TableState::default()
+            .with_offset(self.table.offset())
+            .with_selected(selected);
+        frame.render_stateful_widget(table, area, &mut state);
+        *self.table.offset_mut() = state.offset();
+        for (position, title, style) in titles {
+            let Some(line) = position.checked_sub(state.offset()) else {
+                continue;
+            };
+            if line + 1 < usize::from(area.height) {
+                let row = Rect::new(area.x, area.y + 1 + line as u16, area.width, 1);
+                frame.render_widget(Line::from(title).style(style.bold()), row);
+            }
+        }
     }
 
     fn draw_popup(&self, frame: &mut Frame) {
@@ -1390,6 +1498,7 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
             ("Tab", "Show or hide the selected query, formatted"),
             ("t", "Blocking view as a list or a tree"),
             ("c", "Compact columns, more room for the query"),
+            ("g", "Group by state, database, user, or none"),
             ("?", "This help"),
             ("q Esc", "Quit"),
         ],
@@ -1968,6 +2077,23 @@ mod tests {
         assert!(screen.contains("postgres@bench"), "{screen}");
         assert!(screen.contains(" txn "), "{screen}");
         assert!(screen.contains("txn = idle in transaction"), "{screen}");
+    }
+
+    #[test]
+    fn grouping_sorts_sessions_under_a_title_per_group() {
+        let mut app = app(View::Running);
+        app.backends[0].database = "reports".to_owned();
+        app.group = Group::Database;
+        let pids: Vec<&str> = app.visible().iter().map(|b| b.pid.as_str()).collect();
+        assert_eq!(pids, ["102", "101"]);
+        app.table.select(Some(1));
+        let screen = screen(&mut app);
+        assert!(screen.contains("GROUPED BY DATABASE"), "{screen}");
+        assert!(screen.contains("▾ bench (1)"), "{screen}");
+        assert!(screen.contains("▾ reports (1)"), "{screen}");
+        let lines: Vec<&str> = screen.lines().collect();
+        let reports = lines.iter().position(|l| l.contains("▾ reports")).unwrap();
+        assert!(lines[reports + 1].starts_with("101"), "{screen}");
     }
 
     #[test]
