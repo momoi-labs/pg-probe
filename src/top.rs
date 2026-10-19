@@ -10,6 +10,7 @@
 //! When the server runs on this host, host load and memory and per-backend
 //! CPU and I/O come from the local `/proc`, which costs the server nothing.
 
+mod function;
 mod os;
 
 use std::collections::HashMap;
@@ -204,6 +205,16 @@ struct Popup {
     /// The backend is gone; the panel keeps its last known details.
     ended: bool,
     scroll: u16,
+    /// The definitions of the functions the query calls, opened with `f`.
+    function: Option<FunctionPanel>,
+}
+
+struct FunctionPanel {
+    database: String,
+    /// The functions found, or why the lookup failed.
+    result: Result<Vec<function::FunctionDef>, String>,
+    index: usize,
+    scroll: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -358,6 +369,45 @@ impl App {
                 if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     return Ok(());
                 }
+                if let Some(panel) = self
+                    .popup
+                    .as_mut()
+                    .and_then(|popup| popup.function.as_mut())
+                {
+                    let count = panel.result.as_ref().map_or(0, Vec::len);
+                    match key.code {
+                        KeyCode::Char('q') => return Ok(()),
+                        KeyCode::Char('f') | KeyCode::Esc => {
+                            if let Some(popup) = &mut self.popup {
+                                popup.function = None;
+                            }
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            panel.scroll = panel.scroll.saturating_add(1)
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            panel.scroll = panel.scroll.saturating_sub(1)
+                        }
+                        KeyCode::PageDown => {
+                            panel.scroll = panel.scroll.saturating_add(PAGE as u16)
+                        }
+                        KeyCode::PageUp => panel.scroll = panel.scroll.saturating_sub(PAGE as u16),
+                        KeyCode::Right | KeyCode::Char('l') if panel.index + 1 < count => {
+                            panel.index += 1;
+                            panel.scroll = 0;
+                        }
+                        KeyCode::Left | KeyCode::Char('h') if panel.index > 0 => {
+                            panel.index -= 1;
+                            panel.scroll = 0;
+                        }
+                        _ => {}
+                    }
+                    continue;
+                }
+                if key.code == KeyCode::Char('f') && self.popup.is_some() {
+                    self.open_function(client);
+                    continue;
+                }
                 if let Some(popup) = &mut self.popup {
                     match key.code {
                         KeyCode::Char('q') => return Ok(()),
@@ -439,8 +489,51 @@ impl App {
             memory: None,
             ended: false,
             scroll: 0,
+            function: None,
         });
         self.refresh_popup(client)
+    }
+
+    /// Looks up the functions the popup's query calls, in the database the
+    /// query runs in. A lookup failure is shown in the panel, never fatal.
+    fn open_function(&mut self, client: &ConnectedClient) {
+        let Some(popup) = &self.popup else {
+            return;
+        };
+        let backend = self
+            .backends
+            .iter()
+            .find(|backend| backend.pid == popup.pid);
+        let query = popup
+            .details
+            .as_ref()
+            .map(|details| details.query.clone())
+            .or_else(|| backend.map(|backend| backend.query.clone()))
+            .unwrap_or_default();
+        let database = backend
+            .map(|backend| backend.database.clone())
+            .unwrap_or_default();
+        let result = if database.is_empty() {
+            Err("The backend has ended, so its database is unknown.".to_owned())
+        } else if database == self.server.database {
+            function::fetch(client, &query).map_err(|_| "The catalog query failed.".to_owned())
+        } else {
+            // pg_proc is per database: open a short read-only session in the
+            // query's database, look the functions up, and close it.
+            match client.for_database(&database, SOURCE, &mut Vec::new()) {
+                Ok(other) => function::fetch(&other, &query)
+                    .map_err(|_| "The catalog query failed.".to_owned()),
+                Err(_) => Err(format!("Could not connect to database {database}.")),
+            }
+        };
+        if let Some(popup) = &mut self.popup {
+            popup.function = Some(FunctionPanel {
+                database,
+                result,
+                index: 0,
+                scroll: 0,
+            });
+        }
     }
 
     fn refresh_popup(&mut self, client: &ConnectedClient) -> Result<(), TopError> {
@@ -501,6 +594,7 @@ impl App {
         frame.render_widget(footer_line(self.view), footer);
         if self.popup.is_some() {
             self.draw_popup(frame);
+            self.draw_function_panel(frame);
         }
     }
 
@@ -892,7 +986,61 @@ impl App {
                 .block(
                     Block::bordered()
                         .title(Line::from(format!(" PID {} ", popup.pid)).bold().green())
-                        .title_bottom(Line::from(" v/Esc close · ↑↓ scroll ").dark_gray()),
+                        .title_bottom(
+                            Line::from(" v/Esc close · f function · ↑↓ scroll ").dark_gray(),
+                        ),
+                ),
+            area,
+        );
+    }
+}
+
+impl App {
+    fn draw_function_panel(&self, frame: &mut Frame) {
+        let Some(panel) = self
+            .popup
+            .as_ref()
+            .and_then(|popup| popup.function.as_ref())
+        else {
+            return;
+        };
+        let (lines, position) = match &panel.result {
+            Err(message) => (
+                vec![Line::from(Span::styled(
+                    message.clone(),
+                    Style::new().red(),
+                ))],
+                String::new(),
+            ),
+            Ok(functions) if functions.is_empty() => (
+                vec![Line::from("No user function call found in this query.")],
+                String::new(),
+            ),
+            Ok(functions) => (
+                function::lines(&functions[panel.index]),
+                format!(
+                    " · ←→ other matches ({}/{})",
+                    panel.index + 1,
+                    functions.len()
+                ),
+            ),
+        };
+        let area = centered(frame.area(), 90, 80);
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: false })
+                .scroll((panel.scroll, 0))
+                .block(
+                    Block::bordered()
+                        .title(
+                            Line::from(format!(" function in {} ", panel.database))
+                                .bold()
+                                .green(),
+                        )
+                        .title_bottom(
+                            Line::from(format!(" f/Esc back · ↑↓ scroll{position} ")).dark_gray(),
+                        ),
                 ),
             area,
         );
@@ -1337,6 +1485,7 @@ mod tests {
             memory: None,
             ended: false,
             scroll: 0,
+            function: None,
         });
         let mut terminal = Terminal::new(TestBackend::new(160, 40)).unwrap();
         terminal.draw(|frame| app.draw(frame)).unwrap();
