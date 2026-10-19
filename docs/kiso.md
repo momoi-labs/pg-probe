@@ -29,6 +29,11 @@ file has a bug.
 
 ## Product rules
 
+- Appearance is set once on `<html>` in `web/index.html`: accent `gold`,
+  chart style `halftone`, corner style `rounded`, corner size `medium`, no
+  corner marks, default visual style and app shell, frame scope `panels`,
+  background `dots`. `data-theme` stays off so the console follows the system
+  theme.
 - Show facts and derived values only. A derived value states its formula next
   to it. No thresholds, danger markers or health colors for now.
 - A metric that the artifact cannot answer shows the unknown treatment and
