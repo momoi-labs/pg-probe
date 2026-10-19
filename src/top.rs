@@ -14,7 +14,7 @@ mod explain;
 mod function;
 mod os;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -263,6 +263,8 @@ struct App {
     help: bool,
     /// The selected query, formatted under the list. Toggled with Tab.
     preview: bool,
+    /// The blocking view as a tree of who waits on whom. Toggled with `t`.
+    tree: bool,
     popup: Option<Popup>,
     backends: Vec<Backend>,
     /// Blocker pid to the pids it blocks. Filled only in the blocking view.
@@ -367,6 +369,7 @@ impl App {
             paused: false,
             help: false,
             preview: false,
+            tree: false,
             popup: None,
             backends: Vec::new(),
             blocks: HashMap::new(),
@@ -492,6 +495,10 @@ impl App {
                     KeyCode::Char(' ') => self.paused = !self.paused,
                     KeyCode::Char('?') => self.help = true,
                     KeyCode::Tab => self.preview = !self.preview,
+                    KeyCode::Char('t') => {
+                        self.tree = !self.tree;
+                        self.table.select(Some(0));
+                    }
                     KeyCode::Char('v') | KeyCode::Enter => self.open_popup(client)?,
                     KeyCode::F(1) | KeyCode::Char('1') => self.view = View::Running,
                     KeyCode::F(2) | KeyCode::Char('2') => self.view = View::Waiting,
@@ -656,6 +663,17 @@ impl App {
     }
 
     fn visible(&self) -> Vec<&Backend> {
+        self.rows()
+            .into_iter()
+            .map(|(_, backend)| backend)
+            .collect()
+    }
+
+    /// The list rows, each with the tree branch drawn before its PID.
+    fn rows(&self) -> Vec<(String, &Backend)> {
+        if self.view == View::Blocking && self.tree {
+            return self.blocking_tree();
+        }
         self.backends
             .iter()
             .filter(|backend| match self.view {
@@ -663,7 +681,57 @@ impl App {
                 View::Waiting => backend.waits_on_lock(),
                 View::Blocking => self.blocks.contains_key(&backend.pid),
             })
+            .map(|backend| (String::new(), backend))
             .collect()
+    }
+
+    /// Blockers that wait on no one are roots, and each session hangs under
+    /// the sessions it waits on. A session with two blockers shows under
+    /// both. In a deadlock every blocker also waits, so they become roots.
+    fn blocking_tree(&self) -> Vec<(String, &Backend)> {
+        let waiting: HashSet<&str> = self.blocks.values().flatten().map(String::as_str).collect();
+        let blockers = || {
+            self.backends
+                .iter()
+                .filter(|backend| self.blocks.contains_key(&backend.pid))
+        };
+        let mut rows = Vec::new();
+        for root in blockers().filter(|backend| !waiting.contains(backend.pid.as_str())) {
+            self.add_branch(root, "", "", &mut vec![root.pid.as_str()], &mut rows);
+        }
+        for blocker in blockers() {
+            if !rows.iter().any(|(_, backend)| backend.pid == blocker.pid) {
+                self.add_branch(blocker, "", "", &mut vec![blocker.pid.as_str()], &mut rows);
+            }
+        }
+        rows
+    }
+
+    fn add_branch<'a>(
+        &'a self,
+        backend: &'a Backend,
+        branch: &str,
+        indent: &str,
+        path: &mut Vec<&'a str>,
+        rows: &mut Vec<(String, &'a Backend)>,
+    ) {
+        rows.push((branch.to_owned(), backend));
+        let children: Vec<&Backend> = self
+            .blocks
+            .get(&backend.pid)
+            .into_iter()
+            .flatten()
+            .filter(|pid| !path.contains(&pid.as_str()))
+            .filter_map(|pid| self.backends.iter().find(|backend| &backend.pid == pid))
+            .collect();
+        for (index, child) in children.iter().enumerate() {
+            let last = index + 1 == children.len();
+            let branch = format!("{indent}{}", if last { "└─ " } else { "├─ " });
+            let indent = format!("{indent}{}", if last { "   " } else { "│  " });
+            path.push(&child.pid);
+            self.add_branch(child, &branch, &indent, path, rows);
+            path.pop();
+        }
     }
 
     fn select_by(&mut self, delta: isize) {
@@ -856,14 +924,15 @@ impl App {
     }
 
     fn draw_table(&mut self, frame: &mut Frame, area: Rect) {
-        let last_column = if self.view == View::Blocking {
+        let tree = self.view == View::Blocking && self.tree;
+        let last_column = if self.view == View::Blocking && !tree {
             "BLOCKS"
         } else {
             "WAITING"
         };
         let mut titles = vec!["PID", "DATABASE", "USER"];
         let mut widths = vec![
-            Constraint::Length(7),
+            Constraint::Length(if tree { 16 } else { 7 }),
             Constraint::Length(16),
             Constraint::Length(12),
         ];
@@ -887,10 +956,10 @@ impl App {
             .style(Style::new().black().on_green().bold());
 
         let rows: Vec<Row> = self
-            .visible()
+            .rows()
             .into_iter()
-            .map(|backend| {
-                let wait = if self.view == View::Blocking {
+            .map(|(branch, backend)| {
+                let wait = if self.view == View::Blocking && !tree {
                     Span::styled(
                         self.blocks
                             .get(&backend.pid)
@@ -907,7 +976,10 @@ impl App {
                     Span::styled(backend.wait_label(), style)
                 };
                 let mut cells = vec![
-                    Cell::from(Span::styled(backend.pid.clone(), Style::new().cyan())),
+                    Cell::from(Line::from(vec![
+                        Span::styled(branch, Style::new().dark_gray()),
+                        Span::styled(backend.pid.clone(), Style::new().cyan()),
+                    ])),
                     Cell::from(Span::styled(
                         backend.database.clone(),
                         Style::new().dark_gray().bold(),
@@ -1286,6 +1358,7 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
             ("v Enter", "Query details"),
             ("Space", "Pause or resume refreshes"),
             ("Tab", "Show or hide the selected query, formatted"),
+            ("t", "Blocking view as a list or a tree"),
             ("?", "This help"),
             ("q Esc", "Quit"),
         ],
@@ -1819,6 +1892,29 @@ mod tests {
             .collect();
         assert!(screen.contains("PID 101 ·"), "{screen}");
         assert!(screen.contains("│from "), "{screen}");
+    }
+
+    #[test]
+    fn blocking_tree_hangs_waiters_under_their_blockers() {
+        let mut app = app(View::Blocking);
+        app.backends = ["10", "20", "30", "40", "50", "51"]
+            .iter()
+            .map(|pid| backend(pid, "active", "", ""))
+            .collect();
+        app.blocks = HashMap::from([
+            ("10".to_owned(), vec!["20".to_owned(), "40".to_owned()]),
+            ("20".to_owned(), vec!["30".to_owned()]),
+            ("50".to_owned(), vec!["51".to_owned()]),
+            ("51".to_owned(), vec!["50".to_owned()]),
+        ]);
+        assert_eq!(app.visible().len(), 4);
+        app.tree = true;
+        let rows: Vec<String> = app
+            .rows()
+            .iter()
+            .map(|(branch, backend)| format!("{branch}{}", backend.pid))
+            .collect();
+        assert_eq!(rows, ["10", "├─ 20", "│  └─ 30", "└─ 40", "50", "└─ 51"]);
     }
 
     #[test]
