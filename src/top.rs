@@ -265,6 +265,9 @@ struct App {
     preview: bool,
     /// The blocking view as a tree of who waits on whom. Toggled with `t`.
     tree: bool,
+    /// USER and DATABASE in one column and short states, so the query gets
+    /// more room. Toggled with `c`.
+    compact: bool,
     popup: Option<Popup>,
     backends: Vec<Backend>,
     /// Blocker pid to the pids it blocks. Filled only in the blocking view.
@@ -370,6 +373,7 @@ impl App {
             help: false,
             preview: false,
             tree: false,
+            compact: false,
             popup: None,
             backends: Vec::new(),
             blocks: HashMap::new(),
@@ -495,6 +499,7 @@ impl App {
                     KeyCode::Char(' ') => self.paused = !self.paused,
                     KeyCode::Char('?') => self.help = true,
                     KeyCode::Tab => self.preview = !self.preview,
+                    KeyCode::Char('c') => self.compact = !self.compact,
                     KeyCode::Char('t') => {
                         self.tree = !self.tree;
                         self.table.select(Some(0));
@@ -763,6 +768,21 @@ impl App {
                 .alignment(Alignment::Center),
             title,
         );
+        let body = if self.compact {
+            let [body, legend] =
+                Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(body);
+            frame.render_widget(
+                Line::from(
+                    " STATE: act = active · txn = idle in transaction · \
+                     abrt = idle in transaction (aborted)",
+                )
+                .dark_gray(),
+                legend,
+            );
+            body
+        } else {
+            body
+        };
         if self.preview {
             let lines = self.preview_lines();
             let height = (lines.len() as u16 + 2).min(body.height / 2);
@@ -930,12 +950,15 @@ impl App {
         } else {
             "WAITING"
         };
-        let mut titles = vec!["PID", "DATABASE", "USER"];
-        let mut widths = vec![
-            Constraint::Length(if tree { 16 } else { 7 }),
-            Constraint::Length(16),
-            Constraint::Length(12),
-        ];
+        let mut titles = vec!["PID"];
+        let mut widths = vec![Constraint::Length(if tree { 16 } else { 7 })];
+        if self.compact {
+            titles.push("USER@DATABASE");
+            widths.push(Constraint::Length(24));
+        } else {
+            titles.extend(["DATABASE", "USER"]);
+            widths.extend([Constraint::Length(16), Constraint::Length(12)]);
+        }
         if self.os.is_some() {
             titles.extend(["CPU%", "READ/s", "WRITE/s", "IOW"]);
             widths.extend([
@@ -947,7 +970,7 @@ impl App {
         }
         titles.extend(["STATE", "TIME+", last_column, "QUERY"]);
         widths.extend([
-            Constraint::Length(20),
+            Constraint::Length(if self.compact { 5 } else { 20 }),
             Constraint::Length(10),
             Constraint::Length(22),
             Constraint::Fill(1),
@@ -975,17 +998,20 @@ impl App {
                     };
                     Span::styled(backend.wait_label(), style)
                 };
-                let mut cells = vec![
-                    Cell::from(Line::from(vec![
-                        Span::styled(branch, Style::new().dark_gray()),
-                        Span::styled(backend.pid.clone(), Style::new().cyan()),
-                    ])),
-                    Cell::from(Span::styled(
-                        backend.database.clone(),
-                        Style::new().dark_gray().bold(),
-                    )),
-                    Cell::from(backend.user.clone()),
-                ];
+                let mut cells = vec![Cell::from(Line::from(vec![
+                    Span::styled(branch, Style::new().dark_gray()),
+                    Span::styled(backend.pid.clone(), Style::new().cyan()),
+                ]))];
+                let database =
+                    Span::styled(backend.database.clone(), Style::new().dark_gray().bold());
+                if self.compact {
+                    cells.push(Cell::from(Line::from(vec![
+                        Span::raw(format!("{}@", backend.user)),
+                        database,
+                    ])));
+                } else {
+                    cells.extend([Cell::from(database), Cell::from(backend.user.clone())]);
+                }
                 if let Some(os) = &self.os {
                     let rate = os.rates.get(&backend.pid);
                     let right =
@@ -1010,7 +1036,11 @@ impl App {
                 }
                 cells.extend([
                     Cell::from(Span::styled(
-                        backend.state.clone(),
+                        if self.compact {
+                            short_state(&backend.state).to_owned()
+                        } else {
+                            backend.state.clone()
+                        },
                         state_style(&backend.state),
                     )),
                     Cell::from(
@@ -1359,6 +1389,7 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
             ("Space", "Pause or resume refreshes"),
             ("Tab", "Show or hide the selected query, formatted"),
             ("t", "Blocking view as a list or a tree"),
+            ("c", "Compact columns, more room for the query"),
             ("?", "This help"),
             ("q Esc", "Quit"),
         ],
@@ -1533,6 +1564,16 @@ fn footer_line(view: View) -> Line<'static> {
         spans.push(Span::styled(format!("{label:<18}"), style));
     }
     Line::from(spans)
+}
+
+/// The compact list's states. The legend under the list spells them out.
+fn short_state(state: &str) -> &str {
+    match state {
+        "active" => "act",
+        "idle in transaction" => "txn",
+        "idle in transaction (aborted)" => "abrt",
+        other => other,
+    }
 }
 
 fn state_style(state: &str) -> Style {
@@ -1915,6 +1956,18 @@ mod tests {
             .map(|(branch, backend)| format!("{branch}{}", backend.pid))
             .collect();
         assert_eq!(rows, ["10", "├─ 20", "│  └─ 30", "└─ 40", "50", "└─ 51"]);
+    }
+
+    #[test]
+    fn compact_columns_merge_user_and_database() {
+        let mut app = app(View::Running);
+        app.backends[0].state = "idle in transaction".to_owned();
+        app.compact = true;
+        let screen = screen(&mut app);
+        assert!(screen.contains("USER@DATABASE"), "{screen}");
+        assert!(screen.contains("postgres@bench"), "{screen}");
+        assert!(screen.contains(" txn "), "{screen}");
+        assert!(screen.contains("txn = idle in transaction"), "{screen}");
     }
 
     #[test]
