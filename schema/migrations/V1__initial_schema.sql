@@ -370,6 +370,24 @@ CREATE TABLE postgres_extension (
     extension_version TEXT NOT NULL,
     PRIMARY KEY (snapshot_id, database_name, extension_name)
 ) STRICT;
+CREATE TABLE postgres_relation (
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    collected_at TEXT NOT NULL,
+    database_name TEXT NOT NULL,
+    schema_name TEXT NOT NULL,
+    relation_name TEXT NOT NULL,
+    relkind TEXT NOT NULL,
+    heap_pages INTEGER NOT NULL,
+    index_pages INTEGER NOT NULL,
+    toast_pages INTEGER NOT NULL,
+    estimated_rows INTEGER,
+    live_tuples INTEGER,
+    dead_tuples INTEGER,
+    last_autovacuum TEXT,
+    autovacuum_count INTEGER,
+    last_autoanalyze TEXT,
+    PRIMARY KEY (snapshot_id, database_name, schema_name, relation_name)
+) STRICT;
 CREATE VIEW database_inventory AS
     SELECT
         d.snapshot_id,

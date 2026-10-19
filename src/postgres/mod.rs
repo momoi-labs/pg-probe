@@ -16,6 +16,7 @@
 mod connection;
 mod databases;
 mod extensions;
+mod relations;
 mod sanitize;
 mod settings;
 mod settings_allowlist;
@@ -28,6 +29,7 @@ pub use connection::{
 };
 pub use databases::{DatabaseEntry, ExtensionVisitStatus};
 pub use extensions::ExtensionEntry;
+pub use relations::RelationEntry;
 pub use settings::Setting;
 pub use stats::{
     ActivityAggregate, ArchiverStats, BgWriterStats, DatabaseStats, IoStatEntry, LockAggregate,
@@ -51,6 +53,7 @@ pub struct TargetInventory {
     pub settings: Vec<Setting>,
     pub databases: Vec<DatabaseEntry>,
     pub extensions: Vec<ExtensionEntry>,
+    pub relations: Vec<RelationEntry>,
     pub stats: PostgresStats,
 }
 
@@ -252,7 +255,8 @@ fn collect_target_inventory(params: &ConnectionParams) -> (TargetInventory, Vec<
             );
             continue;
         }
-        match extensions::visit_database(&client, database, &mut outcomes) {
+        match extensions::visit_database(&client, database, &mut inventory.relations, &mut outcomes)
+        {
             Some(found) => {
                 outcomes.push(ComponentOutcome::collected(
                     visit_source,

@@ -42,6 +42,7 @@ const INVARIANT: &[&str] = &[
     "postgres_setting",
     "postgres_database",
     "postgres_extension",
+    "postgres_relation",
 ];
 
 fn schema() -> Connection {

@@ -442,6 +442,7 @@ impl crate::collector::Sink for PartialWriter {
         write_postgres_settings(&tx, &self.snapshot_id, inventory, &collected_at)?;
         write_postgres_databases(&tx, &self.snapshot_id, inventory, &collected_at)?;
         write_postgres_extensions(&tx, &self.snapshot_id, inventory, &collected_at)?;
+        write_postgres_relations(&tx, &self.snapshot_id, inventory, &collected_at)?;
         write_postgres_database_stats(
             &tx,
             &self.snapshot_id,
@@ -1937,6 +1938,47 @@ fn write_postgres_extensions(
                 extension.database_name.as_str(),
                 extension.extension_name.as_str(),
                 extension.extension_version.as_str(),
+            ])
+            .map_err(ArtifactError::Sqlite)?;
+    }
+    Ok(())
+}
+
+fn write_postgres_relations(
+    tx: &rusqlite::Transaction,
+    snapshot_id: &str,
+    inventory: &TargetInventory,
+    collected_at: &str,
+) -> Result<(), ArtifactError> {
+    // A name the sanitizer rejected is stored as <invalid>, which can repeat
+    // within a database, so a duplicate key is skipped rather than fatal.
+    let mut statement = tx
+        .prepare(
+            "INSERT OR IGNORE INTO postgres_relation (
+                snapshot_id, collected_at, database_name, schema_name, relation_name,
+                relkind, heap_pages, index_pages, toast_pages, estimated_rows,
+                live_tuples, dead_tuples, last_autovacuum, autovacuum_count, last_autoanalyze
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        )
+        .map_err(ArtifactError::Sqlite)?;
+    for relation in &inventory.relations {
+        statement
+            .execute(params![
+                snapshot_id,
+                collected_at,
+                relation.database_name,
+                relation.schema_name,
+                relation.relation_name,
+                relation.relkind,
+                relation.heap_pages,
+                relation.index_pages,
+                relation.toast_pages,
+                relation.estimated_rows,
+                relation.live_tuples,
+                relation.dead_tuples,
+                relation.last_autovacuum,
+                relation.autovacuum_count,
+                relation.last_autoanalyze,
             ])
             .map_err(ArtifactError::Sqlite)?;
     }

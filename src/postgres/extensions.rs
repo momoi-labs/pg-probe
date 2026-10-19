@@ -11,6 +11,7 @@ use crate::postgres::databases::{
     mark_connection_failed, mark_permission_denied, mark_visited, DatabaseEntry,
     ExtensionVisitStatus,
 };
+use crate::postgres::relations::{collect_relations, RelationEntry};
 use crate::postgres::sanitize::sanitize_identifier;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,21 +33,26 @@ impl fmt::Display for ExtensionEntry {
 
 /// Connect to the given database name using the initial connection settings
 /// and collect its extensions.
+/// While connected, it also collects the database's largest relations into
+/// `relations`.
 pub fn collect_extensions_for_database(
     initial_client: &ConnectedClient,
     database: &str,
+    relations: &mut Vec<RelationEntry>,
     outcomes: &mut Vec<ComponentOutcome>,
 ) -> Result<Vec<ExtensionEntry>, AdapterError> {
     let sanitized = sanitize_identifier(database);
     if !sanitized.redacted && sanitized.value == database {
         let source = "postgres.extensions.visit";
         let secondary_client = initial_client.for_database(database, source, outcomes)?;
-        collect_extensions(
+        let extensions = collect_extensions(
             &secondary_client,
             database,
             outcomes,
             secondary_client.endpoint().host.as_str(),
-        )
+        )?;
+        relations.extend(collect_relations(&secondary_client, database, outcomes));
+        Ok(extensions)
     } else {
         outcomes.push(ComponentOutcome::failed(
             "postgres.extensions.visit",
@@ -94,13 +100,19 @@ fn collect_extensions(
 pub fn visit_database(
     initial_client: &ConnectedClient,
     database: &mut DatabaseEntry,
+    relations: &mut Vec<RelationEntry>,
     outcomes: &mut Vec<ComponentOutcome>,
 ) -> Option<Vec<ExtensionEntry>> {
     if !database.can_connect {
         database.extension_visit_status = ExtensionVisitStatus::NotConnectable;
         return None;
     }
-    match collect_extensions_for_database(initial_client, &database.database_name, outcomes) {
+    match collect_extensions_for_database(
+        initial_client,
+        &database.database_name,
+        relations,
+        outcomes,
+    ) {
         Ok(extensions) => {
             mark_visited(database);
             Some(extensions)
