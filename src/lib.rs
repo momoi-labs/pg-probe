@@ -133,6 +133,14 @@ fn run_collection(
         return Ok(interrupted_report(partial_path));
     }
 
+    tracing::debug!(
+        artifact = %partial_path.display(),
+        duration_s = sampling.map(|s| s.duration.as_secs()),
+        interval_s = sampling.map(|s| s.interval.as_secs()),
+        "capture started",
+    );
+    tracing::debug!(sample = 1_u64, "sample started");
+
     let mut has_failures = false;
 
     if domains.linux_enabled() {
@@ -189,6 +197,7 @@ fn run_collection(
             return Ok(interrupted_report(partial_path));
         }
     }
+    tracing::debug!(sample = 1_u64, "sample finished");
 
     if let Some(sampling) = sampling {
         match run_samples(
@@ -242,12 +251,15 @@ fn run_samples(
         .then(|| PostgresSampler::new(params.clone()));
     let mut has_failures = false;
     let mut due = sampling.interval;
+    let mut sample = 1_u64;
 
     while due <= sampling.duration {
         if !sleep_until(session_start + due, cancel) {
             return Ok(None);
         }
         writer.begin_sample(now_utc())?;
+        sample += 1;
+        tracing::debug!(sample, "sample started");
 
         if domains.linux_enabled() {
             has_failures |= run_collector(&ComputeSampleCollector, writer)?;
@@ -260,6 +272,7 @@ fn run_samples(
         if let Some(postgres) = &postgres {
             has_failures |= run_collector(postgres, writer)?;
         }
+        tracing::debug!(sample, "sample finished");
         if cancel.is_cancelled() {
             return Ok(None);
         }

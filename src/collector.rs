@@ -144,10 +144,9 @@ where
 /// `error_code` (and the OS error number when captured) so an operator can see
 /// why a collector did not succeed.
 ///
-/// Per-collector progress is a `--verbose` feature: the binary maps verbose to
-/// info level, so these events are emitted only while info is enabled. That keeps
-/// the status-to-level color mapping while leaving default and `--quiet` runs
-/// silent.
+/// These events are emitted only while info is enabled: the binary prints them
+/// one per line under `--verbose`, summarizes them in its default progress
+/// view, and leaves `--quiet` runs without them.
 fn log_outcomes(outcomes: &[ComponentOutcome]) {
     if !tracing::enabled!(tracing::Level::INFO) {
         return;

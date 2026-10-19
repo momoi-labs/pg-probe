@@ -417,6 +417,34 @@ fn default_run_emits_no_per_collector_progress() {
 }
 
 #[test]
+fn default_run_off_a_terminal_appends_a_progress_summary() {
+    let directory = tempdir().unwrap();
+
+    let output = cargo_bin_cmd!("pg-probe")
+        .arg("capture")
+        .arg("--data-directory")
+        .arg(directory.path())
+        .arg("--domain")
+        .arg("linux")
+        .assert();
+
+    let stderr = String::from_utf8(output.get_output().stderr.clone()).unwrap();
+
+    assert!(
+        stderr.contains("capture started"),
+        "expected a start line, got stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("snapshot collected="),
+        "expected the snapshot counts, got stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("capture finished"),
+        "expected a finish line, got stderr: {stderr}"
+    );
+}
+
+#[test]
 fn verbose_reports_error_code_for_failed_collector() {
     let directory = tempdir().unwrap();
 

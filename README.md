@@ -123,14 +123,20 @@ of queued. All samples go into one artifact, written when the duration ends.
 Ctrl+C stops the session early and keeps the samples taken so far in the
 `.sqlite.partial` file.
 
-All diagnostics go to stderr as structured log lines: the default keeps errors
-and warnings, `--quiet` keeps only errors, and `--verbose` adds per-collector
-progress. The published artifact path is reported as the `artifact` field of
-the final "complete"/"partial snapshot published" line. The process never
-overwrites an existing artifact; collisions get numeric suffixes. On success the
-artifact is written atomically and the process exits `0`. If any required
-source fails, the artifact is still published as a partial snapshot and the
-process exits non-zero.
+All diagnostics go to stderr. By default a capture shows its progress: on a
+terminal, a summary redrawn in place with the samples taken, collector counts
+per domain, sample time without the snapshot (p95 and p99, updated every 10
+samples), what pg-probe itself costs the host (CPU as a share of one core, peak
+memory, disk writes) and the errors and unsupported sources so far. The view
+redraws every `--refresh`, half the interval by default and at least `1s`. Off a
+terminal it appends timestamped lines only when something changes, plus one
+progress line per minute. `--quiet` keeps only errors, and `--verbose` prints
+one structured line per collector outcome instead. The published artifact path
+is reported as the `artifact` field of the final "complete"/"partial snapshot
+published" line. The process never overwrites an existing artifact; collisions
+get numeric suffixes. On success the artifact is written atomically and the
+process exits `0`. If any required source fails, the artifact is still published
+as a partial snapshot and the process exits non-zero.
 
 Inspect the artifact with standard tooling:
 

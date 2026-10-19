@@ -1,3 +1,4 @@
+mod progress;
 mod signal;
 
 use std::path::PathBuf;
@@ -96,6 +97,11 @@ struct CaptureArgs {
     )]
     interval: Duration,
 
+    /// Time between redraws of the progress view on a terminal. At least
+    /// `1s`. Defaults to half the interval, and never under `1s`.
+    #[arg(long, value_name = "DURATION", value_parser = parse_duration)]
+    refresh: Option<Duration>,
+
     /// Suppress progress and warning messages on stderr.
     #[arg(short, long)]
     quiet: bool,
@@ -107,6 +113,15 @@ struct CaptureArgs {
     /// Print help.
     #[arg(short = '?', long = "help", action = clap::ArgAction::Help)]
     help: Option<bool>,
+}
+
+/// The shortest time between redraws of the progress view.
+const MIN_REFRESH: Duration = Duration::from_secs(1);
+
+/// Half the sampling interval, so the view shows each sample without
+/// redrawing more than it needs to.
+fn default_refresh(interval: Duration) -> Duration {
+    (interval / 2).max(MIN_REFRESH)
 }
 
 /// Parses a whole number followed by `s`, `m` or `h`.
@@ -230,11 +245,17 @@ fn analyze(args: AnalyzeArgs) -> ExitCode {
 }
 
 fn capture(cli: CaptureArgs) -> ExitCode {
-    init_logger(cli.quiet, cli.verbose);
+    let refresh = cli.refresh.unwrap_or_else(|| default_refresh(cli.interval));
+    let progress = init_logger(cli.quiet, cli.verbose, refresh.max(MIN_REFRESH));
 
     if let Err(error) = signal::install() {
         tracing::error!("failed to install signal handlers: {error}");
         return ExitCode::from(EXIT_PERSIST);
+    }
+
+    if refresh < MIN_REFRESH {
+        tracing::error!("invalid --refresh: it must be at least 1 second");
+        return ExitCode::from(EXIT_USAGE);
     }
 
     let domains = match parse_domain(&cli.domain) {
@@ -266,6 +287,10 @@ fn capture(cli: CaptureArgs) -> ExitCode {
         return ExitCode::from(EXIT_USAGE);
     }
 
+    if progress.is_some() {
+        progress::header(cli.duration.map(|duration| (duration, cli.interval)));
+    }
+
     warn_about_existing_partials(&data_dir);
 
     let params = pg_probe::ConnectionParams {
@@ -276,20 +301,32 @@ fn capture(cli: CaptureArgs) -> ExitCode {
     };
 
     let result = pg_probe::capture_session(&data_dir, signal::flag(), domains, &params, sampling);
+    if let Some(progress) = progress {
+        let report = result.as_ref().ok();
+        progress.finish(
+            report.is_some_and(|report| report.interrupted),
+            report.and_then(|report| {
+                report
+                    .final_path
+                    .as_deref()
+                    .or(report.partial_path.as_deref())
+            }),
+        );
+    }
 
     report_exit(result)
 }
 
-/// Installs the structured logger on stderr. The level is derived from the
-/// verbosity flags: `--quiet` keeps only errors, the default keeps errors and
-/// warnings, and `--verbose` adds per-collector progress at info level.
-fn init_logger(quiet: bool, verbose: bool) {
+/// Installs the logger on stderr. `--quiet` keeps only errors and
+/// `--verbose` adds one structured line per collector outcome. The default
+/// shows a progress summary instead, returned so it can be ended.
+fn init_logger(quiet: bool, verbose: bool, refresh: Duration) -> Option<progress::Progress> {
     let level = if quiet {
         tracing::Level::ERROR
     } else if verbose {
         tracing::Level::INFO
     } else {
-        tracing::Level::WARN
+        return Some(progress::install(refresh));
     };
     tracing_subscriber::fmt()
         .with_max_level(level)
@@ -297,6 +334,7 @@ fn init_logger(quiet: bool, verbose: bool) {
         .with_target(false)
         .with_writer(std::io::stderr)
         .init();
+    None
 }
 
 fn parse_domain(value: &str) -> Result<DomainSelection, String> {
@@ -386,6 +424,15 @@ mod tests {
         assert_eq!(parse_duration("90s"), Ok(Duration::from_secs(90)));
         assert_eq!(parse_duration("5m"), Ok(Duration::from_secs(300)));
         assert_eq!(parse_duration("1h"), Ok(Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn refresh_defaults_to_half_the_interval_and_at_least_one_second() {
+        assert_eq!(
+            default_refresh(Duration::from_secs(10)),
+            Duration::from_secs(5)
+        );
+        assert_eq!(default_refresh(Duration::from_secs(1)), MIN_REFRESH);
     }
 
     #[test]

@@ -14,7 +14,7 @@
 mod explain;
 mod function;
 mod os;
-mod palette;
+pub mod palette;
 mod settings;
 
 use std::collections::{HashMap, HashSet, VecDeque};
