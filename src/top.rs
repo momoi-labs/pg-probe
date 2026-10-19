@@ -984,33 +984,36 @@ impl App {
         };
         frame.render_widget(Paragraph::new(lines), header);
         let count = self.visible().len();
+        let heading = match self.shown_group() {
+            Group::None => format!("{} ({count})", self.view.title()),
+            group => format!(
+                "{} ({count}) · GROUPED BY {}",
+                self.view.title(),
+                group.name().to_uppercase()
+            ),
+        };
+        // The compact legend sits right of the centered heading, and only
+        // when it fits there without touching it.
+        let legend = match (self.compact, self.view) {
+            (false, _) => None,
+            (true, View::Vacuum) => Some("TYPE: wrap = to prevent wraparound · man = manual "),
+            (true, _) => Some("STATE: act = active · txn = idle in transaction · abrt = aborted "),
+        };
+        let side = usize::from(title.width).saturating_sub(heading.chars().count()) / 2;
+        if let Some(legend) = legend.filter(|legend| legend.chars().count() < side) {
+            frame.render_widget(
+                Line::from(legend)
+                    .style(palette::muted())
+                    .alignment(Alignment::Right),
+                title,
+            );
+        }
         frame.render_widget(
-            Line::from(match self.shown_group() {
-                Group::None => format!("{} ({count})", self.view.title()),
-                group => format!(
-                    "{} ({count}) · GROUPED BY {}",
-                    self.view.title(),
-                    group.name().to_uppercase()
-                ),
-            })
-            .style(palette::strong())
-            .alignment(Alignment::Center),
+            Line::from(heading)
+                .style(palette::strong())
+                .alignment(Alignment::Center),
             title,
         );
-        let body = if self.compact {
-            let [body, legend] =
-                Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(body);
-            let text = if self.view == View::Vacuum {
-                " TYPE: wrap = to prevent wraparound · man = manual"
-            } else {
-                " STATE: act = active · txn = idle in transaction · \
-                 abrt = idle in transaction (aborted)"
-            };
-            frame.render_widget(Line::from(text).style(palette::muted()), legend);
-            body
-        } else {
-            body
-        };
         if self.preview {
             let lines = self.preview_lines();
             let height = (lines.len() as u16 + 2).min(body.height / 2);
@@ -1804,15 +1807,6 @@ impl App {
 /// Every key, grouped by where it works. The footer has room for a few.
 const HELP: &[(&str, &[(&str, &str)])] = &[
     (
-        "Views",
-        &[
-            ("F1 1", "Running queries"),
-            ("F2 2", "Waiting queries"),
-            ("F3 3", "Blocking queries"),
-            ("F4 4", "Vacuum in progress, manual and autovacuum"),
-        ],
-    ),
-    (
         "List",
         &[
             ("↑ ↓ j k", "Move the selection"),
@@ -1831,6 +1825,25 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
+        "Views",
+        &[
+            ("F1 1", "Running queries"),
+            ("F2 2", "Waiting queries"),
+            ("F3 3", "Blocking queries"),
+            ("F4 4", "Vacuum in progress, manual and autovacuum"),
+        ],
+    ),
+    (
+        "Compact columns",
+        &[
+            ("act", "active"),
+            ("txn", "idle in transaction"),
+            ("abrt", "idle in transaction (aborted)"),
+            ("wrap", "vacuum to prevent wraparound"),
+            ("man", "manual vacuum"),
+        ],
+    ),
+    (
         "Query details",
         &[
             ("f", "Functions the query calls"),
@@ -1841,30 +1854,36 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
     ),
 ];
 
+/// The help lists the list keys on the left and the rest on the right, so
+/// it fits a 24-line terminal.
 fn draw_help(frame: &mut Frame) {
-    let mut lines = Vec::new();
-    for (section, keys) in HELP {
-        if !lines.is_empty() {
-            lines.push(Line::default());
-        }
-        lines.push(Line::from(Span::styled(*section, palette::strong())));
-        for (key, action) in *keys {
-            lines.push(Line::from(vec![
-                Span::styled(format!("  {key:<16}"), palette::link()),
-                Span::raw(*action),
-            ]));
-        }
-    }
-    let area = centered(frame.area(), 60, 80);
+    let column =
+        |sections: &'static [(&'static str, &'static [(&'static str, &'static str)])]| {
+            let mut lines = Vec::new();
+            for (section, keys) in sections {
+                if !lines.is_empty() {
+                    lines.push(Line::default());
+                }
+                lines.push(Line::from(Span::styled(*section, palette::strong())));
+                for (key, action) in *keys {
+                    lines.push(Line::from(vec![
+                        Span::styled(format!("  {key:<14}"), palette::link()),
+                        Span::raw(*action),
+                    ]));
+                }
+            }
+            Paragraph::new(lines)
+        };
+    let area = centered(frame.area(), 90, 90);
+    let block = palette::popup()
+        .title(Line::from(" Keyboard shortcuts ").style(palette::strong()))
+        .title_bottom(Line::from(" any key closes ").style(palette::muted()));
+    let [left, right] =
+        Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).areas(block.inner(area));
     frame.render_widget(Clear, area);
-    frame.render_widget(
-        Paragraph::new(lines).block(
-            palette::popup()
-                .title(Line::from(" Keyboard shortcuts ").style(palette::strong()))
-                .title_bottom(Line::from(" any key closes ").style(palette::muted())),
-        ),
-        area,
-    );
+    frame.render_widget(block, area);
+    frame.render_widget(column(&HELP[..1]), left);
+    frame.render_widget(column(&HELP[1..]), right);
 }
 
 /// Drops control characters from one plan line but keeps its leading
