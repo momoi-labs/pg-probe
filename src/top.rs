@@ -992,22 +992,6 @@ impl App {
                 group.name().to_uppercase()
             ),
         };
-        // The compact legend sits right of the centered heading, and only
-        // when it fits there without touching it.
-        let legend = match (self.compact, self.view) {
-            (false, _) => None,
-            (true, View::Vacuum) => Some("TYPE: wrap = to prevent wraparound · man = manual "),
-            (true, _) => Some("STATE: act = active · txn = idle in transaction · abrt = aborted "),
-        };
-        let side = usize::from(title.width).saturating_sub(heading.chars().count()) / 2;
-        if let Some(legend) = legend.filter(|legend| legend.chars().count() < side) {
-            frame.render_widget(
-                Line::from(legend)
-                    .style(palette::muted())
-                    .alignment(Alignment::Right),
-                title,
-            );
-        }
         frame.render_widget(
             Line::from(heading)
                 .style(palette::strong())
@@ -2065,7 +2049,7 @@ fn sparkline(values: &[usize]) -> String {
         .collect()
 }
 
-/// The compact list's states. The legend under the list spells them out.
+/// The compact list's states. The help screen spells them out.
 fn short_state(state: &str) -> &str {
     match state {
         "active" => "act",
@@ -2075,8 +2059,7 @@ fn short_state(state: &str) -> &str {
     }
 }
 
-/// The compact vacuum view's types. The legend under the list spells them
-/// out.
+/// The compact vacuum view's types. The help screen spells them out.
 fn short_kind(kind: &str) -> &str {
     match kind {
         "wraparound" => "wrap",
@@ -2508,7 +2491,6 @@ mod tests {
         assert!(screen.contains("USER@DATABASE"), "{screen}");
         assert!(screen.contains("postgres@bench"), "{screen}");
         assert!(screen.contains(" txn "), "{screen}");
-        assert!(screen.contains("txn = idle in transaction"), "{screen}");
     }
 
     #[test]
@@ -2602,7 +2584,6 @@ mod tests {
         assert!(screen.contains("TABLE@DATABASE"), "{screen}");
         assert!(screen.contains("public.t@app"), "{screen}");
         assert!(screen.contains(" wrap "), "{screen}");
-        assert!(screen.contains("wrap = to prevent wraparound"), "{screen}");
     }
 
     #[test]
