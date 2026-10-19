@@ -171,6 +171,10 @@ in the SQLite `user_version` pragma. The current schema contains:
 
 - `snapshot` — one row of run-level envelope metadata (identifier, collector
   name and version, start/finish timestamps in UTC, and overall status).
+- `sample` — one row per sample, with the UTC time it was taken. Values that
+  change during a run, such as counters and gauges, are keyed by sample. A
+  default run writes one sample. Values that do not change, such as host
+  identity and settings, are recorded once per snapshot.
 - `collector_outcome` — one row per collector component, recording its symbolic
   source, timing, status, and a stable machine-readable error code when it did
   not succeed.

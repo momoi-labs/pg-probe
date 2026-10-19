@@ -22,6 +22,8 @@ use crate::postgres::TargetInventory;
 
 const SQLITE_APPLICATION_ID: i64 = 0x5047_5052; // "PGPR"
 const FILE_MODE: u32 = 0o600;
+/// A single-shot run writes one sample, numbered from 1.
+const FIRST_SAMPLE: i64 = 1;
 
 mod embedded_migrations {
     refinery::embed_migrations!("schema/migrations");
@@ -145,6 +147,7 @@ pub struct PartialWriter {
     partial_path: PathBuf,
     final_path: PathBuf,
     snapshot_id: String,
+    sample_id: i64,
 }
 
 impl PartialWriter {
@@ -166,6 +169,7 @@ impl PartialWriter {
             partial_path: partial_path.to_owned(),
             final_path: final_path.to_owned(),
             snapshot_id: snapshot_id_str.clone(),
+            sample_id: FIRST_SAMPLE,
         };
         writer.init_schema()?;
         writer.write_envelope(started_at_utc)?;
@@ -210,6 +214,7 @@ impl PartialWriter {
             ],
         )
         .map_err(ArtifactError::Sqlite)?;
+        write_sample(&tx, &self.snapshot_id, self.sample_id, started_at_utc)?;
         tx.commit().map_err(ArtifactError::Sqlite)?;
         self.fsync_partial()
     }
@@ -247,8 +252,20 @@ impl crate::collector::Sink for PartialWriter {
         write_cpu_sets(&tx, &self.snapshot_id, compute, &collected_at)?;
         write_cpu_topology(&tx, &self.snapshot_id, compute, &collected_at)?;
         write_numa_nodes(&tx, &self.snapshot_id, compute, &collected_at)?;
-        write_cpu_times(&tx, &self.snapshot_id, compute, &collected_at)?;
-        write_scheduler(&tx, &self.snapshot_id, compute, &collected_at)?;
+        write_cpu_times(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            compute,
+            &collected_at,
+        )?;
+        write_scheduler(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            compute,
+            &collected_at,
+        )?;
         tx.commit().map_err(ArtifactError::Sqlite)?;
         self.fsync_partial()
     }
@@ -264,8 +281,20 @@ impl crate::collector::Sink for PartialWriter {
             .map_err(ArtifactError::Sqlite)?;
         let collected_at = format_timestamp(crate::contract::now_utc());
         write_outcomes(&tx, &self.snapshot_id, outcomes)?;
-        write_memory_rows(&tx, &self.snapshot_id, memory, &collected_at)?;
-        write_vm_events(&tx, &self.snapshot_id, memory, &collected_at)?;
+        write_memory_rows(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            memory,
+            &collected_at,
+        )?;
+        write_vm_events(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            memory,
+            &collected_at,
+        )?;
         tx.commit().map_err(ArtifactError::Sqlite)?;
         self.fsync_partial()
     }
@@ -281,7 +310,13 @@ impl crate::collector::Sink for PartialWriter {
             .map_err(ArtifactError::Sqlite)?;
         let collected_at = format_timestamp(crate::contract::now_utc());
         write_outcomes(&tx, &self.snapshot_id, outcomes)?;
-        write_psi(&tx, &self.snapshot_id, pressure, &collected_at)?;
+        write_psi(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            pressure,
+            &collected_at,
+        )?;
         tx.commit().map_err(ArtifactError::Sqlite)?;
         self.fsync_partial()
     }
@@ -299,7 +334,13 @@ impl crate::collector::Sink for PartialWriter {
         write_outcomes(&tx, &self.snapshot_id, outcomes)?;
         write_mounts(&tx, &self.snapshot_id, storage, &collected_at)?;
         write_block_devices(&tx, &self.snapshot_id, storage, &collected_at)?;
-        write_block_io(&tx, &self.snapshot_id, storage, &collected_at)?;
+        write_block_io(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            storage,
+            &collected_at,
+        )?;
         tx.commit().map_err(ArtifactError::Sqlite)?;
         self.fsync_partial()
     }
@@ -332,8 +373,27 @@ impl crate::collector::Sink for PartialWriter {
         let collected_at = format_timestamp(crate::contract::now_utc());
         write_outcomes(&tx, &self.snapshot_id, outcomes)?;
         write_cgroup_limits(&tx, &self.snapshot_id, cgroups, &collected_at)?;
-        write_cgroup_events(&tx, &self.snapshot_id, cgroups, &collected_at)?;
-        write_cgroup_io(&tx, &self.snapshot_id, cgroups, &collected_at)?;
+        write_cgroup_usage(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            cgroups,
+            &collected_at,
+        )?;
+        write_cgroup_events(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            cgroups,
+            &collected_at,
+        )?;
+        write_cgroup_io(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            cgroups,
+            &collected_at,
+        )?;
         tx.commit().map_err(ArtifactError::Sqlite)?;
         self.fsync_partial()
     }
@@ -371,18 +431,90 @@ impl crate::collector::Sink for PartialWriter {
         write_postgres_settings(&tx, &self.snapshot_id, inventory, &collected_at)?;
         write_postgres_databases(&tx, &self.snapshot_id, inventory, &collected_at)?;
         write_postgres_extensions(&tx, &self.snapshot_id, inventory, &collected_at)?;
-        write_postgres_database_stats(&tx, &self.snapshot_id, inventory, &collected_at)?;
-        write_postgres_standby_conflicts(&tx, &self.snapshot_id, inventory, &collected_at)?;
-        write_postgres_wal_stats(&tx, &self.snapshot_id, inventory, &collected_at)?;
-        write_postgres_bgwriter_stats(&tx, &self.snapshot_id, inventory, &collected_at)?;
-        write_postgres_checkpointer_stats(&tx, &self.snapshot_id, inventory, &collected_at)?;
-        write_postgres_archiver_stats(&tx, &self.snapshot_id, inventory, &collected_at)?;
-        write_postgres_io_stats(&tx, &self.snapshot_id, inventory, &collected_at)?;
-        write_postgres_slru_stats(&tx, &self.snapshot_id, inventory, &collected_at)?;
-        write_postgres_activity_aggregates(&tx, &self.snapshot_id, inventory, &collected_at)?;
-        write_postgres_lock_aggregates(&tx, &self.snapshot_id, inventory, &collected_at)?;
-        write_postgres_replication_aggregates(&tx, &self.snapshot_id, inventory, &collected_at)?;
-        write_postgres_slot_aggregates(&tx, &self.snapshot_id, inventory, &collected_at)?;
+        write_postgres_database_stats(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            inventory,
+            &collected_at,
+        )?;
+        write_postgres_standby_conflicts(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            inventory,
+            &collected_at,
+        )?;
+        write_postgres_wal_stats(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            inventory,
+            &collected_at,
+        )?;
+        write_postgres_bgwriter_stats(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            inventory,
+            &collected_at,
+        )?;
+        write_postgres_checkpointer_stats(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            inventory,
+            &collected_at,
+        )?;
+        write_postgres_archiver_stats(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            inventory,
+            &collected_at,
+        )?;
+        write_postgres_io_stats(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            inventory,
+            &collected_at,
+        )?;
+        write_postgres_slru_stats(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            inventory,
+            &collected_at,
+        )?;
+        write_postgres_activity_aggregates(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            inventory,
+            &collected_at,
+        )?;
+        write_postgres_lock_aggregates(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            inventory,
+            &collected_at,
+        )?;
+        write_postgres_replication_aggregates(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            inventory,
+            &collected_at,
+        )?;
+        write_postgres_slot_aggregates(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            inventory,
+            &collected_at,
+        )?;
         tx.commit().map_err(ArtifactError::Sqlite)?;
         self.fsync_partial()
     }
@@ -507,6 +639,7 @@ pub fn publish(snapshot: &Snapshot, output: &Path) -> Result<(), ArtifactError> 
         )
         .map_err(ArtifactError::Sqlite)?;
 
+        write_sample(&tx, &snapshot_id, FIRST_SAMPLE, snapshot.started_at_utc)?;
         write_outcomes(&tx, &snapshot_id, &snapshot.outcomes)?;
         write_identity_row(&tx, &snapshot_id, &snapshot.identity)?;
 
@@ -532,30 +665,35 @@ pub fn publish(snapshot: &Snapshot, output: &Path) -> Result<(), ArtifactError> 
         write_cpu_times(
             &tx,
             &snapshot_id,
+            FIRST_SAMPLE,
             &snapshot.compute_memory.compute,
             &collected_at,
         )?;
         write_scheduler(
             &tx,
             &snapshot_id,
+            FIRST_SAMPLE,
             &snapshot.compute_memory.compute,
             &collected_at,
         )?;
         write_memory_rows(
             &tx,
             &snapshot_id,
+            FIRST_SAMPLE,
             &snapshot.compute_memory.memory,
             &collected_at,
         )?;
         write_vm_events(
             &tx,
             &snapshot_id,
+            FIRST_SAMPLE,
             &snapshot.compute_memory.memory,
             &collected_at,
         )?;
         write_psi(
             &tx,
             &snapshot_id,
+            FIRST_SAMPLE,
             &snapshot.compute_memory.pressure,
             &collected_at,
         )?;
@@ -574,6 +712,7 @@ pub fn publish(snapshot: &Snapshot, output: &Path) -> Result<(), ArtifactError> 
         write_block_io(
             &tx,
             &snapshot_id,
+            FIRST_SAMPLE,
             &snapshot.storage_limits.storage,
             &collected_at,
         )?;
@@ -589,15 +728,24 @@ pub fn publish(snapshot: &Snapshot, output: &Path) -> Result<(), ArtifactError> 
             &snapshot.storage_limits.cgroups,
             &collected_at,
         )?;
+        write_cgroup_usage(
+            &tx,
+            &snapshot_id,
+            FIRST_SAMPLE,
+            &snapshot.storage_limits.cgroups,
+            &collected_at,
+        )?;
         write_cgroup_events(
             &tx,
             &snapshot_id,
+            FIRST_SAMPLE,
             &snapshot.storage_limits.cgroups,
             &collected_at,
         )?;
         write_cgroup_io(
             &tx,
             &snapshot_id,
+            FIRST_SAMPLE,
             &snapshot.storage_limits.cgroups,
             &collected_at,
         )?;
@@ -667,6 +815,20 @@ pub fn publish(snapshot: &Snapshot, output: &Path) -> Result<(), ArtifactError> 
         let _ = fs::remove_file(&gzip_path);
     }
     result
+}
+
+fn write_sample(
+    tx: &rusqlite::Transaction,
+    snapshot_id: &str,
+    sample_id: i64,
+    taken_at_utc: DateTime<Utc>,
+) -> Result<(), ArtifactError> {
+    tx.execute(
+        "INSERT INTO sample (snapshot_id, sample_id, taken_at_utc) VALUES (?1, ?2, ?3)",
+        params![snapshot_id, sample_id, format_timestamp(taken_at_utc)],
+    )
+    .map_err(ArtifactError::Sqlite)?;
+    Ok(())
 }
 
 fn write_outcomes(
@@ -845,13 +1007,14 @@ fn write_numa_nodes(
 fn write_cpu_times(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     compute: &ComputeObservations,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
     let mut statement = tx
         .prepare(
-            "INSERT OR REPLACE INTO linux_cpu_time (snapshot_id, collected_at, cpu_id, state, ticks)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT OR REPLACE INTO linux_cpu_time (snapshot_id, sample_id, collected_at, cpu_id, state, ticks)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )
         .map_err(ArtifactError::Sqlite)?;
 
@@ -875,6 +1038,7 @@ fn write_cpu_times(
             statement
                 .execute(params![
                     snapshot_id,
+                    sample_id,
                     collected_at,
                     cpu_id,
                     state_name,
@@ -889,6 +1053,7 @@ fn write_cpu_times(
 fn write_scheduler(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     compute: &ComputeObservations,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
@@ -928,11 +1093,12 @@ fn write_scheduler(
 
     tx.execute(
         "INSERT INTO linux_scheduler (
-                snapshot_id, collected_at, procs_running, procs_blocked, ctxt, processes,
+                snapshot_id, sample_id, collected_at, procs_running, procs_blocked, ctxt, processes,
                 intr, softirq, load_avg_1m, load_avg_5m, load_avg_15m, runnable_tasks, total_tasks
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             snapshot_id,
+            sample_id,
             collected_at,
             procs_running,
             procs_blocked,
@@ -954,13 +1120,14 @@ fn write_scheduler(
 fn write_memory_rows(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     memory: &MemoryObservations,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
     let mut statement = tx
         .prepare(
-            "INSERT INTO linux_memory (snapshot_id, collected_at, key, value_bytes, unit)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO linux_memory (snapshot_id, sample_id, collected_at, key, value_bytes, unit)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )
         .map_err(ArtifactError::Sqlite)?;
 
@@ -969,6 +1136,7 @@ fn write_memory_rows(
         statement
             .execute(params![
                 snapshot_id,
+                sample_id,
                 collected_at,
                 entry.key,
                 value,
@@ -982,13 +1150,14 @@ fn write_memory_rows(
 fn write_vm_events(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     memory: &MemoryObservations,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
     let mut statement = tx
         .prepare(
-            "INSERT INTO linux_vm_event (snapshot_id, collected_at, key, value, unit)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO linux_vm_event (snapshot_id, sample_id, collected_at, key, value, unit)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )
         .map_err(ArtifactError::Sqlite)?;
 
@@ -997,6 +1166,7 @@ fn write_vm_events(
         statement
             .execute(params![
                 snapshot_id,
+                sample_id,
                 collected_at,
                 entry.key,
                 value,
@@ -1010,14 +1180,15 @@ fn write_vm_events(
 fn write_psi(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     pressure: &PressureObservations,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
     let mut statement = tx
         .prepare(
             "INSERT INTO linux_psi (
-                snapshot_id, collected_at, resource, scope, avg10, avg60, avg300, total_us
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                snapshot_id, sample_id, collected_at, resource, scope, avg10, avg60, avg300, total_us
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )
         .map_err(ArtifactError::Sqlite)?;
 
@@ -1026,6 +1197,7 @@ fn write_psi(
         statement
             .execute(params![
                 snapshot_id,
+                sample_id,
                 collected_at,
                 entry.resource.as_str(),
                 entry.scope.as_str(),
@@ -1169,19 +1341,20 @@ fn write_block_devices(
 fn write_block_io(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     storage: &StorageObservations,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
     let mut statement = tx
         .prepare(
             "INSERT OR IGNORE INTO linux_block_io (
-                snapshot_id, collected_at, device_major, device_minor,
+                snapshot_id, sample_id, collected_at, device_major, device_minor,
                 reads_completed, reads_merged, sectors_read, read_milliseconds,
                 writes_completed, writes_merged, sectors_written, write_milliseconds,
                 io_in_progress, io_milliseconds, weighted_io_milliseconds,
                 discards_completed, discard_sectors, discard_milliseconds,
                 flushes_completed, flush_milliseconds
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
         )
         .map_err(ArtifactError::Sqlite)?;
 
@@ -1196,6 +1369,7 @@ fn write_block_io(
         statement
             .execute(params![
                 snapshot_id,
+                sample_id,
                 collected_at,
                 i64::from(entry.device_major),
                 i64::from(entry.device_minor),
@@ -1282,55 +1456,89 @@ fn write_cgroup_limits(
             .map_err(|_| ArtifactError::ValueOutOfRange)
     };
 
-    tx
-        .execute(
-            "INSERT OR IGNORE INTO linux_cgroup (
+    tx.execute(
+        "INSERT OR IGNORE INTO linux_cgroup (
                 snapshot_id, collected_at, version,
                 cpu_quota_microseconds, cpu_period_microseconds, cpu_quota_unlimited,
-                cpu_weight, memory_current_bytes, memory_min_bytes, memory_low_bytes,
+                cpu_weight, memory_min_bytes, memory_low_bytes,
                 memory_high_bytes, memory_high_unlimited, memory_max_bytes,
-                memory_max_unlimited, swap_current_bytes, swap_max_bytes,
-                swap_max_unlimited, pids_current, pids_max, pids_max_unlimited
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
-            params![
-                snapshot_id,
-                collected_at,
-                version_str,
-                limits.cpu_quota_microseconds,
-                limits.cpu_period_microseconds,
-                limits.cpu_quota_unlimited.map(|b| b as i64),
-                opt_u64(limits.cpu_weight)?,
-                opt_u64(limits.memory_current_bytes)?,
-                opt_u64(limits.memory_min_bytes)?,
-                opt_u64(limits.memory_low_bytes)?,
-                opt_u64(limits.memory_high_bytes)?,
-                limits.memory_high_unlimited.map(|b| b as i64),
-                opt_u64(limits.memory_max_bytes)?,
-                limits.memory_max_unlimited.map(|b| b as i64),
-                opt_u64(limits.swap_current_bytes)?,
-                opt_u64(limits.swap_max_bytes)?,
-                limits.swap_max_unlimited.map(|b| b as i64),
-                opt_u64(limits.pids_current)?,
-                limits.pids_max,
-                limits.pids_max_unlimited.map(|b| b as i64),
-            ],
-        )
-        .map_err(ArtifactError::Sqlite)?;
+                memory_max_unlimited, swap_max_bytes,
+                swap_max_unlimited, pids_max, pids_max_unlimited
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+        params![
+            snapshot_id,
+            collected_at,
+            version_str,
+            limits.cpu_quota_microseconds,
+            limits.cpu_period_microseconds,
+            limits.cpu_quota_unlimited.map(|b| b as i64),
+            opt_u64(limits.cpu_weight)?,
+            opt_u64(limits.memory_min_bytes)?,
+            opt_u64(limits.memory_low_bytes)?,
+            opt_u64(limits.memory_high_bytes)?,
+            limits.memory_high_unlimited.map(|b| b as i64),
+            opt_u64(limits.memory_max_bytes)?,
+            limits.memory_max_unlimited.map(|b| b as i64),
+            opt_u64(limits.swap_max_bytes)?,
+            limits.swap_max_unlimited.map(|b| b as i64),
+            limits.pids_max,
+            limits.pids_max_unlimited.map(|b| b as i64),
+        ],
+    )
+    .map_err(ArtifactError::Sqlite)?;
+    Ok(())
+}
+
+// Usage is variant: it is recorded per sample, apart from the limits.
+fn write_cgroup_usage(
+    tx: &rusqlite::Transaction,
+    snapshot_id: &str,
+    sample_id: i64,
+    cgroups: &CgroupObservations,
+    collected_at: &str,
+) -> Result<(), ArtifactError> {
+    let limits = &cgroups.limits;
+    if limits.version.is_none() {
+        return Ok(());
+    }
+
+    let opt_u64 = |v: Option<u64>| {
+        v.map(i64::try_from)
+            .transpose()
+            .map_err(|_| ArtifactError::ValueOutOfRange)
+    };
+
+    tx.execute(
+        "INSERT OR IGNORE INTO linux_cgroup_usage (
+                snapshot_id, sample_id, collected_at,
+                memory_current_bytes, swap_current_bytes, pids_current
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            snapshot_id,
+            sample_id,
+            collected_at,
+            opt_u64(limits.memory_current_bytes)?,
+            opt_u64(limits.swap_current_bytes)?,
+            opt_u64(limits.pids_current)?,
+        ],
+    )
+    .map_err(ArtifactError::Sqlite)?;
     Ok(())
 }
 
 fn write_cgroup_events(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     cgroups: &CgroupObservations,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
     let mut statement = tx
         .prepare(
             "INSERT OR IGNORE INTO linux_cgroup_event (
-                snapshot_id, collected_at, controller, event_name,
+                snapshot_id, sample_id, collected_at, controller, event_name,
                 cumulative_value, unit
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )
         .map_err(ArtifactError::Sqlite)?;
 
@@ -1340,6 +1548,7 @@ fn write_cgroup_events(
         statement
             .execute(params![
                 snapshot_id,
+                sample_id,
                 collected_at,
                 entry.controller.as_str(),
                 entry.event_name.as_str(),
@@ -1354,16 +1563,17 @@ fn write_cgroup_events(
 fn write_cgroup_io(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     cgroups: &CgroupObservations,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
     let mut statement = tx
         .prepare(
             "INSERT OR IGNORE INTO linux_cgroup_io (
-                snapshot_id, collected_at, device_major, device_minor,
+                snapshot_id, sample_id, collected_at, device_major, device_minor,
                 read_bytes, write_bytes, discard_bytes,
                 read_operations, write_operations, discard_operations
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         )
         .map_err(ArtifactError::Sqlite)?;
 
@@ -1377,6 +1587,7 @@ fn write_cgroup_io(
         statement
             .execute(params![
                 snapshot_id,
+                sample_id,
                 collected_at,
                 i64::from(entry.device_major),
                 i64::from(entry.device_minor),
@@ -1632,26 +1843,28 @@ fn write_postgres_extensions(
 fn write_postgres_database_stats(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     inventory: &TargetInventory,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
     let mut statement = tx
         .prepare(
             "INSERT INTO postgres_database_stats (
-                snapshot_id, collected_at, database_oid, database_name,
+                snapshot_id, sample_id, collected_at, database_oid, database_name,
                 num_backends, xact_commit, xact_rollback, blks_read, blks_hit,
                 tup_returned, tup_fetched, tup_inserted, tup_updated, tup_deleted,
                 conflicts, temp_files, temp_bytes, deadlocks, checksum_failures,
                 blk_read_time_ms, blk_write_time_ms, session_time_ms, active_time_ms,
                 idle_in_transaction_time_ms, sessions, sessions_abandoned, sessions_fatal,
                 sessions_killed, stats_reset
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
         )
         .map_err(ArtifactError::Sqlite)?;
     for stats in &inventory.stats.database_stats {
         statement
             .execute(params![
                 snapshot_id,
+                sample_id,
                 collected_at,
                 stats.database_oid,
                 stats.database_name.as_str(),
@@ -1689,21 +1902,23 @@ fn write_postgres_database_stats(
 fn write_postgres_standby_conflicts(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     inventory: &TargetInventory,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
     let mut statement = tx
         .prepare(
             "INSERT INTO postgres_standby_conflicts (
-                snapshot_id, collected_at, database_oid, database_name,
+                snapshot_id, sample_id, collected_at, database_oid, database_name,
                 confl_tablespace, confl_lock, confl_snapshot, confl_bufferpin, confl_deadlock
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         )
         .map_err(ArtifactError::Sqlite)?;
     for stats in &inventory.stats.standby_conflicts {
         statement
             .execute(params![
                 snapshot_id,
+                sample_id,
                 collected_at,
                 stats.database_oid,
                 stats.database_name.as_str(),
@@ -1721,17 +1936,19 @@ fn write_postgres_standby_conflicts(
 fn write_postgres_wal_stats(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     inventory: &TargetInventory,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
     if let Some(stats) = &inventory.stats.wal_stats {
         tx.execute(
             "INSERT INTO postgres_wal_stats (
-                snapshot_id, collected_at, wal_records, wal_fpi, wal_bytes,
+                snapshot_id, sample_id, collected_at, wal_records, wal_fpi, wal_bytes,
                 wal_buffers_full, wal_write, wal_sync, wal_write_time_ms, wal_sync_time_ms, stats_reset
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 snapshot_id,
+                sample_id,
                 collected_at,
                 stats.wal_records,
                 stats.wal_fpi,
@@ -1752,19 +1969,21 @@ fn write_postgres_wal_stats(
 fn write_postgres_bgwriter_stats(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     inventory: &TargetInventory,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
     if let Some(stats) = &inventory.stats.bgwriter_stats {
         tx.execute(
             "INSERT INTO postgres_bgwriter_stats (
-                snapshot_id, collected_at, checkpoints_timed, checkpoints_req,
+                snapshot_id, sample_id, collected_at, checkpoints_timed, checkpoints_req,
                 checkpoint_write_time_ms, checkpoint_sync_time_ms, buffers_checkpoint,
                 buffers_clean, maxwritten_clean, buffers_backend, buffers_backend_fsync,
                 buffers_alloc, stats_reset
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 snapshot_id,
+                sample_id,
                 collected_at,
                 stats.checkpoints_timed,
                 stats.checkpoints_req,
@@ -1787,17 +2006,19 @@ fn write_postgres_bgwriter_stats(
 fn write_postgres_checkpointer_stats(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     inventory: &TargetInventory,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
     if let Some(stats) = &inventory.stats.checkpointer_stats {
         tx.execute(
             "INSERT INTO postgres_checkpointer_stats (
-                snapshot_id, collected_at, num_timed, num_requested,
+                snapshot_id, sample_id, collected_at, num_timed, num_requested,
                 write_time_ms, sync_time_ms, buffers_written, stats_reset
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 snapshot_id,
+                sample_id,
                 collected_at,
                 stats.checkpoints_timed,
                 stats.checkpoints_req,
@@ -1815,17 +2036,19 @@ fn write_postgres_checkpointer_stats(
 fn write_postgres_archiver_stats(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     inventory: &TargetInventory,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
     if let Some(stats) = &inventory.stats.archiver_stats {
         tx.execute(
             "INSERT INTO postgres_archiver_stats (
-                snapshot_id, collected_at, archived_count, last_archived_wal,
+                snapshot_id, sample_id, collected_at, archived_count, last_archived_wal,
                 last_archived_time, failed_count, last_failed_wal, last_failed_time, stats_reset
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 snapshot_id,
+                sample_id,
                 collected_at,
                 stats.archived_count,
                 stats.last_archived_wal,
@@ -1844,6 +2067,7 @@ fn write_postgres_archiver_stats(
 fn write_postgres_io_stats(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     inventory: &TargetInventory,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
@@ -1851,16 +2075,17 @@ fn write_postgres_io_stats(
         let mut statement = tx
             .prepare(
                 "INSERT INTO postgres_io_stats (
-                    snapshot_id, collected_at, backend_type, io_object, io_context,
+                    snapshot_id, sample_id, collected_at, backend_type, io_object, io_context,
                     reads, read_time_ms, writes, write_time_ms, extends, extend_time_ms,
                     op_bytes, hits, evictions, reuses, fsyncs, stats_reset
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             )
             .map_err(ArtifactError::Sqlite)?;
         for entry in entries {
             statement
                 .execute(params![
                     snapshot_id,
+                    sample_id,
                     collected_at,
                     entry.backend_type.as_str(),
                     entry.io_object,
@@ -1887,6 +2112,7 @@ fn write_postgres_io_stats(
 fn write_postgres_slru_stats(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     inventory: &TargetInventory,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
@@ -1894,15 +2120,16 @@ fn write_postgres_slru_stats(
         let mut statement = tx
             .prepare(
                 "INSERT INTO postgres_slru_stats (
-                    snapshot_id, collected_at, name, blocks_zeroed, blocks_hit,
+                    snapshot_id, sample_id, collected_at, name, blocks_zeroed, blocks_hit,
                     blocks_read, blocks_written, blocks_exists, flush_count, stats_reset
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             )
             .map_err(ArtifactError::Sqlite)?;
         for entry in entries {
             statement
                 .execute(params![
                     snapshot_id,
+                    sample_id,
                     collected_at,
                     entry.name.as_str(),
                     entry.blocks_zeroed,
@@ -1922,21 +2149,23 @@ fn write_postgres_slru_stats(
 fn write_postgres_activity_aggregates(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     inventory: &TargetInventory,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
     let mut statement = tx
         .prepare(
             "INSERT INTO postgres_activity_aggregates (
-                snapshot_id, collected_at, database_name, backend_type, state,
+                snapshot_id, sample_id, collected_at, database_name, backend_type, state,
                 wait_event_type, count, max_age_seconds
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )
         .map_err(ArtifactError::Sqlite)?;
     for agg in &inventory.stats.activity_aggregates {
         statement
             .execute(params![
                 snapshot_id,
+                sample_id,
                 collected_at,
                 agg.database_name,
                 agg.backend_type.as_str(),
@@ -1953,21 +2182,23 @@ fn write_postgres_activity_aggregates(
 fn write_postgres_lock_aggregates(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     inventory: &TargetInventory,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
     let mut statement = tx
         .prepare(
             "INSERT INTO postgres_lock_aggregates (
-                snapshot_id, collected_at, lock_mode, lock_type, granted,
+                snapshot_id, sample_id, collected_at, lock_mode, lock_type, granted,
                 fast_path, count, max_wait_age_seconds
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )
         .map_err(ArtifactError::Sqlite)?;
     for agg in &inventory.stats.lock_aggregates {
         statement
             .execute(params![
                 snapshot_id,
+                sample_id,
                 collected_at,
                 agg.lock_mode.as_str(),
                 agg.lock_type.as_str(),
@@ -1984,20 +2215,22 @@ fn write_postgres_lock_aggregates(
 fn write_postgres_replication_aggregates(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     inventory: &TargetInventory,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
     let mut statement = tx
         .prepare(
             "INSERT INTO postgres_replication_aggregates (
-                snapshot_id, collected_at, state, sync_state, count, max_lag_bytes
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                snapshot_id, sample_id, collected_at, state, sync_state, count, max_lag_bytes
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )
         .map_err(ArtifactError::Sqlite)?;
     for agg in &inventory.stats.replication_aggregates {
         statement
             .execute(params![
                 snapshot_id,
+                sample_id,
                 collected_at,
                 agg.state,
                 agg.sync_state,
@@ -2012,6 +2245,7 @@ fn write_postgres_replication_aggregates(
 fn write_postgres_slot_aggregates(
     tx: &rusqlite::Transaction,
     snapshot_id: &str,
+    sample_id: i64,
     inventory: &TargetInventory,
     collected_at: &str,
 ) -> Result<(), ArtifactError> {
@@ -2019,14 +2253,15 @@ fn write_postgres_slot_aggregates(
         let mut statement = tx
             .prepare(
                 "INSERT INTO postgres_slot_aggregates (
-                    snapshot_id, collected_at, slot_type, active, count, max_retained_bytes
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    snapshot_id, sample_id, collected_at, slot_type, active, count, max_retained_bytes
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             )
             .map_err(ArtifactError::Sqlite)?;
         for agg in aggregates {
             statement
                 .execute(params![
                     snapshot_id,
+                    sample_id,
                     collected_at,
                     agg.slot_type.as_str(),
                     agg.active as i32,

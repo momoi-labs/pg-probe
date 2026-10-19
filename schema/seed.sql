@@ -4,10 +4,13 @@ INSERT INTO snapshot (
     started_at_utc, finished_at_utc, status
 )
 SELECT
-    name, 1, 'pg-probe', 'dev-seed',
+    name, 2, 'pg-probe', 'dev-seed',
     '2026-08-19T12:00:00Z', '2026-08-19T12:00:05Z',
     CASE WHEN name IN ('partial-failures', 'null-heavy') THEN 'partial' ELSE 'complete' END
 FROM seed_scenario;
+
+INSERT INTO sample (snapshot_id, sample_id, taken_at_utc)
+SELECT name, 1, '2026-08-19T12:00:00Z' FROM seed_scenario;
 
 INSERT INTO linux_identity (
     snapshot_id, hostname, kernel_sysname, kernel_release, kernel_version,
@@ -62,8 +65,8 @@ SELECT name, '2026-08-19T12:00:03Z', 'fsync',
        NULL, 'bool', 'configuration file', 0
 FROM seed_scenario WHERE name <> 'partial-failures';
 
-INSERT INTO linux_memory (snapshot_id, collected_at, key, value_bytes, unit)
-SELECT name, '2026-08-19T12:00:02Z', 'MemTotal',
+INSERT INTO linux_memory (snapshot_id, sample_id, collected_at, key, value_bytes, unit)
+SELECT name, 1, '2026-08-19T12:00:02Z', 'MemTotal',
        CASE WHEN name = 'large-host' THEN 1099511627776 ELSE 17179869184 END,
        'bytes'
 FROM seed_scenario WHERE name <> 'null-heavy';

@@ -168,7 +168,14 @@ fn a_successful_run_publishes_a_valid_gzip_artifact() {
     assert_eq!(
         conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
             .unwrap(),
-        1
+        2
+    );
+    assert_eq!(
+        conn.query_row("SELECT count(*) FROM sample", [], |row| row
+            .get::<_, i64>(0))
+            .unwrap(),
+        1,
+        "a default run writes exactly one sample"
     );
     assert_eq!(
         conn.query_row("SELECT count(*) FROM refinery_schema_history", [], |row| {

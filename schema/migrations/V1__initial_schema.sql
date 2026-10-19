@@ -7,6 +7,12 @@ CREATE TABLE snapshot (
     finished_at_utc TEXT NOT NULL,
     status TEXT NOT NULL CHECK (status IN ('complete', 'partial'))
 ) STRICT;
+CREATE TABLE sample (
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL CHECK (sample_id >= 1),
+    taken_at_utc TEXT NOT NULL,
+    PRIMARY KEY (snapshot_id, sample_id)
+) STRICT;
 CREATE TABLE collector_outcome (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
     source TEXT NOT NULL,
@@ -75,14 +81,17 @@ CREATE TABLE linux_numa_node (
 ) STRICT;
 CREATE TABLE linux_cpu_time (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     cpu_id INTEGER NOT NULL,
     state TEXT NOT NULL,
     ticks INTEGER NOT NULL,
-    PRIMARY KEY (snapshot_id, cpu_id, state)
+    PRIMARY KEY (snapshot_id, sample_id, cpu_id, state),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 ) STRICT;
 CREATE TABLE linux_scheduler (
-    snapshot_id TEXT PRIMARY KEY NOT NULL REFERENCES snapshot(snapshot_id),
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     procs_running INTEGER,
     procs_blocked INTEGER,
@@ -94,26 +103,33 @@ CREATE TABLE linux_scheduler (
     load_avg_5m REAL,
     load_avg_15m REAL,
     runnable_tasks INTEGER,
-    total_tasks INTEGER
+    total_tasks INTEGER,
+    PRIMARY KEY (snapshot_id, sample_id),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 ) STRICT;
 CREATE TABLE linux_memory (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     key TEXT NOT NULL,
     value_bytes INTEGER,
     unit TEXT NOT NULL CHECK (unit IN ('bytes', 'pages')),
-    PRIMARY KEY (snapshot_id, key)
+    PRIMARY KEY (snapshot_id, sample_id, key),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 ) STRICT;
 CREATE TABLE linux_vm_event (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     key TEXT NOT NULL,
     value INTEGER NOT NULL,
     unit TEXT NOT NULL CHECK (unit IN ('events', 'KiB')),
-    PRIMARY KEY (snapshot_id, key)
+    PRIMARY KEY (snapshot_id, sample_id, key),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 ) STRICT;
 CREATE TABLE linux_psi (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     resource TEXT NOT NULL CHECK (resource IN ('cpu', 'memory', 'io')),
     scope TEXT NOT NULL CHECK (scope IN ('some', 'full')),
@@ -121,7 +137,8 @@ CREATE TABLE linux_psi (
     avg60 REAL NOT NULL,
     avg300 REAL NOT NULL,
     total_us INTEGER NOT NULL,
-    PRIMARY KEY (snapshot_id, resource, scope)
+    PRIMARY KEY (snapshot_id, sample_id, resource, scope),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 ) STRICT;
 CREATE TABLE linux_mount (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
@@ -156,6 +173,7 @@ CREATE TABLE linux_block_device (
 ) STRICT;
 CREATE TABLE linux_block_io (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     device_major INTEGER NOT NULL,
     device_minor INTEGER NOT NULL,
@@ -175,7 +193,8 @@ CREATE TABLE linux_block_io (
     discard_milliseconds INTEGER,
     flushes_completed INTEGER,
     flush_milliseconds INTEGER,
-    PRIMARY KEY (snapshot_id, device_major, device_minor)
+    PRIMARY KEY (snapshot_id, sample_id, device_major, device_minor),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 ) STRICT;
 CREATE TABLE linux_resource_limit (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
@@ -198,31 +217,41 @@ CREATE TABLE linux_cgroup (
     cpu_period_microseconds INTEGER,
     cpu_quota_unlimited INTEGER CHECK (cpu_quota_unlimited IN (0, 1)),
     cpu_weight INTEGER,
-    memory_current_bytes INTEGER,
     memory_min_bytes INTEGER,
     memory_low_bytes INTEGER,
     memory_high_bytes INTEGER,
     memory_high_unlimited INTEGER CHECK (memory_high_unlimited IN (0, 1)),
     memory_max_bytes INTEGER,
     memory_max_unlimited INTEGER CHECK (memory_max_unlimited IN (0, 1)),
-    swap_current_bytes INTEGER,
     swap_max_bytes INTEGER,
     swap_max_unlimited INTEGER CHECK (swap_max_unlimited IN (0, 1)),
-    pids_current INTEGER,
     pids_max INTEGER,
     pids_max_unlimited INTEGER CHECK (pids_max_unlimited IN (0, 1))
 ) STRICT;
+CREATE TABLE linux_cgroup_usage (
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
+    collected_at TEXT NOT NULL,
+    memory_current_bytes INTEGER,
+    swap_current_bytes INTEGER,
+    pids_current INTEGER,
+    PRIMARY KEY (snapshot_id, sample_id),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
+) STRICT;
 CREATE TABLE linux_cgroup_event (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     controller TEXT NOT NULL CHECK (controller IN ('cpu', 'memory', 'pids')),
     event_name TEXT NOT NULL,
     cumulative_value INTEGER NOT NULL,
     unit TEXT NOT NULL CHECK (unit IN ('count', 'microseconds')),
-    PRIMARY KEY (snapshot_id, controller, event_name)
+    PRIMARY KEY (snapshot_id, sample_id, controller, event_name),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 ) STRICT;
 CREATE TABLE linux_cgroup_io (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     device_major INTEGER NOT NULL,
     device_minor INTEGER NOT NULL,
@@ -232,7 +261,8 @@ CREATE TABLE linux_cgroup_io (
     read_operations INTEGER,
     write_operations INTEGER,
     discard_operations INTEGER,
-    PRIMARY KEY (snapshot_id, device_major, device_minor)
+    PRIMARY KEY (snapshot_id, sample_id, device_major, device_minor),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 ) STRICT;
 CREATE TABLE linux_kernel_vm (
     snapshot_id TEXT PRIMARY KEY NOT NULL REFERENCES snapshot(snapshot_id),
@@ -338,6 +368,7 @@ CREATE VIEW database_inventory AS
     FROM postgres_database d;
 CREATE TABLE postgres_database_stats (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     database_oid INTEGER NOT NULL,
     database_name TEXT NOT NULL,
@@ -366,10 +397,12 @@ CREATE TABLE postgres_database_stats (
     sessions_fatal INTEGER,
     sessions_killed INTEGER,
     stats_reset TEXT,
-    PRIMARY KEY (snapshot_id, database_oid)
+    PRIMARY KEY (snapshot_id, sample_id, database_oid),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 ) STRICT;
 CREATE TABLE postgres_standby_conflicts (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     database_oid INTEGER NOT NULL,
     database_name TEXT NOT NULL,
@@ -378,10 +411,12 @@ CREATE TABLE postgres_standby_conflicts (
     confl_snapshot INTEGER NOT NULL,
     confl_bufferpin INTEGER NOT NULL,
     confl_deadlock INTEGER NOT NULL,
-    PRIMARY KEY (snapshot_id, database_oid)
+    PRIMARY KEY (snapshot_id, sample_id, database_oid),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 ) STRICT;
 CREATE TABLE postgres_wal_stats (
-    snapshot_id TEXT PRIMARY KEY NOT NULL REFERENCES snapshot(snapshot_id),
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     wal_records INTEGER NOT NULL,
     wal_fpi INTEGER NOT NULL,
@@ -391,10 +426,13 @@ CREATE TABLE postgres_wal_stats (
     wal_sync INTEGER,
     wal_write_time_ms REAL,
     wal_sync_time_ms REAL,
-    stats_reset TEXT
+    stats_reset TEXT,
+    PRIMARY KEY (snapshot_id, sample_id),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 ) STRICT;
 CREATE TABLE postgres_bgwriter_stats (
-    snapshot_id TEXT PRIMARY KEY NOT NULL REFERENCES snapshot(snapshot_id),
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     checkpoints_timed INTEGER,
     checkpoints_req INTEGER,
@@ -406,20 +444,26 @@ CREATE TABLE postgres_bgwriter_stats (
     buffers_backend INTEGER,
     buffers_backend_fsync INTEGER,
     buffers_alloc INTEGER,
-    stats_reset TEXT
+    stats_reset TEXT,
+    PRIMARY KEY (snapshot_id, sample_id),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 ) STRICT;
 CREATE TABLE postgres_checkpointer_stats (
-    snapshot_id TEXT PRIMARY KEY NOT NULL REFERENCES snapshot(snapshot_id),
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     num_timed INTEGER,
     num_requested INTEGER,
     write_time_ms REAL,
     sync_time_ms REAL,
     buffers_written INTEGER,
-    stats_reset TEXT
+    stats_reset TEXT,
+    PRIMARY KEY (snapshot_id, sample_id),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 ) STRICT;
 CREATE TABLE postgres_archiver_stats (
-    snapshot_id TEXT PRIMARY KEY NOT NULL REFERENCES snapshot(snapshot_id),
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     archived_count INTEGER NOT NULL,
     last_archived_wal TEXT,
@@ -427,10 +471,13 @@ CREATE TABLE postgres_archiver_stats (
     failed_count INTEGER NOT NULL,
     last_failed_wal TEXT,
     last_failed_time TEXT,
-    stats_reset TEXT
+    stats_reset TEXT,
+    PRIMARY KEY (snapshot_id, sample_id),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 ) STRICT;
 CREATE TABLE postgres_io_stats (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     backend_type TEXT NOT NULL,
     io_object TEXT,
@@ -447,10 +494,12 @@ CREATE TABLE postgres_io_stats (
     reuses INTEGER NOT NULL,
     fsyncs INTEGER NOT NULL,
     stats_reset TEXT,
-    PRIMARY KEY (snapshot_id, backend_type, io_object, io_context)
+    PRIMARY KEY (snapshot_id, sample_id, backend_type, io_object, io_context),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 ) STRICT;
 CREATE TABLE postgres_slru_stats (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     name TEXT NOT NULL,
     blocks_zeroed INTEGER NOT NULL,
@@ -460,41 +509,54 @@ CREATE TABLE postgres_slru_stats (
     blocks_exists INTEGER NOT NULL,
     flush_count INTEGER NOT NULL,
     stats_reset TEXT,
-    PRIMARY KEY (snapshot_id, name)
+    PRIMARY KEY (snapshot_id, sample_id, name),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 ) STRICT;
 CREATE TABLE postgres_activity_aggregates (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     database_name TEXT,
     backend_type TEXT NOT NULL,
     state TEXT,
     wait_event_type TEXT,
     count INTEGER NOT NULL,
-    max_age_seconds INTEGER
+    max_age_seconds INTEGER,
+    PRIMARY KEY (snapshot_id, sample_id, database_name, backend_type, state, wait_event_type),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 );
 CREATE TABLE postgres_lock_aggregates (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     lock_mode TEXT NOT NULL,
     lock_type TEXT NOT NULL,
     granted INTEGER NOT NULL CHECK (granted IN (0, 1)),
     fast_path INTEGER CHECK (fast_path IN (0, 1)),
     count INTEGER NOT NULL,
-    max_wait_age_seconds INTEGER
+    max_wait_age_seconds INTEGER,
+    PRIMARY KEY (snapshot_id, sample_id, lock_mode, lock_type, granted, fast_path),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 );
 CREATE TABLE postgres_replication_aggregates (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     state TEXT,
     sync_state TEXT,
     count INTEGER NOT NULL,
-    max_lag_bytes INTEGER
+    max_lag_bytes INTEGER,
+    PRIMARY KEY (snapshot_id, sample_id, state, sync_state),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 );
 CREATE TABLE postgres_slot_aggregates (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
     collected_at TEXT NOT NULL,
     slot_type TEXT NOT NULL,
     active INTEGER NOT NULL CHECK (active IN (0, 1)),
     count INTEGER NOT NULL,
-    max_retained_bytes INTEGER
+    max_retained_bytes INTEGER,
+    PRIMARY KEY (snapshot_id, sample_id, slot_type, active),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 );
