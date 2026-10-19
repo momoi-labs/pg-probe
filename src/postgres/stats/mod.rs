@@ -26,6 +26,7 @@ mod lock_aggregates;
 mod replication_aggregates;
 mod slru_stats;
 mod standby_conflicts;
+mod wal_position;
 mod wal_stats;
 
 pub use activity_aggregates::{collect_activity_aggregates, ActivityAggregate};
@@ -39,6 +40,7 @@ pub use replication_aggregates::{
 };
 pub use slru_stats::{collect_slru_stats, SlruStatEntry};
 pub use standby_conflicts::{collect_standby_conflicts, StandbyConflictStats};
+pub use wal_position::{collect_wal_position, WAL_POSITION_MIN_VERSION};
 pub use wal_stats::{collect_wal_stats, WalStats};
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -55,6 +57,8 @@ pub struct PostgresStats {
     pub lock_aggregates: Vec<LockAggregate>,
     pub replication_aggregates: Vec<ReplicationAggregate>,
     pub slot_aggregates: Option<Vec<SlotAggregate>>,
+    /// Current WAL insert position in bytes. None on a standby.
+    pub wal_position_bytes: Option<i64>,
 }
 
 type OptionalStatsCollector<T> = fn(
@@ -218,7 +222,42 @@ fn collect_postgres_stats(
         &mut outcomes,
     );
 
+    collect_wal_position_outcome(&mut stats, client, server_version_num, &mut outcomes);
+
     (stats, outcomes)
+}
+
+fn collect_wal_position_outcome(
+    stats: &mut PostgresStats,
+    client: &ConnectedClient,
+    server_version_num: i32,
+    outcomes: &mut Vec<ComponentOutcome>,
+) {
+    let source = "postgres.stats.wal_position";
+    let started_at = now_utc();
+    let failed = |status, code| {
+        ComponentOutcome::failed(source, status, code, None).with_timing(started_at, now_utc())
+    };
+    if server_version_num < WAL_POSITION_MIN_VERSION {
+        outcomes.push(failed(
+            CollectionStatus::Unsupported,
+            "not_in_server_version",
+        ));
+        return;
+    }
+    match collect_wal_position(client, server_version_num, outcomes) {
+        Ok(Some(position)) => {
+            stats.wal_position_bytes = Some(position);
+            outcomes.push(ComponentOutcome::collected(
+                source,
+                started_at,
+                now_utc(),
+                now_utc(),
+            ));
+        }
+        Ok(None) => outcomes.push(failed(CollectionStatus::Unsupported, "in_recovery")),
+        Err(_) => outcomes.push(failed(CollectionStatus::IoError, "wal_position_failed")),
+    }
 }
 
 fn collect_sub<T>(

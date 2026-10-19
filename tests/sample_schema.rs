@@ -14,6 +14,7 @@ const VARIANT: &[&str] = &[
     "postgres_database_stats",
     "postgres_standby_conflicts",
     "postgres_wal_stats",
+    "postgres_wal_position",
     "postgres_bgwriter_stats",
     "postgres_checkpointer_stats",
     "postgres_archiver_stats",

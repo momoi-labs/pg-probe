@@ -447,6 +447,14 @@ CREATE TABLE postgres_wal_stats (
     PRIMARY KEY (snapshot_id, sample_id),
     FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 ) STRICT;
+CREATE TABLE postgres_wal_position (
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
+    collected_at TEXT NOT NULL,
+    wal_position_bytes INTEGER NOT NULL,
+    PRIMARY KEY (snapshot_id, sample_id),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
+) STRICT;
 CREATE TABLE postgres_bgwriter_stats (
     snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
     sample_id INTEGER NOT NULL,

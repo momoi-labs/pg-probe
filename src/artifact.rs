@@ -470,6 +470,13 @@ impl crate::collector::Sink for PartialWriter {
             inventory,
             &collected_at,
         )?;
+        write_postgres_wal_position(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            inventory,
+            &collected_at,
+        )?;
         write_postgres_checkpointer_stats(
             &tx,
             &self.snapshot_id,
@@ -2056,6 +2063,25 @@ fn write_postgres_wal_stats(
                 stats.wal_sync_time_ms,
                 stats.stats_reset,
             ],
+        )
+        .map_err(ArtifactError::Sqlite)?;
+    }
+    Ok(())
+}
+
+fn write_postgres_wal_position(
+    tx: &rusqlite::Transaction,
+    snapshot_id: &str,
+    sample_id: i64,
+    inventory: &TargetInventory,
+    collected_at: &str,
+) -> Result<(), ArtifactError> {
+    if let Some(position) = inventory.stats.wal_position_bytes {
+        tx.execute(
+            "INSERT INTO postgres_wal_position (
+                snapshot_id, sample_id, collected_at, wal_position_bytes
+            ) VALUES (?1, ?2, ?3, ?4)",
+            params![snapshot_id, sample_id, collected_at, position],
         )
         .map_err(ArtifactError::Sqlite)?;
     }
