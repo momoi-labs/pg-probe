@@ -6,9 +6,8 @@ import { ChartPanel, Note, Panel } from './panels.tsx'
 
 const GIB = 1024 ** 3
 const MIB = 1024 ** 2
-const percent = (value: number) => `${value.toFixed(1)}%`
+const oneDecimal = (value: number) => value.toFixed(1)
 const gib = (value: number) => `${value.toFixed(1)} GiB`
-const mibPerSecond = (value: number) => `${value.toFixed(1)} MiB/s`
 const decimal = (value: number) => value.toFixed(2)
 
 // Kernel sector unit for /proc/diskstats, not the device block size.
@@ -58,14 +57,13 @@ function CpuUtilization() {
   return (
     <ChartPanel
       title="CPU utilization"
-      sub="by state, stacked"
       span={8}
       loading={isPending}
-      label="CPU busy by state (%)"
+      label="CPU utilization by state (%)"
       variant="stacked-area"
       min={0}
       max={100}
-      formatValue={percent}
+      formatValue={oneDecimal}
       data={chart}
       series={[
         { key: 'user', label: 'User' },
@@ -90,10 +88,9 @@ function LoadAverage() {
   return (
     <ChartPanel
       title="Load average"
-      sub="1m / 5m / 15m"
       span={4}
       loading={isPending || samples.isPending}
-      label="Load average"
+      label="Load average, 1 / 5 / 15 minutes"
       min={0}
       formatValue={decimal}
       data={chart}
@@ -141,14 +138,13 @@ function Memory() {
   return (
     <ChartPanel
       title="Memory"
-      sub="stacked to MemTotal"
       span={8}
       loading={isPending || samples.isPending}
-      label="Memory by use (GiB)"
+      label="Memory by use, up to MemTotal (GiB)"
       variant="stacked-area"
       min={0}
       max={max}
-      formatValue={gib}
+      formatValue={oneDecimal}
       data={chart}
       series={[
         { key: 'used', label: 'Used' },
@@ -177,7 +173,7 @@ function Swap() {
       loading={isPending || samples.isPending}
       label="Swap used (GiB)"
       min={0}
-      formatValue={gib}
+      formatValue={oneDecimal}
       data={chart}
       series={[{ key: 'used', label: 'Used' }]}
       note="SwapTotal − SwapFree"
@@ -216,12 +212,11 @@ function DiskThroughput() {
   return (
     <ChartPanel
       title="Disk throughput"
-      sub="all disks"
       span={6}
       loading={disks.isPending || samples.isPending}
-      label="Disk throughput (MiB/s)"
+      label="Disk throughput, all disks (MiB/s)"
       min={0}
-      formatValue={mibPerSecond}
+      formatValue={oneDecimal}
       data={chart}
       series={[
         { key: 'read', label: 'Read' },
@@ -279,13 +274,12 @@ function DiskUtilization() {
   return (
     <ChartPanel
       title="Disk utilization"
-      sub="share of time the device was busy, five busiest"
       span={6}
       loading={isPending}
-      label="Disk busy time (%)"
+      label="Disk busy time, five busiest disks (%)"
       min={0}
       max={100}
-      formatValue={percent}
+      formatValue={oneDecimal}
       data={chart}
       series={busiest.map((name) => ({ key: name, label: name }))}
       note="Change in io_milliseconds ÷ milliseconds between samples. On SSDs and NVMe with deep queues this nears 100% before the device is saturated."
@@ -327,12 +321,11 @@ function PressureStall() {
   return (
     <ChartPanel
       title="Pressure stall"
-      sub="some, 10s window"
       span={6}
       loading={isPending || samples.isPending}
-      label="Share of time some tasks stalled (%)"
+      label="Pressure stall, some tasks, 10 s average (%)"
       min={0}
-      formatValue={percent}
+      formatValue={oneDecimal}
       data={chart}
       series={[
         { key: 'cpu', label: 'CPU' },
@@ -407,12 +400,11 @@ function NetworkThroughput() {
   return (
     <ChartPanel
       title="Network throughput"
-      sub="all interfaces"
       span={6}
       loading={isPending || samples.isPending}
-      label="Network throughput (MiB/s)"
+      label="Network throughput, all interfaces (MiB/s)"
       min={0}
-      formatValue={mibPerSecond}
+      formatValue={oneDecimal}
       data={chart}
       series={[
         { key: 'received', label: 'Received' },
@@ -433,10 +425,9 @@ function Processes() {
   return (
     <ChartPanel
       title="Processes"
-      sub="running and blocked"
       span={6}
       loading={isPending || samples.isPending}
-      label="Processes"
+      label="Processes running and blocked"
       min={0}
       formatValue={(value) => value.toFixed(0)}
       data={chart}

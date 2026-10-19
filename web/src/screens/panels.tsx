@@ -68,8 +68,13 @@ export function Note({ children }: { children: ReactNode }) {
   return <p className="muted">{children}</p>
 }
 
-type ChartPanelProps = Omit<PanelProps, 'children'> & {
-  // The figure label carries the unit, for example "CPU by state (%)".
+type ChartPanelProps = {
+  // Names the panel's anchor, which Overview tiles link to.
+  title: string
+  span: Span
+  loading?: boolean
+  // The one visible title: what the chart shows and its unit, for example
+  // "CPU utilization by state (%)". Axis values carry no unit.
   label: string
   data: ChartSample[]
   series: ChartSeries[]
@@ -80,9 +85,13 @@ type ChartPanelProps = Omit<PanelProps, 'children'> & {
   note?: ReactNode
 }
 
-// A time series panel. Every chart on the page shares one sync id, so
-// inspecting a sample in one panel inspects the same time in the others.
+// A time series panel. The chart caption is the panel's title, so the card
+// has no header of its own. Every chart shares one sync id, so inspecting a
+// sample in one panel inspects the same time in the others.
 export function ChartPanel({
+  title,
+  span,
+  loading,
   label,
   data,
   series,
@@ -91,32 +100,39 @@ export function ChartPanel({
   max,
   formatValue,
   note,
-  ...panel
 }: ChartPanelProps) {
   // Kiso charts take one to five series. None means the artifact holds no
   // data for this panel, for example PostgreSQL panels in a Linux capture.
-  if (series.length === 0) {
+  if (!loading && series.length === 0) {
     return (
-      <Panel {...panel}>
+      <Panel title={label} span={span}>
         <Note>Not recorded in this artifact.</Note>
       </Panel>
     )
   }
   return (
-    <Panel {...panel}>
-      <Chart
-        label={label}
-        data={data}
-        series={series}
-        variant={variant}
-        legend={panel.span >= 6 ? 'table' : 'inline'}
-        min={min}
-        max={max}
-        syncId="session"
-        formatTime={formatTime}
-        formatValue={formatValue}
-      />
-      {note && <Note>{note}</Note>}
-    </Panel>
+    <DashboardPanel span={span} id={panelId(title)} className="panel-anchor">
+      <Card>
+        <CardContent>
+          {loading ? (
+            <Skeleton variant="block" />
+          ) : (
+            <Chart
+              label={label}
+              data={data}
+              series={series}
+              variant={variant}
+              legend="inline"
+              min={min}
+              max={max}
+              syncId="session"
+              formatTime={formatTime}
+              formatValue={formatValue}
+            />
+          )}
+          {note && <Note>{note}</Note>}
+        </CardContent>
+      </Card>
+    </DashboardPanel>
   )
 }

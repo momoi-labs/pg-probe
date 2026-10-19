@@ -17,7 +17,6 @@ function RowsPanel() {
   return (
     <ChartPanel
       title="Rows"
-      sub="read and written per second"
       span={6}
       loading={isPending || samples.isPending}
       label="Rows per second"

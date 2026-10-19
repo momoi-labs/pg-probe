@@ -83,4 +83,6 @@ export function lastValue(data: ChartSample[], key: string): number | null {
   return null
 }
 
-export const formatTime = (value: number) => new Date(value).toISOString().slice(11, 19)
+// Hours and minutes, in UTC like every time in the console. The exact-values
+// table keeps full timestamps.
+export const formatTime = (value: number) => new Date(value).toISOString().slice(11, 16)

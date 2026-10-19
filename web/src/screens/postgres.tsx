@@ -24,9 +24,8 @@ import { deltas, points, rates, useSamples, type Values } from '../series.ts'
 import { ChartPanel, Note, Panel } from './panels.tsx'
 
 const MIB = 1024 ** 2
-const percent = (value: number) => `${value.toFixed(1)}%`
-const perSecond = (value: number) => `${value.toFixed(1)}/s`
-const mibPerSecond = (value: number) => `${value.toFixed(2)} MiB/s`
+const oneDecimal = (value: number) => value.toFixed(1)
+const twoDecimals = (value: number) => value.toFixed(2)
 
 // Before PostgreSQL 10, pg_stat_activity lists only client backends, and the
 // probe records them as client_backend. Older artifacts stored "<invalid>".
@@ -67,10 +66,9 @@ function ConnectionsByState() {
   return (
     <ChartPanel
       title="Connections by state"
-      sub="client backends, stacked"
       span={8}
       loading={activity.isPending || samples.isPending}
-      label="Client backends by state"
+      label="Client connections by state"
       variant="stacked-area"
       min={0}
       formatValue={(value) => value.toFixed(0)}
@@ -107,12 +105,11 @@ function CacheHitRatio() {
   return (
     <ChartPanel
       title="Cache hit ratio"
-      sub="per interval"
       span={4}
       loading={stats.isPending}
-      label="Cache hit ratio (%)"
+      label="Cache hit ratio per interval (%)"
       max={100}
-      formatValue={percent}
+      formatValue={oneDecimal}
       data={chart}
       series={[{ key: 'ratio', label: 'All databases' }]}
       note="Δblks_hit ÷ (Δblks_hit + Δblks_read) between samples"
@@ -126,12 +123,11 @@ function Transactions() {
   return (
     <ChartPanel
       title="Transactions"
-      sub="commits and rollbacks per second"
       span={6}
       loading={stats.isPending}
       label="Transactions per second"
       min={0}
-      formatValue={perSecond}
+      formatValue={oneDecimal}
       data={chart}
       series={[
         { key: 'xact_commit', label: 'Commits' },
@@ -155,7 +151,7 @@ function TemporaryFiles() {
       loading={stats.isPending}
       label="Temporary files written (MiB/s)"
       min={0}
-      formatValue={mibPerSecond}
+      formatValue={twoDecimals}
       data={chart}
       series={[{ key: 'temp_bytes', label: 'All databases' }]}
       note="Change in temp_bytes ÷ seconds"
@@ -225,9 +221,9 @@ function WalAndCheckpoints() {
       loading={
         samples.isPending || bgwriter.isPending || checkpointer.isPending || wal.isPending
       }
-      label="Bytes written (MiB/s)"
+      label="WAL and buffer writes (MiB/s)"
       min={0}
-      formatValue={mibPerSecond}
+      formatValue={twoDecimals}
       data={chart}
       series={series}
       note={`Buffers written per second × block size (${blockSize} bytes).${hasWal ? ` WAL from the change in ${wal.source}.` : ' No WAL figure in this artifact.'}`}
