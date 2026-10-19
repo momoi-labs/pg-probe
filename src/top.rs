@@ -961,14 +961,13 @@ impl App {
         let body = if self.compact {
             let [body, legend] =
                 Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(body);
-            frame.render_widget(
-                Line::from(
-                    " STATE: act = active · txn = idle in transaction · \
-                     abrt = idle in transaction (aborted)",
-                )
-                .dark_gray(),
-                legend,
-            );
+            let text = if self.view == View::Vacuum {
+                " TYPE: wrap = to prevent wraparound · man = manual"
+            } else {
+                " STATE: act = active · txn = idle in transaction · \
+                 abrt = idle in transaction (aborted)"
+            };
+            frame.render_widget(Line::from(text).dark_gray(), legend);
             body
         } else {
             body
@@ -1381,13 +1380,19 @@ impl App {
         // Before 9.6 there is no phase or progress, so those columns go
         // and the query gets their room.
         let progress = has_vacuum_progress(self.server.version_num);
-        let mut titles = vec!["PID", "DATABASE", "TABLE", "TYPE"];
-        let mut widths = vec![
-            Constraint::Length(7),
-            Constraint::Length(16),
-            Constraint::Length(32),
-            Constraint::Length(10),
-        ];
+        let mut titles = vec!["PID"];
+        let mut widths = vec![Constraint::Length(7)];
+        if self.compact {
+            titles.extend(["TABLE@DATABASE", "TYPE"]);
+            widths.extend([Constraint::Length(36), Constraint::Length(4)]);
+        } else {
+            titles.extend(["DATABASE", "TABLE", "TYPE"]);
+            widths.extend([
+                Constraint::Length(16),
+                Constraint::Length(32),
+                Constraint::Length(10),
+            ]);
+        }
         if progress {
             titles.push("PHASE");
             widths.push(Constraint::Length(24));
@@ -1423,15 +1428,27 @@ impl App {
                     "auto" => Style::new().yellow(),
                     _ => Style::new(),
                 };
-                let mut cells = vec![
-                    Cell::from(Span::styled(backend.pid.clone(), Style::new().cyan())),
-                    Cell::from(Span::styled(
-                        backend.database.clone(),
-                        Style::new().dark_gray().bold(),
-                    )),
-                    Cell::from(or_dash(&vacuum.table).to_owned()),
-                    Cell::from(Span::styled(vacuum.kind.clone(), kind_style)),
-                ];
+                let mut cells = vec![Cell::from(Span::styled(
+                    backend.pid.clone(),
+                    Style::new().cyan(),
+                ))];
+                let database =
+                    Span::styled(backend.database.clone(), Style::new().dark_gray().bold());
+                if self.compact {
+                    cells.extend([
+                        Cell::from(Line::from(vec![
+                            Span::raw(format!("{}@", or_dash(&vacuum.table))),
+                            database,
+                        ])),
+                        Cell::from(Span::styled(short_kind(&vacuum.kind), kind_style)),
+                    ]);
+                } else {
+                    cells.extend([
+                        Cell::from(database),
+                        Cell::from(or_dash(&vacuum.table).to_owned()),
+                        Cell::from(Span::styled(vacuum.kind.clone(), kind_style)),
+                    ]);
+                }
                 if progress {
                     cells.push(Cell::from(or_dash(&vacuum.phase).to_owned()));
                 }
@@ -2003,6 +2020,16 @@ fn short_state(state: &str) -> &str {
     }
 }
 
+/// The compact vacuum view's types. The legend under the list spells them
+/// out.
+fn short_kind(kind: &str) -> &str {
+    match kind {
+        "wraparound" => "wrap",
+        "manual" => "man",
+        other => other,
+    }
+}
+
 fn state_style(state: &str) -> Style {
     match state {
         "active" => Style::new().green(),
@@ -2517,6 +2544,27 @@ mod tests {
         let screen = screen(&mut app);
         assert!(!screen.contains("PHASE"), "{screen}");
         assert!(screen.contains("public.t "), "{screen}");
+    }
+
+    #[test]
+    fn compact_vacuum_view_merges_table_and_database() {
+        let mut app = app(View::Vacuum);
+        app.compact = true;
+        app.vacuums = vec![Vacuum {
+            backend: Backend {
+                pid: "900".to_owned(),
+                database: "app".to_owned(),
+                ..Backend::default()
+            },
+            table: "public.t".to_owned(),
+            kind: "wraparound".to_owned(),
+            ..Vacuum::default()
+        }];
+        let screen = screen(&mut app);
+        assert!(screen.contains("TABLE@DATABASE"), "{screen}");
+        assert!(screen.contains("public.t@app"), "{screen}");
+        assert!(screen.contains(" wrap "), "{screen}");
+        assert!(screen.contains("wrap = to prevent wraparound"), "{screen}");
     }
 
     #[test]

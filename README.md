@@ -152,7 +152,7 @@ pg-probe top -h db.example.com -U monitor -d app -i 5
 | `Space` | Pause or resume the refresh |
 | `Tab` | Show the selected query, formatted, under the list |
 | `t` | Show the blocking view as a tree of who waits on whom |
-| `c` | Compact columns: user@database and short states, more room for the query |
+| `c` | Compact columns: user@database (table@database in the vacuum view) and short states and types, more room for the query |
 | `g` | Group the list by state, database, user, or none |
 | `h` | Two-line header with the active and waiting sessions of the last refreshes |
 | `?` | List every key |
