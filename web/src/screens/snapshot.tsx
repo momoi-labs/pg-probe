@@ -3,6 +3,7 @@ import {
   AlertContent,
   AlertDescription,
   AlertTitle,
+  Disclosure,
   PageHeader,
   PageHeaderDescription,
   PageHeaderTitle,
@@ -111,10 +112,33 @@ export function SnapshotLayout() {
 
   const { snapshot, collector_outcomes: outcomes } = data
   const missing = notCollected(outcomes)
+  // Failures can change how the rest of the page reads, so they stay in view.
+  // Sources this host or server version lacks are expected; each panel that
+  // needs one already says so, and the full list stays one click away.
+  const failed = missing.filter((group) => group.status !== 'unsupported')
+  const unsupported = missing.filter((group) => group.status === 'unsupported')
   const took = duration(snapshot.started_at_utc, snapshot.finished_at_utc)
   // Distinct sources, not one per sample: a source that is unsupported in a
   // 19-sample session is one missing source.
-  const missingCount = new Set(missing.map((group) => group.source)).size
+  const distinct = (groups: OutcomeGroup[]) => new Set(groups.map((group) => group.source)).size
+  const sourceList = (groups: OutcomeGroup[]) => (
+    <ul>
+      {groups.map((group) => (
+        <li key={`${group.source}|${group.status}|${group.errorCode}`}>
+          <code>{group.source}</code>: {group.status}
+          {group.errorCode && (
+            <>
+              {' '}
+              (<code>{group.errorCode}</code>)
+            </>
+          )}
+          {sampleCount != null && sampleCount > 1 && group.count === sampleCount
+            ? ', every sample'
+            : group.count > 1 && ` ×${group.count}`}
+        </li>
+      ))}
+    </ul>
+  )
 
   return (
     <>
@@ -135,36 +159,28 @@ export function SnapshotLayout() {
           {sampleCount != null && ` · ${sampleCount} ${sampleCount === 1 ? 'sample' : 'samples'}`}
         </PageHeaderDescription>
       </PageHeader>
-      {missing.length > 0 && (
-        <Alert variant={snapshot.status === 'partial' ? 'warning' : 'info'}>
+      {failed.length > 0 && (
+        <Alert variant="warning">
           <AlertContent>
             <AlertTitle>
-              {missingCount === 1
-                ? '1 source was not collected'
-                : `${missingCount} sources were not collected`}
+              {distinct(failed) === 1
+                ? '1 source failed'
+                : `${distinct(failed)} sources failed`}
             </AlertTitle>
             <AlertDescription>
-              Each source below has no data in this artifact. Panels that read it show
-              an unknown value.
+              These sources have no data in this artifact. Panels that read them show an
+              unknown value.
             </AlertDescription>
-            <ul>
-              {missing.map((group) => (
-                <li key={`${group.source}|${group.status}|${group.errorCode}`}>
-                  <code>{group.source}</code>: {group.status}
-                  {group.errorCode && (
-                    <>
-                      {' '}
-                      (<code>{group.errorCode}</code>)
-                    </>
-                  )}
-                  {sampleCount != null && sampleCount > 1 && group.count === sampleCount
-                    ? ', every sample'
-                    : group.count > 1 && ` ×${group.count}`}
-                </li>
-              ))}
-            </ul>
+            {sourceList(failed)}
           </AlertContent>
         </Alert>
+      )}
+      {unsupported.length > 0 && (
+        <Disclosure
+          summary={`${distinct(unsupported)} ${distinct(unsupported) === 1 ? 'source is' : 'sources are'} not available on this host or server version`}
+        >
+          {sourceList(unsupported)}
+        </Disclosure>
       )}
       <Outlet />
     </>
