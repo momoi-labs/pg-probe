@@ -1062,7 +1062,7 @@ impl App {
         frame.render_widget(
             Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>()).block(
                 palette::panel()
-                    .title(Line::from(title).bold())
+                    .title(Line::from(title).style(palette::strong()))
                     .title_bottom(Line::from(" Tab hides ").style(palette::muted())),
             ),
             area,
