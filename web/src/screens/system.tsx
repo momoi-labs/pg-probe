@@ -53,11 +53,11 @@ export function useCpuShares() {
   return { chart, isPending: isPending || samples.isPending }
 }
 
-function CpuUtilisation() {
+function CpuUtilization() {
   const { chart, isPending } = useCpuShares()
   return (
     <ChartPanel
-      title="CPU utilisation"
+      title="CPU utilization"
       sub="by state, stacked"
       span={8}
       loading={isPending}
@@ -261,7 +261,7 @@ export function useDiskBusy() {
   return { all, names: disks.names, isPending: disks.isPending || samples.isPending }
 }
 
-function DiskUtilisation() {
+function DiskUtilization() {
   const { all, names, isPending } = useDiskBusy()
   // A chart holds five series: keep the five busiest disks.
   const busiest = [...names]
@@ -278,7 +278,7 @@ function DiskUtilisation() {
   }))
   return (
     <ChartPanel
-      title="Disk utilisation"
+      title="Disk utilization"
       sub="share of time the device was busy, five busiest"
       span={6}
       loading={isPending}
@@ -386,12 +386,12 @@ export function System() {
   return (
     <Disclosure summary="System" open>
       <DashboardGrid>
-        <CpuUtilisation />
+        <CpuUtilization />
         <LoadAverage />
         <Memory />
         <Swap />
         <DiskThroughput />
-        <DiskUtilisation />
+        <DiskUtilization />
         <GapPanel title="Network throughput" sub="primary interface" span={6} gap="no collector">
           No collector reads /proc/net/dev yet. The plan is a new linux.network collector.
         </GapPanel>
