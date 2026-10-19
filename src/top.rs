@@ -23,6 +23,7 @@ use ratatui::style::{Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Cell, Clear, Paragraph, Row, Table, TableState, Wrap};
 use ratatui::{DefaultTerminal, Frame};
+use sqlformat::{Dialect, FormatOptions, QueryParams};
 use thiserror::Error;
 
 use crate::postgres::stats::capability::{has_backend_type, has_wait_event_type};
@@ -200,7 +201,8 @@ pub struct Details {
     pub xmin: String,
     pub query: String,
     /// The query exactly as the server holds it, line breaks included. It
-    /// is never drawn, only sent to `EXPLAIN`.
+    /// is sent to `EXPLAIN`, and drawn only after formatting strips control
+    /// characters.
     pub raw_query: String,
 }
 
@@ -1062,7 +1064,11 @@ impl App {
             "Query",
             Style::new().cyan().bold(),
         )));
-        lines.push(Line::from(details.query.clone()));
+        lines.extend(
+            query_lines(&details, self.server.query_size_limit)
+                .into_iter()
+                .map(Line::from),
+        );
 
         let area = frame.area();
         frame.render_widget(Clear, area);
@@ -1466,6 +1472,24 @@ fn fetch_blocks(
 /// Decodes a server value for display: whitespace collapses to single spaces
 /// and control characters are dropped, so text from the server can neither
 /// break the layout nor send escape sequences to the terminal.
+/// Lays the query out one clause per line for the details panel. Text the
+/// server cut at `track_activity_query_size` stays on one line, since the
+/// formatter would indent a broken statement.
+fn query_lines(details: &Details, size_limit: usize) -> Vec<String> {
+    let raw = &details.raw_query;
+    if raw.trim().is_empty() || (size_limit > 0 && raw.len() + 1 >= size_limit) {
+        return vec![details.query.clone()];
+    }
+    let options = FormatOptions {
+        dialect: Dialect::PostgreSql,
+        ..FormatOptions::default()
+    };
+    sqlformat::format(raw, &QueryParams::None, &options)
+        .lines()
+        .map(|line| line.chars().filter(|c| !c.is_control()).collect())
+        .collect()
+}
+
 fn text_of(value: &[u8]) -> String {
     single_line(&String::from_utf8_lossy(value))
 }
@@ -1535,6 +1559,20 @@ mod tests {
             text_of(b"UPDATE t\n  SET x = 1\x1b[2J"),
             "UPDATE t SET x = 1[2J"
         );
+    }
+
+    #[test]
+    fn details_query_is_formatted_unless_the_server_cut_it() {
+        let details = Details {
+            query: "SELECT a FROM t WHERE b = 1".to_owned(),
+            raw_query: "select a from t where b = 1\x1b[2J".to_owned(),
+            ..Details::default()
+        };
+        let lines = query_lines(&details, 1024);
+        assert_eq!(lines[0], "select");
+        assert!(lines.contains(&"  a".to_owned()), "{lines:?}");
+        assert!(lines.iter().all(|line| !line.contains('\x1b')));
+        assert_eq!(query_lines(&details, 32), vec![details.query.clone()]);
     }
 
     #[test]
