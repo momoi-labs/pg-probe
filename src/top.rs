@@ -111,6 +111,11 @@ WHERE pid = {pid}",
     ))
 }
 
+/// Whether `pg_stat_progress_vacuum` exists (PG 9.6+).
+const fn has_vacuum_progress(server_version_num: i32) -> bool {
+    server_version_num >= 90600
+}
+
 /// Builds the vacuum view's `SELECT`: every manual and autovacuum run in
 /// progress. The table name resolves only in the connected database, since
 /// `regclass` reads the local catalog; other databases show the table OID.
@@ -128,8 +133,7 @@ fn vacuum_sql(server_version_num: i32) -> String {
             CASE WHEN a.query LIKE '%(to prevent wraparound)' THEN 'wraparound' ELSE 'auto' END \
         ELSE 'manual' END"
     );
-    // pg_stat_progress_vacuum arrived in PG 9.6, with wait_event_type.
-    if has_wait_event_type(server_version_num).is_supported() {
+    if has_vacuum_progress(server_version_num) {
         format!(
             "\
 SELECT a.pid, a.datname, a.usename, a.state, a.wait_event_type, a.wait_event, \
@@ -1374,14 +1378,20 @@ impl App {
     }
 
     fn draw_vacuum_table(&mut self, frame: &mut Frame, area: Rect) {
-        let mut titles = vec!["PID", "DATABASE", "TABLE", "TYPE", "PHASE"];
+        // Before 9.6 there is no phase or progress, so those columns go
+        // and the query gets their room.
+        let progress = has_vacuum_progress(self.server.version_num);
+        let mut titles = vec!["PID", "DATABASE", "TABLE", "TYPE"];
         let mut widths = vec![
             Constraint::Length(7),
             Constraint::Length(16),
-            Constraint::Length(24),
+            Constraint::Length(32),
             Constraint::Length(10),
-            Constraint::Length(24),
         ];
+        if progress {
+            titles.push("PHASE");
+            widths.push(Constraint::Length(24));
+        }
         if self.os.is_some() {
             titles.extend(["CPU%", "READ/s", "WRITE/s"]);
             widths.extend([
@@ -1390,10 +1400,12 @@ impl App {
                 Constraint::Length(9),
             ]);
         }
-        titles.extend(["SCANNED", "IDX", "TIME+", "WAITING", "QUERY"]);
+        if progress {
+            titles.extend(["SCANNED", "IDX"]);
+            widths.extend([Constraint::Length(7), Constraint::Length(3)]);
+        }
+        titles.extend(["TIME+", "WAITING", "QUERY"]);
         widths.extend([
-            Constraint::Length(7),
-            Constraint::Length(3),
             Constraint::Length(10),
             Constraint::Length(22),
             Constraint::Fill(1),
@@ -1419,8 +1431,10 @@ impl App {
                     )),
                     Cell::from(or_dash(&vacuum.table).to_owned()),
                     Cell::from(Span::styled(vacuum.kind.clone(), kind_style)),
-                    Cell::from(or_dash(&vacuum.phase).to_owned()),
                 ];
+                if progress {
+                    cells.push(Cell::from(or_dash(&vacuum.phase).to_owned()));
+                }
                 if let Some(os) = &self.os {
                     let rate = os.rates.get(&backend.pid);
                     let bytes = |value: Option<f64>| {
@@ -1436,9 +1450,13 @@ impl App {
                         right(bytes(rate.and_then(|rate| rate.write_per_s))),
                     ]);
                 }
+                if progress {
+                    cells.extend([
+                        right(vacuum.scanned()),
+                        right(or_dash(&vacuum.index_passes).to_owned()),
+                    ]);
+                }
                 cells.extend([
-                    right(vacuum.scanned()),
-                    right(or_dash(&vacuum.index_passes).to_owned()),
                     Cell::from(
                         Line::from(Span::styled(
                             backend.duration_s.map(format_duration).unwrap_or_default(),
@@ -2071,6 +2089,22 @@ fn backend_of(row: &[Vec<u8>]) -> Backend {
     }
 }
 
+/// The table an autovacuum worker names in its query, such as `public.t`
+/// in `autovacuum: VACUUM ANALYZE public.t (to prevent wraparound)`. The
+/// name may hold spaces inside quotes, so it is everything after the
+/// keywords.
+fn autovacuum_table(query: &str) -> Option<String> {
+    let mut rest = query.strip_prefix("autovacuum: ")?;
+    rest = rest
+        .strip_suffix(" (to prevent wraparound)")
+        .unwrap_or(rest);
+    for keyword in ["VACUUM ", "ANALYZE "] {
+        rest = rest.strip_prefix(keyword).unwrap_or(rest);
+    }
+    let name = rest.trim();
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
 fn fetch_vacuums(client: &ConnectedClient, sql: &str) -> Result<Vec<Vacuum>, AdapterError> {
     let rows = client.exec_bounded_rows(sql, SOURCE, &mut Vec::new())?;
     Ok(rows
@@ -2082,9 +2116,18 @@ fn fetch_vacuums(client: &ConnectedClient, sql: &str) -> Result<Vec<Vacuum>, Ada
                     .map(|value| text_of(value))
                     .unwrap_or_default()
             };
+            let backend = backend_of(row);
+            // The server resolves names only in the connected database and
+            // has none before 9.6; an autovacuum's query names its table.
+            let mut table = text(8);
+            if table.is_empty() || table.bytes().all(|byte| byte.is_ascii_digit()) {
+                if let Some(name) = autovacuum_table(&backend.query) {
+                    table = name;
+                }
+            }
             Vacuum {
-                backend: backend_of(row),
-                table: text(8),
+                backend,
+                table,
                 kind: text(9),
                 phase: text(10),
                 heap_scanned: text(11).parse().ok(),
@@ -2446,8 +2489,40 @@ mod tests {
     }
 
     #[test]
+    fn autovacuum_queries_name_their_table() {
+        assert_eq!(
+            autovacuum_table("autovacuum: VACUUM public.t (to prevent wraparound)").as_deref(),
+            Some("public.t")
+        );
+        assert_eq!(
+            autovacuum_table("autovacuum: VACUUM ANALYZE public.\"my t\"").as_deref(),
+            Some("public.\"my t\"")
+        );
+        assert_eq!(autovacuum_table("VACUUM;"), None);
+    }
+
+    #[test]
+    fn vacuum_view_drops_progress_columns_before_9_6() {
+        let mut app = app(View::Vacuum);
+        app.vacuums = vec![Vacuum {
+            backend: Backend {
+                pid: "900".to_owned(),
+                query: "autovacuum: VACUUM public.t (to prevent wraparound)".to_owned(),
+                ..Backend::default()
+            },
+            table: "public.t".to_owned(),
+            kind: "wraparound".to_owned(),
+            ..Vacuum::default()
+        }];
+        let screen = screen(&mut app);
+        assert!(!screen.contains("PHASE"), "{screen}");
+        assert!(screen.contains("public.t "), "{screen}");
+    }
+
+    #[test]
     fn vacuum_view_lists_progress_and_finds_autovacuum_workers() {
         let mut app = app(View::Vacuum);
+        app.server.version_num = 170000;
         app.vacuums = vec![Vacuum {
             backend: Backend {
                 pid: "900".to_owned(),
