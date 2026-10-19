@@ -27,7 +27,6 @@ file has a bug.
 | `GapPanel` | A panel the artifact cannot draw yet. The badge names the missing work: `needs sampling`, `no collector`, `needs schema change` or `blocked` |
 | `ChartPanel` | A time series panel: a Kiso `Chart` in a `Panel`, on the shared `session` sync id |
 | `Note` | Muted text that says why a value is missing. Always visible |
-| `Formula` | A collapsed "How it's calculated" disclosure with a value's formula |
 
 ## Product rules
 
@@ -36,9 +35,10 @@ file has a bug.
   corner marks, default visual style and app shell, frame scope `panels`,
   background `dots`. `data-theme` stays off so the console follows the system
   theme.
-- Show facts and derived values only. Every derived value has its formula one
-  click away, in a collapsed "How it's calculated" disclosure. No thresholds,
-  danger markers or health colors for now.
+- Show facts and derived values only. The screens carry no formulas: every
+  derived value is documented in `docs/console-metrics.md`, which changes with
+  the screen that shows the value. No thresholds, danger markers or health
+  colors for now.
 - A metric that the artifact cannot answer shows the unknown treatment and
   says why: not recorded, or it needs more than one sample.
 - Charts use one point per sample, on the timestamps from `/samples`. Rates

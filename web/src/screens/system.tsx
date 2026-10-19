@@ -2,7 +2,7 @@ import { DashboardGrid, Disclosure, Meter } from '@momoi-labs/kiso-react'
 import type { Row } from '../api.ts'
 import { missingReason, num, useOutcomes, useTable } from '../artifact.ts'
 import { deltas, points, rates, useSamples, type Values } from '../series.ts'
-import { ChartPanel, Formula, Note, Panel } from './panels.tsx'
+import { ChartPanel, Note, Panel } from './panels.tsx'
 
 const GIB = 1024 ** 3
 const MIB = 1024 ** 2
@@ -72,7 +72,6 @@ function CpuUtilization() {
         { key: 'steal', label: 'Steal' },
         { key: 'other', label: 'Nice, IRQ, softirq' },
       ]}
-      note="Change in /proc/stat ticks between samples ÷ change in all ticks. The mean across CPUs, not the sum."
     />
   )
 }
@@ -153,7 +152,6 @@ function Memory() {
         { key: 'buffers', label: 'Buffers' },
         { key: 'free', label: 'Free' },
       ]}
-      note="From /proc/meminfo. Page cache is Cached − Shmem + SReclaimable, because Cached already includes Shmem. Used is MemTotal − MemFree − Buffers − Cached − SReclaimable. Shared memory includes shared_buffers."
     />
   )
 }
@@ -176,7 +174,6 @@ function Swap() {
       formatValue={oneDecimal}
       data={chart}
       series={[{ key: 'used', label: 'Used' }]}
-      note="SwapTotal − SwapFree"
     />
   )
 }
@@ -222,7 +219,6 @@ function DiskThroughput() {
         { key: 'read', label: 'Read' },
         { key: 'write', label: 'Write' },
       ]}
-      note="Change in sectors read and written × 512 bytes ÷ seconds between samples, summed over whole disks."
     />
   )
 }
@@ -282,7 +278,6 @@ function DiskUtilization() {
       formatValue={oneDecimal}
       data={chart}
       series={busiest.map((name) => ({ key: name, label: name }))}
-      note="Change in io_milliseconds ÷ milliseconds between samples. On SSDs and NVMe with deep queues this nears 100% before the device is saturated."
     />
   )
 }
@@ -332,7 +327,6 @@ function PressureStall() {
         { key: 'memory', label: 'Memory' },
         { key: 'io', label: 'I/O' },
       ]}
-      note="avg10 from /proc/pressure"
     />
   )
 }
@@ -361,10 +355,6 @@ function FilesystemUsage() {
               )
             })}
           </div>
-          <Formula>
-            statvfs on local disk filesystems, read once. Network filesystems and /home are not
-            recorded. Used counts space reserved for root.
-          </Formula>
         </>
       ) : (
         <Note>
@@ -410,7 +400,6 @@ function NetworkThroughput() {
         { key: 'received', label: 'Received' },
         { key: 'sent', label: 'Sent' },
       ]}
-      note={`Change in /proc/net/dev bytes ÷ seconds, summed over ${interfaces.join(', ')}. Loopback and container links are not recorded.`}
     />
   )
 }
@@ -435,7 +424,6 @@ function Processes() {
         { key: 'running', label: 'Running' },
         { key: 'blocked', label: 'Blocked on I/O' },
       ]}
-      note="procs_running and procs_blocked from /proc/stat"
     />
   )
 }

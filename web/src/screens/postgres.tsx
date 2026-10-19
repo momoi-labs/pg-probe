@@ -21,7 +21,7 @@ import {
 } from '../artifact.ts'
 import { bytes } from '../format.tsx'
 import { deltas, points, rates, useSamples, type Values } from '../series.ts'
-import { ChartPanel, Formula, Note, Panel } from './panels.tsx'
+import { ChartPanel, Note, Panel } from './panels.tsx'
 
 const MIB = 1024 ** 2
 const oneDecimal = (value: number) => value.toFixed(1)
@@ -74,7 +74,6 @@ function ConnectionsByState() {
       formatValue={(value) => value.toFixed(0)}
       data={chart}
       series={series}
-      note="Count of pg_stat_activity rows per state, aggregated by the probe"
     />
   )
 }
@@ -112,7 +111,6 @@ function CacheHitRatio() {
       formatValue={oneDecimal}
       data={chart}
       series={[{ key: 'ratio', label: 'All databases' }]}
-      note="Δblks_hit ÷ (Δblks_hit + Δblks_read) between samples"
     />
   )
 }
@@ -133,7 +131,6 @@ function Transactions() {
         { key: 'xact_commit', label: 'Commits' },
         { key: 'xact_rollback', label: 'Rollbacks' },
       ]}
-      note="Change in xact_commit and xact_rollback ÷ seconds, all databases"
     />
   )
 }
@@ -154,7 +151,6 @@ function TemporaryFiles() {
       formatValue={twoDecimals}
       data={chart}
       series={[{ key: 'temp_bytes', label: 'All databases' }]}
-      note="Change in temp_bytes ÷ seconds"
     />
   )
 }
@@ -226,7 +222,6 @@ function WalAndCheckpoints() {
       formatValue={twoDecimals}
       data={chart}
       series={series}
-      note={`Buffers written per second × block size (${blockSize} bytes).${hasWal ? ` WAL from the change in ${wal.source}.` : ' No WAL figure in this artifact.'}`}
     />
   )
 }
@@ -304,7 +299,6 @@ function DatabaseSize() {
               value: num(row, 'size_bytes'),
             }))}
           />
-          <Formula>pg_database_size(), read once per snapshot</Formula>
         </>
       ) : (
         <Note>Not recorded in this artifact.</Note>
@@ -337,10 +331,6 @@ function LargestTables() {
               value: (pages(row) * blockSize) / 1024 ** 3,
             }))}
           />
-          <Formula>
-            relpages × block size, as of the last ANALYZE or VACUUM, read once. Estimates, not
-            pg_total_relation_size().
-          </Formula>
         </>
       ) : (
         <Note>
@@ -395,10 +385,6 @@ function DeadTuples() {
             })}
           </TableBody>
         </Table>
-        <Formula>
-          n_dead_tup and n_live_tup from pg_stat_user_tables, read once. These are estimates kept
-          by the statistics collector.
-        </Formula>
       </>
     )
   } else if (isPending) {

@@ -27,7 +27,6 @@ function RowsPanel() {
         { key: 'read', label: 'Read' },
         { key: 'written', label: 'Written' },
       ]}
-      note="Read is Δtup_returned. Written is Δ(tup_inserted + tup_updated + tup_deleted). Per database, not per statement."
     />
   )
 }

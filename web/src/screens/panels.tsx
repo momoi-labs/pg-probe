@@ -8,7 +8,6 @@ import {
   CardHeader,
   CardTitle,
   DashboardPanel,
-  Disclosure,
   Skeleton,
   type ChartSample,
   type ChartSeries,
@@ -69,16 +68,6 @@ export function Note({ children }: { children: ReactNode }) {
   return <p className="muted">{children}</p>
 }
 
-// How a value is derived. Collapsed, like the exact values: it answers a
-// reader who wants to check the number without crowding every panel.
-export function Formula({ children }: { children: ReactNode }) {
-  return (
-    <Disclosure summary="How it's calculated">
-      <p className="muted">{children}</p>
-    </Disclosure>
-  )
-}
-
 type ChartPanelProps = {
   // Names the panel's anchor, which Overview tiles link to.
   title: string
@@ -93,7 +82,6 @@ type ChartPanelProps = {
   min?: number
   max?: number
   formatValue?: (value: number) => string
-  note?: ReactNode
 }
 
 // A time series panel. The chart caption is the panel's title, so the card
@@ -110,7 +98,6 @@ export function ChartPanel({
   min,
   max,
   formatValue,
-  note,
 }: ChartPanelProps) {
   // Kiso charts take one to five series. None means the artifact holds no
   // data for this panel, for example PostgreSQL panels in a Linux capture.
@@ -141,7 +128,6 @@ export function ChartPanel({
               formatValue={formatValue}
             />
           )}
-          {note && <Formula>{note}</Formula>}
         </CardContent>
       </Card>
     </DashboardPanel>
