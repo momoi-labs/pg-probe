@@ -45,6 +45,11 @@ mise install
 mise run build
 ```
 
+`mise run build` first builds the review console in `web/` with pnpm, and
+the binary embeds it, so `pg-probe analyze` needs nothing else at run time.
+A binary built without `web/dist` still works and serves a page that says how
+to build the console.
+
 The executable is produced at
 `target/x86_64-unknown-linux-musl/release/pg-probe`. A plain
 `cargo build --release` links against the local glibc and is meant for

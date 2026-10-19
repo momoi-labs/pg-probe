@@ -174,9 +174,13 @@ fn analyze_serves_schema_listing_detail_rows_and_console() {
     );
     assert_eq!(status, 400, "a filter on an unknown column is rejected");
 
-    let (status, body) = get(port, "/console/");
-    assert_eq!(status, 200);
-    assert!(body.contains("pg-probe review console"));
+    // The built console or, without web/dist, the page that says how to
+    // build it. A client-side route gets the same page.
+    for path in ["/console/", "/console/test-snapshot/queries"] {
+        let (status, body) = get(port, path);
+        assert_eq!(status, 200, "{path}");
+        assert!(body.contains("pg-probe"), "{path}");
+    }
 }
 
 #[test]

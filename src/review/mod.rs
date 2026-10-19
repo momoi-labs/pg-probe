@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::collections::HashMap;
 
 use axum::extract::{Path as AxumPath, Query, State};
-use axum::http::StatusCode;
-use axum::response::{Html, IntoResponse};
+use axum::http::{header, StatusCode};
+use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use flate2::read::GzDecoder;
@@ -87,6 +87,7 @@ pub fn router(data_directory: PathBuf) -> Router {
         .route("/api/snapshots/{id}", get(snapshot))
         .route("/api/snapshots/{id}/samples", get(samples))
         .route("/api/snapshots/{id}/tables/{table}", get(table_rows))
+        .route("/", get(root))
         .route("/console", get(console))
         .route("/console/", get(console))
         .route("/console/{*path}", get(console))
@@ -194,8 +195,48 @@ async fn table_rows(
     Ok(Json(query_rows(&connection, &table, &filters)?))
 }
 
-async fn console() -> impl IntoResponse {
-    Html("<!doctype html><html><body><main><h1>pg-probe review console</h1><p>The web frontend is not built yet.</p></main></body></html>")
+mod console_assets {
+    include!(concat!(env!("OUT_DIR"), "/console_assets.rs"));
+}
+
+const CONSOLE_NOT_BUILT: &str = "<!doctype html><html><body><main>\
+    <h1>pg-probe review console</h1>\
+    <p>This binary was built without the console. Run <code>pnpm install</code> and \
+    <code>pnpm build</code> in <code>web/</code>, then build pg-probe again.</p>\
+    </main></body></html>";
+
+fn content_type(path: &str) -> &'static str {
+    match path.rsplit('.').next() {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") => "text/javascript; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("woff2") => "font/woff2",
+        Some("json") => "application/json",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Serves the embedded console. A path that is not a file is a client-side
+/// route, so it gets `index.html` and the router takes over.
+async fn console(path: Option<AxumPath<String>>) -> Response {
+    let assets = console_assets::ASSETS;
+    let requested = path.map(|AxumPath(path)| path).unwrap_or_default();
+    let asset = assets
+        .iter()
+        .find(|(name, _)| *name == requested)
+        .or_else(|| assets.iter().find(|(name, _)| *name == "index.html"));
+    match asset {
+        Some((name, bytes)) => {
+            ([(header::CONTENT_TYPE, content_type(name))], bytes.to_vec()).into_response()
+        }
+        None => Html(CONSOLE_NOT_BUILT).into_response(),
+    }
+}
+
+async fn root() -> Redirect {
+    Redirect::to("/console/")
 }
 
 fn resolve_artifact(data_directory: &Path, id: &str) -> Result<PathBuf, ApiError> {

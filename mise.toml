@@ -5,6 +5,11 @@ goreleaser = "2.17.1"
 zig = "0.15.2"
 "cargo:cargo-zigbuild" = "0.23.0"
 
+[tasks.web]
+description = "Build the review console that pg-probe analyze embeds"
+run = "pnpm --dir web install --frozen-lockfile && pnpm --dir web build"
+
 [tasks.build]
 description = "Build the static x86_64 musl release binary"
+depends = ["web"]
 run = "cargo zigbuild --locked --release --target x86_64-unknown-linux-musl"

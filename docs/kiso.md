@@ -64,8 +64,11 @@ None.
 
 1. Install: `pnpm install` in `web/`.
 2. Typecheck and build: `pnpm build` in `web/`.
-3. Load the console: run `pg-probe analyze --data-directory web/dev-artifacts`, then
+3. Load the built console: run `pnpm build`, rebuild pg-probe, then run
+   `pg-probe analyze --data-directory web/dev-artifacts` and open
+   `http://localhost:3080/`. The binary embeds `web/dist` at compile time.
+4. Develop with hot reload: run `pg-probe analyze --data-directory web/dev-artifacts`, then
    `pnpm dev` in `web/` and open `http://localhost:5173/console/`. Vite
    proxies `/api` to port 3080. Set `PG_PROBE_API` to use another address.
-4. Check a complete artifact, a partial one (`partial-failures`) and a real
+5. Check a complete artifact, a partial one (`partial-failures`) and a real
    capture, in both themes and at 390px.
