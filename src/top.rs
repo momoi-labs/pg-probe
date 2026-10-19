@@ -564,11 +564,9 @@ impl App {
                 if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
                     return Ok(());
                 }
+                // Every layer closes with q or Esc; only the list quits.
                 if self.help {
-                    match key.code {
-                        KeyCode::Char('q') => return Ok(()),
-                        _ => self.help = false,
-                    }
+                    self.help = false;
                     continue;
                 }
                 if let Some(panel) = self
@@ -578,8 +576,7 @@ impl App {
                 {
                     let count = panel.result.as_ref().map_or(0, Vec::len);
                     match key.code {
-                        KeyCode::Char('q') => return Ok(()),
-                        KeyCode::Char('f') | KeyCode::Esc => {
+                        KeyCode::Char('f' | 'q') | KeyCode::Esc => {
                             if let Some(popup) = &mut self.popup {
                                 popup.function = None;
                             }
@@ -608,8 +605,7 @@ impl App {
                 }
                 if let Some(panel) = self.popup.as_mut().and_then(|popup| popup.explain.as_mut()) {
                     match key.code {
-                        KeyCode::Char('q') => return Ok(()),
-                        KeyCode::Char('e') | KeyCode::Esc => {
+                        KeyCode::Char('e' | 'q') | KeyCode::Esc => {
                             if let Some(popup) = &mut self.popup {
                                 popup.explain = None;
                             }
@@ -638,8 +634,9 @@ impl App {
                 }
                 if let Some(popup) = &mut self.popup {
                     match key.code {
-                        KeyCode::Char('q') => return Ok(()),
-                        KeyCode::Char('v') | KeyCode::Esc | KeyCode::Enter => self.popup = None,
+                        KeyCode::Char('v' | 'q') | KeyCode::Esc | KeyCode::Enter => {
+                            self.popup = None
+                        }
                         KeyCode::Char(' ') => self.paused = !self.paused,
                         KeyCode::Down | KeyCode::Char('j') => {
                             popup.scroll = popup.scroll.saturating_add(1)
@@ -658,7 +655,7 @@ impl App {
                 let view = self.view;
                 let before = self.settings();
                 match key.code {
-                    KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                    KeyCode::Char('q') => return Ok(()),
                     KeyCode::Char(' ') => self.paused = !self.paused,
                     KeyCode::Char('?') => self.help = true,
                     KeyCode::Tab => self.preview = !self.preview,
@@ -1717,7 +1714,7 @@ impl App {
                             ),
                         ]))
                         .title_bottom(
-                            Line::from(" v/Esc back · f function · e explain · ↑↓ scroll ")
+                            Line::from(" v/q/Esc back · f function · e explain · ↑↓ scroll ")
                                 .style(palette::muted()),
                         ),
                 ),
@@ -1766,7 +1763,7 @@ impl App {
                                 .style(palette::strong()),
                         )
                         .title_bottom(
-                            Line::from(format!(" f/Esc back · ↑↓ scroll{position} "))
+                            Line::from(format!(" f/q/Esc back · ↑↓ scroll{position} "))
                                 .style(palette::muted()),
                         ),
                 ),
@@ -1811,7 +1808,7 @@ impl App {
                                 .style(palette::strong()),
                         )
                         .title_bottom(
-                            Line::from(" e/Esc back · ↑↓ scroll ").style(palette::muted()),
+                            Line::from(" e/q/Esc back · ↑↓ scroll ").style(palette::muted()),
                         ),
                 ),
             area,
@@ -1844,7 +1841,8 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
             ("g", "Group by state, database, user, or none"),
             ("h", "Two-line header with session history"),
             ("?", "This help"),
-            ("q Esc", "Quit"),
+            ("q", "Quit"),
+            ("Ctrl+C", "Quit from anywhere"),
         ],
     ),
     (
@@ -1853,7 +1851,7 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
             ("f", "Functions the query calls"),
             ("e", "Estimated plan (EXPLAIN)"),
             ("↑ ↓ PgUp PgDn", "Scroll"),
-            ("v Esc Enter", "Back to the list"),
+            ("v q Esc Enter", "Back to the list"),
         ],
     ),
 ];

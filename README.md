@@ -156,7 +156,7 @@ pg-probe top -h db.example.com -U monitor -d app -i 5
 | `g` | Group the list by state, database, user, or none |
 | `h` | Two-line header with the active and waiting sessions of the last refreshes |
 | `?` | List every key |
-| `q` | Quit |
+| `q` | Quit. In a panel, `q` goes back instead; `Ctrl+C` quits from anywhere |
 
 The display options (`Tab`, `t`, `c`, `g`, `h`) are saved when they change
 and restored on the next run, in `$XDG_CONFIG_HOME/pg-probe/top.json` or
@@ -172,7 +172,7 @@ query, client, application, connection, transaction, and query ages, and
 | `f` | Definition and call statistics of the functions the query calls, as `\df+` and `\sf` show them |
 | `e` | Estimated plan of the query |
 | `←` `→` | Other functions, when the query calls more than one |
-| `v` or `Esc` | Back to the list |
+| `v`, `q` or `Esc` | Back to the list |
 
 Function statistics need `track_functions` set to `pl` or `all`. The plan
 comes from `EXPLAIN` without `ANALYZE`, so it may differ from the plan the
