@@ -1255,9 +1255,9 @@ fn write_mounts(
         .prepare(
             "INSERT OR IGNORE INTO linux_mount (
                 snapshot_id, collected_at, mount_id, parent_mount_id,
-                device_major, device_minor, filesystem_type, is_read_only,
+                device_major, device_minor, mount_point, filesystem_type, is_read_only,
                 total_bytes, available_bytes, total_inodes, available_inodes
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         )
         .map_err(ArtifactError::Sqlite)?;
 
@@ -1290,6 +1290,7 @@ fn write_mounts(
                 i64::from(entry.parent_mount_id),
                 i64::from(entry.device_major),
                 i64::from(entry.device_minor),
+                entry.mount_point.as_deref(),
                 entry.filesystem_type.as_str(),
                 entry.is_read_only as i64,
                 total_bytes,

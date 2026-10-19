@@ -13,6 +13,9 @@ const BLOCK_IO_SOURCE: &str = "proc.diskstats";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MountEntry {
     pub mount_id: u32,
+    /// Set only for local disk filesystems outside `/home`. See
+    /// [`records_mount_point`].
+    pub mount_point: Option<String>,
     pub parent_mount_id: u32,
     pub device_major: u32,
     pub device_minor: u32,
@@ -155,7 +158,8 @@ fn collect_mounts(observations: &mut StorageObservations, outcomes: &mut Vec<Com
     };
 
     match parse_mountinfo(&content) {
-        Ok(mounts) => {
+        Ok(mut mounts) => {
+            measure_mounts(&mut mounts);
             let observed_at_utc = now_utc();
             observations.mounts = mounts;
             outcomes.push(ComponentOutcome::collected(
@@ -335,6 +339,69 @@ fn collect_block_io(observations: &mut StorageObservations, outcomes: &mut Vec<C
     }
 }
 
+/// Local disk filesystems whose path and size are recorded. Network
+/// filesystems are left out on purpose: `statvfs` on a dead NFS server can
+/// block indefinitely, and pg-probe must fail fast (principle 1).
+const LOCAL_DISK_FILESYSTEMS: &[&str] = &[
+    "ext2", "ext3", "ext4", "xfs", "btrfs", "zfs", "f2fs", "jfs", "reiserfs",
+];
+
+/// Whether a mount's path may enter the artifact: a local disk filesystem,
+/// and not a home directory, whose path can carry a user name.
+pub fn records_mount_point(filesystem_type: &str, path: &str) -> bool {
+    LOCAL_DISK_FILESYSTEMS.contains(&filesystem_type)
+        && path != "/home"
+        && !path.starts_with("/home/")
+}
+
+/// Decodes the octal escapes mountinfo uses for spaces, tabs, newlines and
+/// backslashes. Returns `None` for anything that is not printable ASCII, so
+/// an odd path never reaches the artifact.
+fn unescape_mount_point(raw: &str) -> Option<String> {
+    let bytes = raw.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'\\' && index + 4 <= bytes.len() {
+            let octal = std::str::from_utf8(&bytes[index + 1..index + 4]).ok()?;
+            decoded.push(u8::from_str_radix(octal, 8).ok()?);
+            index += 4;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    let path = String::from_utf8(decoded).ok()?;
+    (path.starts_with('/')
+        && path
+            .bytes()
+            .all(|byte| byte.is_ascii_graphic() || byte == b' '))
+    .then_some(path)
+}
+
+/// Fills total and available space for mounts that record a path.
+fn measure_mounts(mounts: &mut [MountEntry]) {
+    for mount in mounts.iter_mut() {
+        let Some(path) = mount.mount_point.as_deref() else {
+            continue;
+        };
+        let Ok(c_path) = std::ffi::CString::new(path) else {
+            continue;
+        };
+        let mut stats: libc::statvfs = unsafe { std::mem::zeroed() };
+        // SAFETY: c_path is a valid NUL-terminated string and stats is a
+        // zeroed statvfs that the call fills in.
+        if unsafe { libc::statvfs(c_path.as_ptr(), &mut stats) } != 0 {
+            continue;
+        }
+        let fragment = stats.f_frsize as u64;
+        mount.total_bytes = (stats.f_blocks as u64).checked_mul(fragment);
+        mount.available_bytes = (stats.f_bavail as u64).checked_mul(fragment);
+        mount.total_inodes = Some(stats.f_files as u64);
+        mount.available_inodes = Some(stats.f_favail as u64);
+    }
+}
+
 pub fn parse_mountinfo(content: &str) -> Result<Vec<MountEntry>, &'static str> {
     let mut mounts = Vec::new();
 
@@ -372,9 +439,12 @@ pub fn parse_mountinfo(content: &str) -> Result<Vec<MountEntry>, &'static str> {
         let filesystem_type = parts[separator_idx + 1].to_string();
 
         let is_read_only = mount_options.split(',').any(|opt| opt == "ro");
+        let mount_point = unescape_mount_point(parts[4])
+            .filter(|path| records_mount_point(&filesystem_type, path));
 
         mounts.push(MountEntry {
             mount_id,
+            mount_point,
             parent_mount_id,
             device_major: major,
             device_minor: minor,
@@ -482,6 +552,27 @@ fn read_sysfs_string(path: &Path) -> io::Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mount_paths_are_kept_only_for_local_disks_outside_home() {
+        assert!(records_mount_point("xfs", "/var/lib/pgsql"));
+        assert!(records_mount_point("ext4", "/"));
+        assert!(!records_mount_point("tmpfs", "/run"));
+        assert!(!records_mount_point("nfs4", "/mnt/data"));
+        assert!(!records_mount_point("ext4", "/home"));
+        assert!(!records_mount_point("ext4", "/home/alice"));
+    }
+
+    #[test]
+    fn mount_point_escapes_are_decoded_and_odd_paths_dropped() {
+        assert_eq!(
+            unescape_mount_point("/mnt/my\\040disk").as_deref(),
+            Some("/mnt/my disk")
+        );
+        assert_eq!(unescape_mount_point("/data").as_deref(), Some("/data"));
+        assert_eq!(unescape_mount_point("/bad\\011tab"), None);
+        assert_eq!(unescape_mount_point("relative"), None);
+    }
 
     #[test]
     fn parse_mountinfo_valid() {

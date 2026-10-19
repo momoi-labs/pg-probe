@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, SecondsFormat, Utc};
 use uuid::Uuid;
 
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 pub const COLLECTOR_NAME: &str = "pg-probe";
 pub const COLLECTOR_VERSION: &str = env!("CARGO_PKG_VERSION");
 

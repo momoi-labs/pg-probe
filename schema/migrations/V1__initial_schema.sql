@@ -147,6 +147,7 @@ CREATE TABLE linux_mount (
     parent_mount_id INTEGER NOT NULL,
     device_major INTEGER NOT NULL,
     device_minor INTEGER NOT NULL,
+    mount_point TEXT,
     filesystem_type TEXT NOT NULL,
     is_read_only INTEGER NOT NULL CHECK (is_read_only IN (0, 1)),
     total_bytes INTEGER,

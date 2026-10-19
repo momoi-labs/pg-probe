@@ -23,7 +23,7 @@ for scenario in complete-small partial-failures dangerous-settings null-heavy la
     sqlite3 "$database" <<SQL
 PRAGMA foreign_keys = ON;
 PRAGMA application_id = 1346850898;
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
 CREATE TABLE refinery_schema_history (
     version int4 PRIMARY KEY,
     name VARCHAR(255),

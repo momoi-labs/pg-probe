@@ -4,7 +4,7 @@ INSERT INTO snapshot (
     started_at_utc, finished_at_utc, status
 )
 SELECT
-    name, 2, 'pg-probe', 'dev-seed',
+    name, 3, 'pg-probe', 'dev-seed',
     '2026-08-19T12:00:00Z', '2026-08-19T12:00:05Z',
     CASE WHEN name IN ('partial-failures', 'null-heavy') THEN 'partial' ELSE 'complete' END
 FROM seed_scenario;
