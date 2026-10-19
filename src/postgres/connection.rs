@@ -236,6 +236,30 @@ impl ConnectedClient {
         self.exec_rows(query, source, outcomes)
     }
 
+    /// Runs one statement over the extended query protocol and returns the
+    /// first text column of every row. The server refuses a string with more
+    /// than one command on this protocol, so nothing after the first statement
+    /// can ever run. On failure it returns the server's message, which is
+    /// about the statement, never about the connection settings.
+    pub fn single_statement_text_rows(&self, statement: &str) -> Result<Vec<String>, String> {
+        let mut client = self
+            .client
+            .lock()
+            .map_err(|_| "the session is unavailable".to_owned())?;
+        let rows = client.query(statement, &[]).map_err(|error| {
+            error
+                .as_db_error()
+                .map(|db_error| db_error.message().to_owned())
+                .unwrap_or_else(|| "the query failed".to_owned())
+        })?;
+        rows.iter()
+            .map(|row| {
+                row.try_get::<_, String>(0)
+                    .map_err(|_| "the result was not text".to_owned())
+            })
+            .collect()
+    }
+
     fn scalar(&self, query: &str) -> Result<String, AdapterError> {
         let messages = self
             .client

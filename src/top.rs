@@ -10,6 +10,7 @@
 //! When the server runs on this host, host load and memory and per-backend
 //! CPU and I/O come from the local `/proc`, which costs the server nothing.
 
+mod explain;
 mod function;
 mod os;
 
@@ -36,7 +37,8 @@ const PAGE: usize = 10;
 
 const SERVER_SQL: &str = "\
 SELECT current_setting('server_version_num'), current_setting('server_version'), \
-    current_setting('max_connections'), current_user, current_database()";
+    current_setting('max_connections'), current_user, current_database(), \
+    current_setting('track_activity_query_size')";
 
 /// Builds the `SELECT` that pairs each backend blocked on a lock with the
 /// pids holding it. PG 9.6+ has `pg_blocking_pids`. Older servers match
@@ -151,6 +153,8 @@ pub struct Server {
     pub user: String,
     pub database: String,
     pub endpoint: String,
+    /// `track_activity_query_size`: the server cuts longer query text.
+    pub query_size_limit: usize,
 }
 
 /// One client backend from `pg_stat_activity`.
@@ -195,6 +199,9 @@ pub struct Details {
     pub xid: String,
     pub xmin: String,
     pub query: String,
+    /// The query exactly as the server holds it, line breaks included. It
+    /// is never drawn, only sent to `EXPLAIN`.
+    pub raw_query: String,
 }
 
 /// The details panel for one backend, opened with `v`.
@@ -207,6 +214,15 @@ struct Popup {
     scroll: u16,
     /// The definitions of the functions the query calls, opened with `f`.
     function: Option<FunctionPanel>,
+    /// The estimated plan of the query, opened with `e`.
+    explain: Option<ExplainPanel>,
+}
+
+struct ExplainPanel {
+    database: String,
+    /// The plan lines, or why there is no plan.
+    result: Result<Vec<String>, String>,
+    scroll: u16,
 }
 
 struct FunctionPanel {
@@ -404,8 +420,34 @@ impl App {
                     }
                     continue;
                 }
+                if let Some(panel) = self.popup.as_mut().and_then(|popup| popup.explain.as_mut()) {
+                    match key.code {
+                        KeyCode::Char('q') => return Ok(()),
+                        KeyCode::Char('e') | KeyCode::Esc => {
+                            if let Some(popup) = &mut self.popup {
+                                popup.explain = None;
+                            }
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            panel.scroll = panel.scroll.saturating_add(1)
+                        }
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            panel.scroll = panel.scroll.saturating_sub(1)
+                        }
+                        KeyCode::PageDown => {
+                            panel.scroll = panel.scroll.saturating_add(PAGE as u16)
+                        }
+                        KeyCode::PageUp => panel.scroll = panel.scroll.saturating_sub(PAGE as u16),
+                        _ => {}
+                    }
+                    continue;
+                }
                 if key.code == KeyCode::Char('f') && self.popup.is_some() {
                     self.open_function(client);
+                    continue;
+                }
+                if key.code == KeyCode::Char('e') && self.popup.is_some() {
+                    self.open_explain(client);
                     continue;
                 }
                 if let Some(popup) = &mut self.popup {
@@ -490,6 +532,7 @@ impl App {
             ended: false,
             scroll: 0,
             function: None,
+            explain: None,
         });
         self.refresh_popup(client)
     }
@@ -513,19 +556,9 @@ impl App {
         let database = backend
             .map(|backend| backend.database.clone())
             .unwrap_or_default();
-        let result = if database.is_empty() {
-            Err("The backend has ended, so its database is unknown.".to_owned())
-        } else if database == self.server.database {
-            function::fetch(client, &query).map_err(|_| "The catalog query failed.".to_owned())
-        } else {
-            // pg_proc is per database: open a short read-only session in the
-            // query's database, look the functions up, and close it.
-            match client.for_database(&database, SOURCE, &mut Vec::new()) {
-                Ok(other) => function::fetch(&other, &query)
-                    .map_err(|_| "The catalog query failed.".to_owned()),
-                Err(_) => Err(format!("Could not connect to database {database}.")),
-            }
-        };
+        let result = self.in_database(client, &database, |session| {
+            function::fetch(session, &query).map_err(|_| "The catalog query failed.".to_owned())
+        });
         if let Some(popup) = &mut self.popup {
             popup.function = Some(FunctionPanel {
                 database,
@@ -533,6 +566,59 @@ impl App {
                 index: 0,
                 scroll: 0,
             });
+        }
+    }
+
+    /// Plans the popup's query with `EXPLAIN`, without `ANALYZE`, in the
+    /// database the query runs in. Refusals and failures show in the popup.
+    fn open_explain(&mut self, client: &ConnectedClient) {
+        let Some(popup) = &self.popup else {
+            return;
+        };
+        let database = self
+            .backends
+            .iter()
+            .find(|backend| backend.pid == popup.pid)
+            .map(|backend| backend.database.clone())
+            .unwrap_or_default();
+        let raw_query = popup
+            .details
+            .as_ref()
+            .map(|details| details.raw_query.clone())
+            .unwrap_or_default();
+        let result =
+            explain::statement(&raw_query, self.server.query_size_limit).and_then(|statement| {
+                self.in_database(client, &database, |session| {
+                    explain::fetch(session, &statement)
+                })
+            });
+        if let Some(popup) = &mut self.popup {
+            popup.explain = Some(ExplainPanel {
+                database,
+                result,
+                scroll: 0,
+            });
+        }
+    }
+
+    /// Runs `work` in `database`. Catalogs such as `pg_proc` and the tables a
+    /// query names are per database, so another database gets a short
+    /// read-only session that closes when `work` returns.
+    fn in_database<T>(
+        &self,
+        client: &ConnectedClient,
+        database: &str,
+        work: impl FnOnce(&ConnectedClient) -> Result<T, String>,
+    ) -> Result<T, String> {
+        if database.is_empty() {
+            return Err("The backend has ended, so its database is unknown.".to_owned());
+        }
+        if database == self.server.database {
+            return work(client);
+        }
+        match client.for_database(database, SOURCE, &mut Vec::new()) {
+            Ok(session) => work(&session),
+            Err(_) => Err(format!("Could not connect to database {database}.")),
         }
     }
 
@@ -595,6 +681,7 @@ impl App {
         if self.popup.is_some() {
             self.draw_popup(frame);
             self.draw_function_panel(frame);
+            self.draw_explain_panel(frame);
         }
     }
 
@@ -977,7 +1064,7 @@ impl App {
         )));
         lines.push(Line::from(details.query.clone()));
 
-        let area = centered(frame.area(), 90, 80);
+        let area = frame.area();
         frame.render_widget(Clear, area);
         frame.render_widget(
             Paragraph::new(lines)
@@ -985,9 +1072,19 @@ impl App {
                 .scroll((popup.scroll, 0))
                 .block(
                     Block::bordered()
-                        .title(Line::from(format!(" PID {} ", popup.pid)).bold().green())
+                        .title(Line::from(vec![
+                            Span::styled(
+                                concat!(" pg-probe ", env!("CARGO_PKG_VERSION"), " "),
+                                Style::new().black().on_green().bold(),
+                            ),
+                            Span::styled(
+                                format!(" query details · PID {} ", popup.pid),
+                                Style::new().bold().green(),
+                            ),
+                        ]))
                         .title_bottom(
-                            Line::from(" v/Esc close · f function · ↑↓ scroll ").dark_gray(),
+                            Line::from(" v/Esc back · f function · e explain · ↑↓ scroll ")
+                                .dark_gray(),
                         ),
                 ),
             area,
@@ -1045,6 +1142,58 @@ impl App {
             area,
         );
     }
+}
+
+impl App {
+    fn draw_explain_panel(&self, frame: &mut Frame) {
+        let Some(panel) = self.popup.as_ref().and_then(|popup| popup.explain.as_ref()) else {
+            return;
+        };
+        let lines: Vec<Line> = match &panel.result {
+            Err(message) => vec![Line::from(Span::styled(
+                message.clone(),
+                Style::new().red(),
+            ))],
+            Ok(plan) => {
+                let mut lines = vec![
+                    Line::from(Span::styled(
+                        "Estimated plan (EXPLAIN without ANALYZE). The query was not run, \
+                         and the plan may differ from the one the backend is running.",
+                        Style::new().yellow(),
+                    )),
+                    Line::default(),
+                ];
+                lines.extend(
+                    plan.iter()
+                        .map(|line| Line::from(single_line_keep_indent(line))),
+                );
+                lines
+            }
+        };
+        let area = centered(frame.area(), 90, 80);
+        frame.render_widget(Clear, area);
+        frame.render_widget(
+            Paragraph::new(lines)
+                .wrap(Wrap { trim: false })
+                .scroll((panel.scroll, 0))
+                .block(
+                    Block::bordered()
+                        .title(
+                            Line::from(format!(" explain in {} ", panel.database))
+                                .bold()
+                                .green(),
+                        )
+                        .title_bottom(Line::from(" e/Esc back · ↑↓ scroll ").dark_gray()),
+                ),
+            area,
+        );
+    }
+}
+
+/// Drops control characters from one plan line but keeps its leading
+/// spaces, which carry the plan's tree shape.
+fn single_line_keep_indent(line: &str) -> String {
+    line.chars().filter(|c| !c.is_control()).collect()
 }
 
 fn or_dash(value: &str) -> &str {
@@ -1222,6 +1371,7 @@ fn read_server(client: &ConnectedClient) -> Result<Server, AdapterError> {
         version_num,
         version: text(1),
         max_connections: text(2).parse().unwrap_or(0),
+        query_size_limit: text(5).parse().unwrap_or(0),
         user: text(3),
         database: text(4),
         endpoint,
@@ -1286,6 +1436,10 @@ fn fetch_details(
             xid: text(10),
             xmin: text(11),
             query: text(12),
+            raw_query: row
+                .get(12)
+                .map(|value| String::from_utf8_lossy(value).into_owned())
+                .unwrap_or_default(),
         }
     }))
 }
@@ -1351,6 +1505,7 @@ mod tests {
             user: "postgres".to_owned(),
             database: "postgres".to_owned(),
             endpoint: "127.0.0.1:5432".to_owned(),
+            query_size_limit: 1024,
         };
         let mut app = App::new(server, Duration::from_secs(2), false);
         app.view = view;
@@ -1486,6 +1641,7 @@ mod tests {
             ended: false,
             scroll: 0,
             function: None,
+            explain: None,
         });
         let mut terminal = Terminal::new(TestBackend::new(160, 40)).unwrap();
         terminal.draw(|frame| app.draw(frame)).unwrap();
