@@ -5,6 +5,7 @@ import {
   NavigationItem,
   NavigationLink,
   NavigationList,
+  TerminalIcon,
 } from '@momoi-labs/kiso-react'
 import { Link, Outlet, useMatches, useParams } from '@tanstack/react-router'
 
@@ -44,7 +45,9 @@ export function Shell() {
       layout="topbar"
       brand={
         <Link to="/" className="brand">
-          <BrandMark>P</BrandMark>
+          <BrandMark>
+            <TerminalIcon />
+          </BrandMark>
           pg-probe
         </Link>
       }
