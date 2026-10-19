@@ -15,6 +15,11 @@ mod activity_aggregates;
 mod archiver_stats;
 mod bgwriter_stats;
 pub(crate) mod capability;
+
+use capability::{
+    has_archiver_stats, has_checkpointer_stats, has_io_stats, has_replication_slots,
+    has_slru_stats, has_wal_stats, StatsCapability,
+};
 mod database_stats;
 mod io_stats;
 mod lock_aggregates;
@@ -109,6 +114,7 @@ fn collect_postgres_stats(
     collect_optional(
         &mut stats.wal_stats,
         "postgres.stats.wal",
+        has_wal_stats(server_version_num),
         "wal_stats_failed",
         client,
         server_version_num,
@@ -119,6 +125,7 @@ fn collect_postgres_stats(
     collect_optional(
         &mut stats.bgwriter_stats,
         "postgres.stats.bgwriter",
+        StatsCapability::Supported,
         "bgwriter_stats_failed",
         client,
         server_version_num,
@@ -129,6 +136,7 @@ fn collect_postgres_stats(
     collect_optional(
         &mut stats.checkpointer_stats,
         "postgres.stats.checkpointer",
+        has_checkpointer_stats(server_version_num),
         "checkpointer_stats_failed",
         client,
         server_version_num,
@@ -139,6 +147,7 @@ fn collect_postgres_stats(
     collect_optional(
         &mut stats.archiver_stats,
         "postgres.stats.archiver",
+        has_archiver_stats(server_version_num),
         "archiver_stats_failed",
         client,
         server_version_num,
@@ -149,6 +158,7 @@ fn collect_postgres_stats(
     collect_optional(
         &mut stats.io_stats,
         "postgres.stats.io",
+        has_io_stats(server_version_num),
         "io_stats_failed",
         client,
         server_version_num,
@@ -159,6 +169,7 @@ fn collect_postgres_stats(
     collect_optional(
         &mut stats.slru_stats,
         "postgres.stats.slru",
+        has_slru_stats(server_version_num),
         "slru_stats_failed",
         client,
         server_version_num,
@@ -199,6 +210,7 @@ fn collect_postgres_stats(
     collect_optional(
         &mut stats.slot_aggregates,
         "postgres.aggregates.slots",
+        has_replication_slots(server_version_num),
         "slot_aggregates_failed",
         client,
         server_version_num,
@@ -246,9 +258,14 @@ fn collect_sub<T>(
     }
 }
 
+/// Runs a collector for a view that only some PostgreSQL versions have. When
+/// `capability` says this server lacks the view, records the source as
+/// unsupported instead of reporting an empty collection.
+#[allow(clippy::too_many_arguments)]
 fn collect_optional<T>(
     target: &mut Option<T>,
     source: &'static str,
+    capability: StatsCapability,
     error_code: &'static str,
     client: &ConnectedClient,
     server_version_num: i32,
@@ -256,6 +273,18 @@ fn collect_optional<T>(
     outcomes: &mut Vec<ComponentOutcome>,
 ) {
     let started_at = now_utc();
+    if !capability.is_supported() {
+        outcomes.push(
+            ComponentOutcome::failed(
+                source,
+                CollectionStatus::Unsupported,
+                "not_in_server_version",
+                None,
+            )
+            .with_timing(started_at, now_utc()),
+        );
+        return;
+    }
     match collector(client, server_version_num, outcomes) {
         Ok(collected) => {
             outcomes.push(ComponentOutcome::collected(
