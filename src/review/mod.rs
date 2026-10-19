@@ -4,7 +4,9 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use axum::extract::{Path as AxumPath, State};
+use std::collections::HashMap;
+
+use axum::extract::{Path as AxumPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse};
 use axum::routing::get;
@@ -52,7 +54,19 @@ struct TableRows {
     table: String,
     columns: Vec<ColumnMetadata>,
     rows: Vec<Map<String, Value>>,
+    /// True when the table had more rows than [`ROW_LIMIT`].
+    truncated: bool,
 }
+
+#[derive(Debug, Serialize)]
+struct SampleListing {
+    sample_id: i64,
+    taken_at_utc: String,
+}
+
+/// The most rows one table request returns. A long sampling session can hold
+/// many thousands of rows; past this, the response says it was truncated.
+const ROW_LIMIT: usize = 100_000;
 
 type ApiError = (StatusCode, Json<Value>);
 
@@ -71,6 +85,7 @@ pub fn router(data_directory: PathBuf) -> Router {
         .route("/api/schema", get(schema))
         .route("/api/snapshots", get(snapshots))
         .route("/api/snapshots/{id}", get(snapshot))
+        .route("/api/snapshots/{id}/samples", get(samples))
         .route("/api/snapshots/{id}/tables/{table}", get(table_rows))
         .route("/console", get(console))
         .route("/console/", get(console))
@@ -118,20 +133,65 @@ async fn snapshot(
     let path = resolve_artifact(state.data_directory.as_ref(), &id)?;
     let connection = open_artifact(&path)?;
     let listing = read_listing(&connection, &path)?;
-    let outcomes = query_rows(&connection, "collector_outcome")?.rows;
+    let outcomes = query_rows(&connection, "collector_outcome", &HashMap::new())?.rows;
     Ok(Json(serde_json::json!({
         "snapshot": listing,
         "collector_outcomes": outcomes
     })))
 }
 
+async fn samples(
+    State(state): State<AppState>,
+    AxumPath(id): AxumPath<String>,
+) -> Result<Json<Value>, ApiError> {
+    let path = resolve_artifact(state.data_directory.as_ref(), &id)?;
+    let connection = open_artifact(&path)?;
+    Ok(Json(
+        serde_json::json!({ "samples": read_samples(&connection)? }),
+    ))
+}
+
+/// Artifacts written before schema version 2 have no `sample` table. They hold
+/// one sample, taken when the snapshot started.
+fn read_samples(connection: &Connection) -> Result<Vec<SampleListing>, ApiError> {
+    let internal =
+        |error: rusqlite::Error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string());
+    let has_table = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'sample')",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(internal)?;
+    let sql = if has_table {
+        "SELECT sample_id, taken_at_utc FROM sample ORDER BY sample_id"
+    } else {
+        "SELECT 1, started_at_utc FROM snapshot"
+    };
+    let mut statement = connection.prepare(sql).map_err(internal)?;
+    let samples = statement
+        .query_map([], |row| {
+            Ok(SampleListing {
+                sample_id: row.get(0)?,
+                taken_at_utc: row.get(1)?,
+            })
+        })
+        .map_err(internal)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(internal)?;
+    Ok(samples)
+}
+
+/// Returns a table's rows. Each query parameter whose name is a column of the
+/// table filters on equality, for example `?sample_id=3` or `?cpu_id=-1`.
 async fn table_rows(
     State(state): State<AppState>,
     AxumPath((id, table)): AxumPath<(String, String)>,
+    Query(filters): Query<HashMap<String, String>>,
 ) -> Result<Json<TableRows>, ApiError> {
     let path = resolve_artifact(state.data_directory.as_ref(), &id)?;
     let connection = open_artifact(&path)?;
-    Ok(Json(query_rows(&connection, &table)?))
+    Ok(Json(query_rows(&connection, &table, &filters)?))
 }
 
 async fn console() -> impl IntoResponse {
@@ -260,7 +320,11 @@ fn columns(connection: &Connection, table: &str) -> Result<Vec<ColumnMetadata>, 
     Ok(columns)
 }
 
-fn query_rows(connection: &Connection, table: &str) -> Result<TableRows, ApiError> {
+fn query_rows(
+    connection: &Connection,
+    table: &str,
+    filters: &HashMap<String, String>,
+) -> Result<TableRows, ApiError> {
     let valid = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type IN ('table', 'view') AND name = ?1 AND name NOT LIKE 'sqlite_%' AND name <> 'refinery_schema_history')",
         [table],
@@ -270,9 +334,32 @@ fn query_rows(connection: &Connection, table: &str) -> Result<TableRows, ApiErro
         return Err(api_error(StatusCode::NOT_FOUND, "table not found"));
     }
     let columns = columns(connection, table)?;
+    let mut conditions = Vec::new();
+    let mut values = Vec::new();
+    for (name, value) in filters {
+        if !columns.iter().any(|column| &column.name == name) {
+            return Err(api_error(
+                StatusCode::BAD_REQUEST,
+                format!("{table} has no column {name}"),
+            ));
+        }
+        values.push(value.as_str());
+        conditions.push(format!(
+            "\"{}\" = ?{}",
+            name.replace('"', "\"\""),
+            values.len()
+        ));
+    }
+    let filter = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", conditions.join(" AND "))
+    };
+    // One row past the limit tells the reader the result was truncated.
     let sql = format!(
-        "SELECT * FROM \"{}\" LIMIT 1000",
-        table.replace('"', "\"\"")
+        "SELECT * FROM \"{}\"{filter} LIMIT {}",
+        table.replace('"', "\"\""),
+        ROW_LIMIT + 1
     );
     let mut statement = connection
         .prepare(&sql)
@@ -282,8 +369,8 @@ fn query_rows(connection: &Connection, table: &str) -> Result<TableRows, ApiErro
         .into_iter()
         .map(str::to_owned)
         .collect::<Vec<_>>();
-    let rows = statement
-        .query_map([], |row| {
+    let mut rows = statement
+        .query_map(rusqlite::params_from_iter(values), |row| {
             let mut object = Map::new();
             for (index, name) in names.iter().enumerate() {
                 object.insert(name.clone(), sqlite_value(row.get_ref(index)?));
@@ -293,10 +380,13 @@ fn query_rows(connection: &Connection, table: &str) -> Result<TableRows, ApiErro
         .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let truncated = rows.len() > ROW_LIMIT;
+    rows.truncate(ROW_LIMIT);
     Ok(TableRows {
         table: table.to_owned(),
         columns,
         rows,
+        truncated,
     })
 }
 

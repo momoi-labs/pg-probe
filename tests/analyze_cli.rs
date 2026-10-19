@@ -48,6 +48,11 @@ fn seed_artifact(directory: &std::path::Path) -> String {
          INSERT INTO linux_identity (
             snapshot_id, hostname, kernel_sysname, kernel_release, kernel_machine
          ) VALUES ('test-snapshot', 'test-host', 'Linux', '6.12.0', 'x86_64');
+         INSERT INTO sample VALUES ('test-snapshot', 1, '2026-08-19T12:00:00Z');
+         INSERT INTO sample VALUES ('test-snapshot', 2, '2026-08-19T12:00:10Z');
+         INSERT INTO linux_memory VALUES
+            ('test-snapshot', 1, '2026-08-19T12:00:00Z', 'MemFree', 1024, 'bytes'),
+            ('test-snapshot', 2, '2026-08-19T12:00:10Z', 'MemFree', 2048, 'bytes');
          INSERT INTO collector_outcome VALUES (
             'test-snapshot', 'linux.identity', 0,
             '2026-08-19T12:00:00Z', '2026-08-19T12:00:01Z', 'collected',
@@ -143,6 +148,31 @@ fn analyze_serves_schema_listing_detail_rows_and_console() {
         .unwrap()
         .iter()
         .any(|column| column["name"] == "hostname"));
+
+    let (status, body) = get(port, &format!("/api/snapshots/{file_name}/samples"));
+    assert_eq!(status, 200);
+    let samples: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(samples["samples"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        samples["samples"][1]["taken_at_utc"],
+        "2026-08-19T12:00:10Z"
+    );
+
+    let (status, body) = get(
+        port,
+        &format!("/api/snapshots/{file_name}/tables/linux_memory?sample_id=2"),
+    );
+    assert_eq!(status, 200);
+    let rows: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(rows["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(rows["rows"][0]["value_bytes"], 2048);
+    assert_eq!(rows["truncated"], false);
+
+    let (status, _) = get(
+        port,
+        &format!("/api/snapshots/{file_name}/tables/linux_memory?bogus=1"),
+    );
+    assert_eq!(status, 400, "a filter on an unknown column is rejected");
 
     let (status, body) = get(port, "/console/");
     assert_eq!(status, 200);
