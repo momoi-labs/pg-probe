@@ -1524,7 +1524,7 @@ impl App {
         };
         let backend = self.backend_by_pid(&popup.pid);
         let details = popup.details.clone().unwrap_or_default();
-        let label = |text: &str| Span::styled(format!("{text:<16}"), palette::muted());
+        let label = |text: &str| Span::styled(format!(" {text:<16}"), palette::muted());
         let field = |name: &str, value: Vec<Span<'static>>| {
             let mut spans = vec![label(name)];
             spans.extend(value);
@@ -1543,6 +1543,10 @@ impl App {
             }
             spans
         };
+        // A section title is a full-width bar, like the list's header row.
+        let width = usize::from(frame.area().width);
+        let section =
+            |name: &str| Line::from(format!(" {name:<width$}")).style(palette::table_header());
 
         let mut lines = Vec::new();
         if popup.ended {
@@ -1556,6 +1560,7 @@ impl App {
             .map(|backend| backend.state.clone())
             .unwrap_or_default();
         lines.extend([
+            section("Session"),
             field(
                 "Database",
                 plain(backend.map(|b| b.database.clone()).unwrap_or_default()),
@@ -1580,6 +1585,7 @@ impl App {
                 plain(backend.map(Backend::wait_label).unwrap_or_default()),
             ),
             Line::default(),
+            section("Age"),
             field(
                 "Connection age",
                 age(details.connection_age_s, &details.backend_start),
@@ -1606,6 +1612,7 @@ impl App {
             let rate = os.rates.get(&popup.pid);
             let sample = os.samples.get(&popup.pid).map(|(_, sample)| sample);
             lines.push(Line::default());
+            lines.push(section("Process"));
             lines.push(field(
                 "CPU",
                 plain(format!(
@@ -1672,7 +1679,7 @@ impl App {
         }
 
         lines.push(Line::default());
-        lines.push(Line::from(Span::styled("Query", palette::strong())));
+        lines.push(section("Query"));
         lines.extend(
             query_lines(
                 &details.raw_query,
@@ -1680,34 +1687,48 @@ impl App {
                 self.server.query_size_limit,
             )
             .into_iter()
-            .map(Line::from),
+            .map(|line| Line::from(format!(" {line}"))),
         );
 
+        // The details fill the screen, so they are a page of the app, with
+        // the list's canvas, header and footer, rather than a popup.
         let area = frame.area();
+        let [header, body, footer] = Layout::vertical([
+            Constraint::Length(2),
+            Constraint::Fill(1),
+            Constraint::Length(1),
+        ])
+        .areas(area);
         frame.render_widget(Clear, area);
+        frame.render_widget(Block::new().style(palette::base()), area);
+        frame.render_widget(
+            Line::from(vec![
+                Span::styled(
+                    concat!(" pg-probe ", env!("CARGO_PKG_VERSION"), " "),
+                    palette::brand(),
+                ),
+                Span::styled(" Query details", palette::strong()),
+                Span::styled(format!(" · PID {}", popup.pid), palette::muted()),
+            ]),
+            header,
+        );
         frame.render_widget(
             Paragraph::new(lines)
                 .wrap(Wrap { trim: false })
-                .scroll((popup.scroll, 0))
-                .block(
-                    palette::popup()
-                        .title(Line::from(vec![
-                            Span::styled(
-                                concat!(" pg-probe ", env!("CARGO_PKG_VERSION"), " "),
-                                palette::brand(),
-                            ),
-                            Span::styled(
-                                format!(" query details · PID {} ", popup.pid),
-                                palette::strong(),
-                            ),
-                        ]))
-                        .title_bottom(
-                            Line::from(" v/q/Esc back · f function · e explain · ↑↓ scroll ")
-                                .style(palette::muted()),
-                        ),
-                ),
-            area,
+                .scroll((popup.scroll, 0)),
+            body,
         );
+        let mut hints = Vec::new();
+        for (key, action) in [
+            ("v q Esc", "Back"),
+            ("f", "Functions"),
+            ("e", "Explain"),
+            ("↑↓", "Scroll"),
+        ] {
+            hints.push(Span::styled(key, palette::link()));
+            hints.push(Span::styled(format!(" {action:<12}"), palette::muted()));
+        }
+        frame.render_widget(Line::from(hints), footer);
     }
 }
 
