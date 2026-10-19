@@ -17,3 +17,6 @@ diagnostic dataset into one portable SQLite file, from PostgreSQL 9.3 on.
   query, function definitions and the estimated plan, and per-backend CPU
   and I/O when the server runs on the same host. Display options persist
   between runs.
+- Each release ships static musl tarballs and `.deb` and `.rpm` packages for
+  x86_64 and arm64. The binary links no libc, so the packages have no
+  dependencies and install on old and new distributions alike.

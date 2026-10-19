@@ -189,6 +189,13 @@ jobs:
             fi
           done
           test -f dist/SHA256SUMS
+          for package in \
+            "dist/pg-probe_${version}_amd64.deb" \
+            "dist/pg-probe_${version}_arm64.deb" \
+            "dist/pg-probe-${version}-1.x86_64.rpm" \
+            "dist/pg-probe-${version}-1.aarch64.rpm"; do
+            test -f "$package"
+          done
 
       - name: Upload release dist
         # actions/upload-artifact@v4.6.2
@@ -198,6 +205,8 @@ jobs:
           path: |
             dist/pg-probe-v${{ needs.validate.outputs.version }}-x86_64-unknown-linux-musl.tar.gz
             dist/pg-probe-v${{ needs.validate.outputs.version }}-aarch64-unknown-linux-musl.tar.gz
+            dist/pg-probe_${{ needs.validate.outputs.version }}_*.deb
+            dist/pg-probe-${{ needs.validate.outputs.version }}-1.*.rpm
             dist/SHA256SUMS
           if-no-files-found: error
           retention-days: 7
@@ -214,8 +223,12 @@ jobs:
         include:
           - runner: ubuntu-24.04
             target: x86_64-unknown-linux-musl
+            deb_arch: amd64
+            rpm_arch: x86_64
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
+            deb_arch: arm64
+            rpm_arch: aarch64
     steps:
       - name: Check out the tagged commit
         # actions/checkout@v4.2.2
@@ -243,6 +256,20 @@ jobs:
           binary="extracted/pg-probe-v${{ needs.validate.outputs.version }}-${{ matrix.target }}/pg-probe"
           scripts/smoke-test-release-binary.sh "$binary" work/ubuntu
 
+      # The binary links no libc, so the packages must declare no dependency.
+      - name: Install and smoke-test the Debian package
+        run: |
+          set -euo pipefail
+          package="dist/pg-probe_${{ needs.validate.outputs.version }}_${{ matrix.deb_arch }}.deb"
+          depends="$(dpkg-deb -f "$package" Depends)"
+          if [[ -n "$depends" ]]; then
+            echo "the Debian package declares dependencies: ${depends}" >&2
+            exit 1
+          fi
+          sudo dpkg -i "$package"
+          scripts/smoke-test-release-binary.sh /usr/bin/pg-probe work/deb
+          sudo dpkg -r pg-probe
+
       - name: Smoke-test inside Rocky Linux (RHEL-compatible)
         run: |
           set -euo pipefail
@@ -255,6 +282,27 @@ jobs:
             -v "${PWD}/work/rocky:/work" \
             rockylinux@sha256:d7be1c094cc5845ee815d4632fe377514ee6ebcf8efaed6892889657e5ddaaa6 \
             bash -lc 'dnf install -y sqlite gzip >/dev/null && bash /smoke.sh /usr/local/bin/pg-probe /work'
+
+      - name: Install and smoke-test the RPM package inside Rocky Linux
+        run: |
+          set -euo pipefail
+          package="dist/pg-probe-${{ needs.validate.outputs.version }}-1.${{ matrix.rpm_arch }}.rpm"
+          mkdir -p work/rpm
+          # rockylinux:9 index digest (multi-arch)
+          docker run --rm \
+            -v "${PWD}/${package}:/pg-probe.rpm:ro" \
+            -v "${PWD}/scripts/smoke-test-release-binary.sh:/smoke.sh:ro" \
+            -v "${PWD}/work/rpm:/work" \
+            rockylinux@sha256:d7be1c094cc5845ee815d4632fe377514ee6ebcf8efaed6892889657e5ddaaa6 \
+            bash -lc 'set -euo pipefail
+              requires="$(rpm -qpR /pg-probe.rpm | grep -v "^rpmlib(" || true)"
+              if [[ -n "$requires" ]]; then
+                echo "the RPM package declares dependencies: $requires" >&2
+                exit 1
+              fi
+              rpm -i /pg-probe.rpm
+              dnf install -y sqlite gzip >/dev/null
+              bash /smoke.sh /usr/bin/pg-probe /work'
 
       - name: Smoke-test inside Alpine
         run: |
@@ -307,17 +355,18 @@ jobs:
         run: |
           set -euo pipefail
           version="${{ needs.validate.outputs.version }}"
-          expected_x86="pg-probe-v${version}-x86_64-unknown-linux-musl.tar.gz"
-          expected_arm="pg-probe-v${version}-aarch64-unknown-linux-musl.tar.gz"
-          mapfile -t files < <(find dist -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)
-          if [[ "${#files[@]}" -ne 3 ]]; then
-            echo "expected exactly two tarballs and SHA256SUMS in dist/, found: ${files[*]-}" >&2
-            exit 1
-          fi
-          if [[ "${files[0]}" != "$expected_arm" \
-             || "${files[1]}" != "SHA256SUMS" \
-             || "${files[2]}" != "$expected_x86" ]]; then
-            echo "unexpected dist contents: ${files[*]}" >&2
+          expected="$(printf '%s\n' \
+            "pg-probe-v${version}-x86_64-unknown-linux-musl.tar.gz" \
+            "pg-probe-v${version}-aarch64-unknown-linux-musl.tar.gz" \
+            "pg-probe_${version}_amd64.deb" \
+            "pg-probe_${version}_arm64.deb" \
+            "pg-probe-${version}-1.x86_64.rpm" \
+            "pg-probe-${version}-1.aarch64.rpm" \
+            SHA256SUMS | LC_ALL=C sort)"
+          actual="$(find dist -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "unexpected dist contents:" >&2
+            echo "$actual" >&2
             exit 1
           fi
           (cd dist && sha256sum -c SHA256SUMS)
@@ -329,6 +378,8 @@ jobs:
           subject-path: |
             dist/pg-probe-v${{ needs.validate.outputs.version }}-x86_64-unknown-linux-musl.tar.gz
             dist/pg-probe-v${{ needs.validate.outputs.version }}-aarch64-unknown-linux-musl.tar.gz
+            dist/pg-probe_${{ needs.validate.outputs.version }}_*.deb
+            dist/pg-probe-${{ needs.validate.outputs.version }}-1.*.rpm
             dist/SHA256SUMS
 
       - name: Create draft release and upload assets
@@ -344,14 +395,25 @@ jobs:
 
           ${changes}
 
-          Self-contained musl Linux builds with bundled libpq and vendored OpenSSL,
-          produced by GoReleaser's Rust builder.
+          Static musl Linux builds with the Rust-native PostgreSQL client and
+          rustls, produced by GoReleaser's Rust builder. The binary links no
+          libc, so the packages declare no dependencies and install on any
+          release of their family.
 
           ### Assets
 
           - \`pg-probe-v${version}-x86_64-unknown-linux-musl.tar.gz\`
           - \`pg-probe-v${version}-aarch64-unknown-linux-musl.tar.gz\`
+          - \`pg-probe_${version}_amd64.deb\`, \`pg-probe_${version}_arm64.deb\`
+          - \`pg-probe-${version}-1.x86_64.rpm\`, \`pg-probe-${version}-1.aarch64.rpm\`
           - \`SHA256SUMS\`
+
+          ### Install a package
+
+          \`\`\`sh
+          sudo dpkg -i pg-probe_${version}_amd64.deb      # Debian, Ubuntu
+          sudo rpm -i pg-probe-${version}-1.x86_64.rpm    # RHEL, Rocky, CentOS
+          \`\`\`
 
           ### Verify checksums
 
@@ -379,6 +441,10 @@ jobs:
             --notes "$notes" \
             "dist/pg-probe-v${version}-x86_64-unknown-linux-musl.tar.gz" \
             "dist/pg-probe-v${version}-aarch64-unknown-linux-musl.tar.gz" \
+            "dist/pg-probe_${version}_amd64.deb" \
+            "dist/pg-probe_${version}_arm64.deb" \
+            "dist/pg-probe-${version}-1.x86_64.rpm" \
+            "dist/pg-probe-${version}-1.aarch64.rpm" \
             dist/SHA256SUMS
 
       - name: Publish the fully populated draft
@@ -387,15 +453,19 @@ jobs:
         run: |
           set -euo pipefail
           tag="${TAG}"
-          mapfile -t assets < <(gh release view "$tag" --json assets --jq '.assets[].name' | LC_ALL=C sort)
-          expected_arm="pg-probe-v${{ needs.validate.outputs.version }}-aarch64-unknown-linux-musl.tar.gz"
-          expected_sum="SHA256SUMS"
-          expected_x86="pg-probe-v${{ needs.validate.outputs.version }}-x86_64-unknown-linux-musl.tar.gz"
-          if [[ "${#assets[@]}" -ne 3 \
-             || "${assets[0]}" != "$expected_arm" \
-             || "${assets[1]}" != "$expected_sum" \
-             || "${assets[2]}" != "$expected_x86" ]]; then
-            echo "draft release assets mismatch: ${assets[*]-}" >&2
+          version="${{ needs.validate.outputs.version }}"
+          expected="$(printf '%s\n' \
+            "pg-probe-v${version}-x86_64-unknown-linux-musl.tar.gz" \
+            "pg-probe-v${version}-aarch64-unknown-linux-musl.tar.gz" \
+            "pg-probe_${version}_amd64.deb" \
+            "pg-probe_${version}_arm64.deb" \
+            "pg-probe-${version}-1.x86_64.rpm" \
+            "pg-probe-${version}-1.aarch64.rpm" \
+            SHA256SUMS | LC_ALL=C sort)"
+          assets="$(gh release view "$tag" --json assets --jq '.assets[].name' | LC_ALL=C sort)"
+          if [[ "$assets" != "$expected" ]]; then
+            echo "draft release assets mismatch:" >&2
+            echo "$assets" >&2
             exit 1
           fi
           gh release edit "$tag" --draft=false

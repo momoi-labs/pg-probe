@@ -21,7 +21,18 @@ review console embedded:
 
 - `pg-probe-v<VERSION>-x86_64-unknown-linux-musl.tar.gz`
 - `pg-probe-v<VERSION>-aarch64-unknown-linux-musl.tar.gz`
+- `pg-probe_<VERSION>_amd64.deb` and `pg-probe_<VERSION>_arm64.deb`
+- `pg-probe-<VERSION>-1.x86_64.rpm` and `pg-probe-<VERSION>-1.aarch64.rpm`
 - `SHA256SUMS`
+
+The binary links no libc, so the `.deb` and `.rpm` packages declare no
+dependencies and install `/usr/bin/pg-probe` on any release of their family,
+from CentOS 7 and Ubuntu 18.04 on:
+
+```bash
+sudo dpkg -i pg-probe_0.1.0_amd64.deb      # Debian, Ubuntu
+sudo rpm -i pg-probe-0.1.0-1.x86_64.rpm    # RHEL, Rocky, CentOS
+```
 
 Each archive contains `pg-probe`, `README.md`, and `LICENSE`. After download:
 

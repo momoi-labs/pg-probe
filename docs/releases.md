@@ -44,6 +44,11 @@ embedded in a binary. It smoke-tests the archives on Ubuntu, Rocky Linux and
 Alpine, verifies `SHA256SUMS`, attests the assets, and publishes the release
 with that version's section of `CHANGELOG.md` as its notes.
 
+GoReleaser also wraps each binary in a `.deb` and an `.rpm`. The binary is
+static musl, so the packages declare no dependencies, not even libc. The
+release fails if either package declares one, and it installs each package
+and runs the smoke test against `/usr/bin/pg-probe`.
+
 ## Retry a release
 
 In **Actions > Release > Run workflow**, enter an existing tag to retry a

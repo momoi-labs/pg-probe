@@ -48,6 +48,48 @@ archives:
           mode: 0o644
           mtime: "{{ .CommitDate }}"
 
+# Debian and RHEL packages around the same static musl binary. The binary
+# links no libc, so the packages declare no dependencies and install on any
+# release of either family.
+nfpms:
+  - id: packages
+    ids:
+      - pg-probe
+    package_name: pg-probe
+    file_name_template: "{{ .ConventionalFileName }}"
+    vendor: Momoi Labs
+    maintainer: Momoi Labs <https://github.com/momoi-labs>
+    homepage: https://github.com/momoi-labs/pg-probe
+    description: |-
+      PostgreSQL and Linux host diagnostics in one portable SQLite file.
+      Captures a time-bounded dataset, serves a review console for it, and
+      shows the queries running now.
+    license: PostgreSQL
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/bin
+    mtime: "{{ .CommitDate }}"
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/pg-probe/copyright
+        packager: deb
+        file_info:
+          mode: 0o644
+          mtime: "{{ .CommitDate }}"
+      - src: LICENSE
+        dst: /usr/share/licenses/pg-probe/LICENSE
+        packager: rpm
+        type: license
+        file_info:
+          mode: 0o644
+          mtime: "{{ .CommitDate }}"
+      - src: README.md
+        dst: /usr/share/doc/pg-probe/README.md
+        file_info:
+          mode: 0o644
+          mtime: "{{ .CommitDate }}"
+
 checksum:
   name_template: SHA256SUMS
   algorithm: sha256
