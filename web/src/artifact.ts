@@ -2,9 +2,21 @@ import { useQuery } from '@tanstack/react-query'
 import { useParams } from '@tanstack/react-router'
 import { snapshotQuery, tableQuery, type Row } from './api.ts'
 
-export function useTable(table: string) {
+export function useTable(table: string, filters?: Record<string, string>) {
   const { snapshotId } = useParams({ from: '/$snapshotId' })
-  return useQuery(tableQuery(snapshotId, table))
+  return useQuery(tableQuery(snapshotId, table, filters))
+}
+
+// Rows written before the sample dimension carry no sample_id. They belong
+// to the single sample such an artifact holds.
+export const sampleOf = (row: Row) => (typeof row.sample_id === 'number' ? row.sample_id : 1)
+
+// The rows of the last sample. Invariant tables have no sample_id, so all of
+// their rows come back.
+export function latest(rows: Row[] | undefined): Row[] {
+  if (!rows?.length) return []
+  const last = Math.max(...rows.map(sampleOf))
+  return rows.filter((row) => sampleOf(row) === last)
 }
 
 export function useOutcomes() {

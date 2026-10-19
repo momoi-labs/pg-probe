@@ -1,135 +1,346 @@
-import { BarGauge, DashboardGrid, Disclosure, KV, KVKey, KVValue, Meter } from '@momoi-labs/kiso-react'
-import { integer, missingReason, num, useOutcomes, useTable } from '../artifact.ts'
-import { bytes } from '../format.tsx'
-import { GapPanel, Note, Panel } from './panels.tsx'
+import { DashboardGrid, Disclosure } from '@momoi-labs/kiso-react'
+import type { Row } from '../api.ts'
+import { missingReason, num, useOutcomes, useTable } from '../artifact.ts'
+import { deltas, points, rates, useSamples, type Values } from '../series.ts'
+import { ChartPanel, GapPanel, Note, Panel } from './panels.tsx'
 
-const gib = (value: number) => `${(value / 1024 ** 3).toFixed(1)} GiB`
+const GIB = 1024 ** 3
+const MIB = 1024 ** 2
+const percent = (value: number) => `${value.toFixed(1)}%`
+const gib = (value: number) => `${value.toFixed(1)} GiB`
+const mibPerSecond = (value: number) => `${value.toFixed(1)} MiB/s`
+const decimal = (value: number) => value.toFixed(2)
+
+// Kernel sector unit for /proc/diskstats, not the device block size.
+const SECTOR_BYTES = 512
+
+const memoryValue = (rows: Row[], key: string) =>
+  num(
+    rows.find((row) => row.key === key),
+    'value_bytes',
+  )
+
+// Guest time is already counted in user time, so it stays out of the total.
+const CPU_STATES = ['user', 'nice', 'system', 'idle', 'iowait', 'irq', 'softirq', 'steal']
+
+function cpuTicks(rows: Row[]): Values {
+  const ticks = (state: string) => num(rows.find((row) => row.state === state), 'ticks')
+  const values: Values = {}
+  for (const state of CPU_STATES) values[state] = ticks(state)
+  return values
+}
+
+// Share of CPU time per state between samples, for the chart and the
+// Overview tile.
+export function useCpuShares() {
+  const samples = useSamples()
+  const { data, isPending } = useTable('linux_cpu_time', { cpu_id: '-1' })
+  const chart = deltas(samples.data ?? [], data ?? [], cpuTicks, (delta) => {
+    const known = CPU_STATES.map((state) => delta[state])
+    if (known.some((value) => value == null)) {
+      return { user: null, system: null, iowait: null, steal: null, other: null }
+    }
+    const total = known.reduce((a, b) => (a ?? 0) + (b ?? 0), 0) ?? 0
+    const share = (value: number) => (total > 0 ? (value / total) * 100 : null)
+    return {
+      user: share(delta.user ?? 0),
+      system: share(delta.system ?? 0),
+      iowait: share(delta.iowait ?? 0),
+      steal: share(delta.steal ?? 0),
+      other: share((delta.nice ?? 0) + (delta.irq ?? 0) + (delta.softirq ?? 0)),
+    }
+  })
+  return { chart, isPending: isPending || samples.isPending }
+}
+
+function CpuUtilisation() {
+  const { chart, isPending } = useCpuShares()
+  return (
+    <ChartPanel
+      title="CPU utilisation"
+      sub="by state, stacked"
+      span={8}
+      loading={isPending}
+      label="CPU busy by state (%)"
+      variant="stacked-area"
+      min={0}
+      max={100}
+      formatValue={percent}
+      data={chart}
+      series={[
+        { key: 'user', label: 'User' },
+        { key: 'system', label: 'System' },
+        { key: 'iowait', label: 'I/O wait' },
+        { key: 'steal', label: 'Steal' },
+        { key: 'other', label: 'Nice, IRQ, softirq' },
+      ]}
+      note="Change in /proc/stat ticks between samples ÷ change in all ticks. The mean across CPUs, not the sum."
+    />
+  )
+}
 
 function LoadAverage() {
+  const samples = useSamples()
   const { data, isPending } = useTable('linux_scheduler')
-  const row = data?.[0]
+  const chart = points(samples.data ?? [], data ?? [], (rows) => ({
+    '1m': num(rows[0], 'load_avg_1m'),
+    '5m': num(rows[0], 'load_avg_5m'),
+    '15m': num(rows[0], 'load_avg_15m'),
+  }))
   return (
-    <Panel title="Load average" sub="1m / 5m / 15m" span={4} loading={isPending}>
-      {row ? (
-        <KV>
-          {(['1m', '5m', '15m'] as const).map((window) => (
-            <div key={window}>
-              <KVKey>{window}</KVKey>
-              <KVValue>{num(row, `load_avg_${window}`)?.toFixed(2) ?? 'NULL'}</KVValue>
-            </div>
-          ))}
-        </KV>
-      ) : (
-        <Note>Not recorded in this artifact.</Note>
-      )}
-    </Panel>
+    <ChartPanel
+      title="Load average"
+      sub="1m / 5m / 15m"
+      span={4}
+      loading={isPending || samples.isPending}
+      label="Load average"
+      min={0}
+      formatValue={decimal}
+      data={chart}
+      series={[
+        { key: '1m', label: '1 minute' },
+        { key: '5m', label: '5 minutes' },
+        { key: '15m', label: '15 minutes' },
+      ]}
+    />
   )
 }
 
 function Memory() {
+  const samples = useSamples()
   const { data, isPending } = useTable('linux_memory')
-  const value = (key: string) => num(data?.find((row) => row.key === key), 'value_bytes')
-  const total = value('MemTotal')
-  const free = value('MemFree')
-  const buffers = value('Buffers')
-  const cached = value('Cached')
-  const shmem = value('Shmem')
-  const reclaimable = value('SReclaimable')
-  const known =
-    total != null &&
-    free != null &&
-    buffers != null &&
-    cached != null &&
-    shmem != null &&
-    reclaimable != null
+  let total: number | null = null
+  const chart = points(samples.data ?? [], data ?? [], (rows) => {
+    const value = (key: string) => memoryValue(rows, key)
+    const memTotal = value('MemTotal')
+    const free = value('MemFree')
+    const buffers = value('Buffers')
+    const cached = value('Cached')
+    const shmem = value('Shmem')
+    const reclaimable = value('SReclaimable')
+    if (
+      memTotal == null ||
+      free == null ||
+      buffers == null ||
+      cached == null ||
+      shmem == null ||
+      reclaimable == null
+    ) {
+      return { used: null, shmem: null, cache: null, buffers: null, free: null }
+    }
+    total = memTotal
+    return {
+      used: (memTotal - free - buffers - cached - reclaimable) / GIB,
+      shmem: shmem / GIB,
+      cache: (cached - shmem + reclaimable) / GIB,
+      buffers: buffers / GIB,
+      free: free / GIB,
+    }
+  })
+  const max = total == null ? undefined : (total as number) / GIB
   return (
-    <Panel title="Memory" sub="split of MemTotal" span={8} loading={isPending}>
-      {known ? (
-        <>
-          <BarGauge
-            label={`Memory by use, of ${gib(total)} MemTotal`}
-            max={total}
-            formatValue={gib}
-            rows={[
-              {
-                key: 'used',
-                label: 'Used',
-                value: total - free - buffers - cached - reclaimable,
-              },
-              { key: 'shmem', label: 'Shared memory', value: shmem },
-              { key: 'cache', label: 'Page cache', value: cached - shmem + reclaimable },
-              { key: 'buffers', label: 'Buffers', value: buffers },
-              { key: 'free', label: 'Free', value: free },
-            ]}
-          />
-          <Note>
-            From /proc/meminfo. Page cache is Cached − Shmem + SReclaimable, because Cached
-            already includes Shmem. Used is MemTotal − MemFree − Buffers − Cached −
-            SReclaimable. Shared memory includes shared_buffers.
-          </Note>
-        </>
-      ) : (
-        <Note>Not recorded in this artifact.</Note>
-      )}
-    </Panel>
+    <ChartPanel
+      title="Memory"
+      sub="stacked to MemTotal"
+      span={8}
+      loading={isPending || samples.isPending}
+      label="Memory by use (GiB)"
+      variant="stacked-area"
+      min={0}
+      max={max}
+      formatValue={gib}
+      data={chart}
+      series={[
+        { key: 'used', label: 'Used' },
+        { key: 'shmem', label: 'Shared memory' },
+        { key: 'cache', label: 'Page cache' },
+        { key: 'buffers', label: 'Buffers' },
+        { key: 'free', label: 'Free' },
+      ]}
+      note="From /proc/meminfo. Page cache is Cached − Shmem + SReclaimable, because Cached already includes Shmem. Used is MemTotal − MemFree − Buffers − Cached − SReclaimable. Shared memory includes shared_buffers."
+    />
   )
 }
 
 function Swap() {
+  const samples = useSamples()
   const { data, isPending } = useTable('linux_memory')
-  const value = (key: string) => num(data?.find((row) => row.key === key), 'value_bytes')
-  const total = value('SwapTotal')
-  const free = value('SwapFree')
-  let content
-  if (total == null || free == null) content = <Note>Not recorded in this artifact.</Note>
-  else if (total === 0) content = <Note>No swap is configured.</Note>
-  else {
-    const used = bytes(total - free)
-    const size = bytes(total)
-    content = (
-      <>
-        <Meter
-          label="Swap used"
-          value={total - free}
-          max={total}
-          valueText={`${used.number} ${used.unit} of ${size.number} ${size.unit}`}
-        />
-        <Note>SwapTotal − SwapFree, from /proc/meminfo</Note>
-      </>
-    )
-  }
+  const chart = points(samples.data ?? [], data ?? [], (rows) => {
+    const total = memoryValue(rows, 'SwapTotal')
+    const free = memoryValue(rows, 'SwapFree')
+    return { used: total == null || free == null ? null : (total - free) / GIB }
+  })
   return (
-    <Panel title="Swap in use" span={4} loading={isPending}>
-      {content}
-    </Panel>
+    <ChartPanel
+      title="Swap in use"
+      span={4}
+      loading={isPending || samples.isPending}
+      label="Swap used (GiB)"
+      min={0}
+      formatValue={gib}
+      data={chart}
+      series={[{ key: 'used', label: 'Used' }]}
+      note="SwapTotal − SwapFree"
+    />
+  )
+}
+
+// Whole disks only. Partitions repeat their disk's I/O and would count twice.
+function useDisks() {
+  const devices = useTable('linux_block_device')
+  const io = useTable('linux_block_io')
+  const names = new Map<string, string>()
+  for (const row of devices.data ?? []) {
+    names.set(`${row.device_major}:${row.device_minor}`, String(row.kernel_name))
+  }
+  const rows = (io.data ?? []).flatMap((row) => {
+    const name = names.get(`${row.device_major}:${row.device_minor}`)
+    return name ? [{ ...row, kernel_name: name }] : []
+  })
+  return { rows, names: [...new Set(names.values())], isPending: devices.isPending || io.isPending }
+}
+
+function DiskThroughput() {
+  const samples = useSamples()
+  const disks = useDisks()
+  const chart = rates(samples.data ?? [], disks.rows, (rows) => {
+    const sectors = (column: string) =>
+      rows.length === 0 ? null : rows.reduce((total, row) => total + (num(row, column) ?? 0), 0)
+    const read = sectors('sectors_read')
+    const written = sectors('sectors_written')
+    return {
+      read: read == null ? null : (read * SECTOR_BYTES) / MIB,
+      write: written == null ? null : (written * SECTOR_BYTES) / MIB,
+    }
+  })
+  return (
+    <ChartPanel
+      title="Disk throughput"
+      sub="all disks"
+      span={6}
+      loading={disks.isPending || samples.isPending}
+      label="Disk throughput (MiB/s)"
+      min={0}
+      formatValue={mibPerSecond}
+      data={chart}
+      series={[
+        { key: 'read', label: 'Read' },
+        { key: 'write', label: 'Write' },
+      ]}
+      note="Change in sectors read and written × 512 bytes ÷ seconds between samples, summed over whole disks."
+    />
+  )
+}
+
+// Busy share of every whole disk between samples, for the chart and the
+// Overview tile.
+export function useDiskBusy() {
+  const samples = useSamples()
+  const disks = useDisks()
+  const all = deltas(
+    samples.data ?? [],
+    disks.rows,
+    (rows) =>
+      Object.fromEntries(
+        disks.names.map((name) => [
+          name,
+          num(
+            rows.find((row) => row.kernel_name === name),
+            'io_milliseconds',
+          ),
+        ]),
+      ),
+    (delta, seconds) =>
+      Object.fromEntries(
+        Object.entries(delta).map(([name, ms]) => [
+          name,
+          ms == null ? null : Math.min((ms / (seconds * 1000)) * 100, 100),
+        ]),
+      ),
+  )
+  return { all, names: disks.names, isPending: disks.isPending || samples.isPending }
+}
+
+function DiskUtilisation() {
+  const { all, names, isPending } = useDiskBusy()
+  // A chart holds five series: keep the five busiest disks.
+  const busiest = [...names]
+    .map((name) => ({
+      name,
+      total: all.reduce((sum, sample) => sum + (sample.values[name] ?? 0), 0),
+    }))
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 5)
+    .map(({ name }) => name)
+  const chart = all.map((sample) => ({
+    timestamp: sample.timestamp,
+    values: Object.fromEntries(busiest.map((name) => [name, sample.values[name] ?? null])),
+  }))
+  return (
+    <ChartPanel
+      title="Disk utilisation"
+      sub="share of time the device was busy, five busiest"
+      span={6}
+      loading={isPending}
+      label="Disk busy time (%)"
+      min={0}
+      max={100}
+      formatValue={percent}
+      data={chart}
+      series={busiest.map((name) => ({ key: name, label: name }))}
+      note="Change in io_milliseconds ÷ milliseconds between samples. On SSDs and NVMe with deep queues this nears 100% before the device is saturated."
+    />
   )
 }
 
 function PressureStall() {
-  const { data, isPending } = useTable('linux_psi')
+  const samples = useSamples()
+  const { data, isPending } = useTable('linux_psi', { scope: 'some' })
   const outcomes = useOutcomes()
-  const some = data?.filter((row) => row.scope === 'some') ?? []
-  const reason = missingReason(outcomes, 'proc.pressure')
-  return (
-    <Panel title="Pressure stall" sub="some, 10s window" span={6} loading={isPending}>
-      {some.length > 0 ? (
-        <BarGauge
-          label="Share of time some tasks stalled, avg10"
-          max={100}
-          formatValue={(value) => `${value.toFixed(1)}%`}
-          rows={some.map((row) => ({
-            key: String(row.resource),
-            label: String(row.resource),
-            value: num(row, 'avg10'),
-          }))}
-        />
-      ) : (
+  if (!isPending && !data?.length) {
+    const reason = missingReason(outcomes, 'proc.pressure')
+    return (
+      <Panel title="Pressure stall" sub="some, 10s window" span={6}>
         <Note>
           Not recorded in this artifact
-          {reason ? `: proc.pressure is ${reason}. Older kernels and some containers have no PSI.` : '.'}
+          {reason
+            ? `: proc.pressure is ${reason}. Older kernels and some containers have no PSI.`
+            : '.'}
         </Note>
-      )}
-    </Panel>
+      </Panel>
+    )
+  }
+  const chart = points(samples.data ?? [], data ?? [], (rows) => ({
+    cpu: num(
+      rows.find((row) => row.resource === 'cpu'),
+      'avg10',
+    ),
+    memory: num(
+      rows.find((row) => row.resource === 'memory'),
+      'avg10',
+    ),
+    io: num(
+      rows.find((row) => row.resource === 'io'),
+      'avg10',
+    ),
+  }))
+  return (
+    <ChartPanel
+      title="Pressure stall"
+      sub="some, 10s window"
+      span={6}
+      loading={isPending || samples.isPending}
+      label="Share of time some tasks stalled (%)"
+      min={0}
+      formatValue={percent}
+      data={chart}
+      series={[
+        { key: 'cpu', label: 'CPU' },
+        { key: 'memory', label: 'Memory' },
+        { key: 'io', label: 'I/O' },
+      ]}
+      note="avg10 from /proc/pressure"
+    />
   )
 }
 
@@ -146,61 +357,41 @@ function FilesystemUsage() {
 }
 
 function Processes() {
+  const samples = useSamples()
   const { data, isPending } = useTable('linux_scheduler')
-  const row = data?.[0]
-  const fields = [
-    ['Running', 'procs_running'],
-    ['Blocked on I/O', 'procs_blocked'],
-    ['Total tasks', 'total_tasks'],
-  ] as const
+  const chart = points(samples.data ?? [], data ?? [], (rows) => ({
+    running: num(rows[0], 'procs_running'),
+    blocked: num(rows[0], 'procs_blocked'),
+  }))
   return (
-    <Panel title="Processes" sub="running and blocked" span={6} loading={isPending}>
-      {row ? (
-        <>
-          <KV>
-            {fields.map(([label, column]) => {
-              const value = num(row, column)
-              return (
-                <div key={column}>
-                  <KVKey>{label}</KVKey>
-                  <KVValue>{value == null ? 'NULL' : integer(value)}</KVValue>
-                </div>
-              )
-            })}
-          </KV>
-          <Note>procs_running and procs_blocked from /proc/stat, tasks from /proc/loadavg</Note>
-        </>
-      ) : (
-        <Note>Not recorded in this artifact.</Note>
-      )}
-    </Panel>
+    <ChartPanel
+      title="Processes"
+      sub="running and blocked"
+      span={6}
+      loading={isPending || samples.isPending}
+      label="Processes"
+      min={0}
+      formatValue={(value) => value.toFixed(0)}
+      data={chart}
+      series={[
+        { key: 'running', label: 'Running' },
+        { key: 'blocked', label: 'Blocked on I/O' },
+      ]}
+      note="procs_running and procs_blocked from /proc/stat"
+    />
   )
 }
-
-const NEEDS_SAMPLING = 'needs sampling'
 
 export function System() {
   return (
     <Disclosure summary="System" open>
       <DashboardGrid>
-        <GapPanel title="CPU utilisation" sub="by state" span={8} gap={NEEDS_SAMPLING}>
-          linux_cpu_time has the per-CPU tick counters. A share of time needs the change between
-          two samples, and the artifact holds one.
-        </GapPanel>
+        <CpuUtilisation />
         <LoadAverage />
         <Memory />
         <Swap />
-        <GapPanel title="Disk throughput" sub="per volume" span={6} gap={NEEDS_SAMPLING}>
-          linux_block_io has the sector counters. Bytes per second needs two samples.
-        </GapPanel>
-        <GapPanel
-          title="Disk utilisation"
-          sub="share of time the device was busy"
-          span={6}
-          gap={NEEDS_SAMPLING}
-        >
-          linux_block_io has io_milliseconds. Busy time needs two samples.
-        </GapPanel>
+        <DiskThroughput />
+        <DiskUtilisation />
         <GapPanel title="Network throughput" sub="primary interface" span={6} gap="no collector">
           No collector reads /proc/net/dev yet. The plan is a new linux.network collector.
         </GapPanel>

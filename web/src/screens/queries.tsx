@@ -1,6 +1,37 @@
 import { DashboardGrid } from '@momoi-labs/kiso-react'
-import { missingReason, useOutcomes, useTable } from '../artifact.ts'
-import { GapPanel, Note, Panel } from './panels.tsx'
+import { missingReason, sum, useOutcomes, useTable } from '../artifact.ts'
+import { rates, useSamples } from '../series.ts'
+import { ChartPanel, GapPanel, Note, Panel } from './panels.tsx'
+
+function RowsPanel() {
+  const samples = useSamples()
+  const { data, isPending } = useTable('postgres_database_stats')
+  const chart = rates(samples.data ?? [], data ?? [], (rows) =>
+    rows.length
+      ? {
+          read: sum(rows, 'tup_returned'),
+          written: sum(rows, 'tup_inserted') + sum(rows, 'tup_updated') + sum(rows, 'tup_deleted'),
+        }
+      : { read: null, written: null },
+  )
+  return (
+    <ChartPanel
+      title="Rows"
+      sub="read and written per second"
+      span={6}
+      loading={isPending || samples.isPending}
+      label="Rows per second"
+      min={0}
+      formatValue={(value) => value.toFixed(0)}
+      data={chart}
+      series={[
+        { key: 'read', label: 'Read' },
+        { key: 'written', label: 'Written' },
+      ]}
+      note="Read is Δtup_returned. Written is Δ(tup_inserted + tup_updated + tup_deleted). Per database, not per statement."
+    />
+  )
+}
 
 const STATEMENTS_GAP =
   'Needs a new postgres.stats.statements collector, after the decision on whether query text may enter the artifact.'
@@ -40,9 +71,7 @@ export function Queries() {
       <GapPanel title="Query volume" sub="calls per second" span={6} gap="no collector">
         {STATEMENTS_GAP}
       </GapPanel>
-      <GapPanel title="Rows" sub="read and written per second" span={6} gap="needs sampling">
-        postgres_database_stats has the tup_* counters. A rate needs two samples.
-      </GapPanel>
+      <RowsPanel />
       <GapPanel
         title="Time split"
         sub="non-I/O against block I/O"

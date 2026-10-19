@@ -10,59 +10,220 @@ import {
   TableRow,
 } from '@momoi-labs/kiso-react'
 import type { Row } from '../api.ts'
-import { collected, integer, missingReason, num, useOutcomes, useTable } from '../artifact.ts'
+import {
+  collected,
+  latest,
+  missingReason,
+  num,
+  sum,
+  useOutcomes,
+  useTable,
+} from '../artifact.ts'
 import { bytes } from '../format.tsx'
-import { GapPanel, Note, Panel } from './panels.tsx'
+import { deltas, points, rates, useSamples, type Values } from '../series.ts'
+import { ChartPanel, GapPanel, Note, Panel } from './panels.tsx'
 
-// Rows from servers older than PostgreSQL 10 have no backend type. Every
-// pg_stat_activity row on those servers is a client backend.
+const MIB = 1024 ** 2
+const percent = (value: number) => `${value.toFixed(1)}%`
+const perSecond = (value: number) => `${value.toFixed(1)}/s`
+const mibPerSecond = (value: number) => `${value.toFixed(2)} MiB/s`
+
+// Before PostgreSQL 10, pg_stat_activity lists only client backends, and the
+// probe records them as client_backend. Older artifacts stored "<invalid>".
 export const isClientBackend = (row: Row) =>
   row.backend_type == null ||
+  row.backend_type === 'client_backend' ||
   row.backend_type === 'client backend' ||
   row.backend_type === '<invalid>'
 
+const stateOf = (row: Row) => (row.state == null ? 'NULL' : String(row.state))
+
 function ConnectionsByState() {
+  const samples = useSamples()
   const activity = useTable('postgres_activity_aggregates')
-  const settings = useTable('postgres_setting')
-  const byState = new Map<string, number>()
-  for (const row of activity.data?.filter(isClientBackend) ?? []) {
-    const state = row.state == null ? 'NULL' : String(row.state)
-    byState.set(state, (byState.get(state) ?? 0) + (num(row, 'count') ?? 0))
+  const clients = (activity.data ?? []).filter(isClientBackend)
+  // Four busiest states by total count, the rest grouped, to stay in five series.
+  const totals = new Map<string, number>()
+  for (const row of clients) {
+    totals.set(stateOf(row), (totals.get(stateOf(row)) ?? 0) + (num(row, 'count') ?? 0))
   }
-  const total = [...byState.values()].reduce((a, b) => a + b, 0)
-  const setting = settings.data?.find((row) => row.setting_name === 'max_connections')
-  const max = setting?.setting_value == null ? null : Number(setting.setting_value)
+  const ranked = [...totals].sort((a, b) => b[1] - a[1]).map(([state]) => state)
+  const shown = ranked.length > 5 ? ranked.slice(0, 4) : ranked
+  const grouped = ranked.length > 5
+  const chart = points(samples.data ?? [], clients, (rows) => {
+    const values: Values = Object.fromEntries(shown.map((state) => [state, 0]))
+    if (grouped) values.other = 0
+    for (const row of rows) {
+      const state = stateOf(row)
+      const key = shown.includes(state) ? state : 'other'
+      values[key] = (values[key] ?? 0) + (num(row, 'count') ?? 0)
+    }
+    return values
+  })
+  const series = [
+    ...shown.map((state) => ({ key: state, label: state })),
+    ...(grouped ? [{ key: 'other', label: 'Other states' }] : []),
+  ]
   return (
-    <Panel
+    <ChartPanel
       title="Connections by state"
-      sub="client backends"
+      sub="client backends, stacked"
       span={8}
-      loading={activity.isPending || settings.isPending}
-    >
-      {byState.size > 0 ? (
-        <>
-          <BarGauge
-            label={max ? `Client backends by state, of max_connections ${max}` : 'Client backends by state'}
-            max={max && max >= total ? max : total}
-            formatValue={integer}
-            rows={[...byState]
-              .sort((a, b) => b[1] - a[1])
-              .map(([state, count]) => ({ key: state, label: state, value: count }))}
-          />
-          <Note>Count of pg_stat_activity rows per state, aggregated by the probe</Note>
-        </>
-      ) : (
-        <Note>Not recorded in this artifact.</Note>
-      )}
-    </Panel>
+      loading={activity.isPending || samples.isPending}
+      label="Client backends by state"
+      variant="stacked-area"
+      min={0}
+      formatValue={(value) => value.toFixed(0)}
+      data={chart}
+      series={series}
+      note="Count of pg_stat_activity rows per state, aggregated by the probe"
+    />
+  )
+}
+
+function useDatabaseStats() {
+  const samples = useSamples()
+  const stats = useTable('postgres_database_stats')
+  return {
+    samples: samples.data ?? [],
+    rows: stats.data ?? [],
+    isPending: samples.isPending || stats.isPending,
+  }
+}
+
+const totals =
+  (...columns: string[]) =>
+  (rows: Row[]): Values =>
+    Object.fromEntries(columns.map((column) => [column, rows.length ? sum(rows, column) : null]))
+
+function CacheHitRatio() {
+  const stats = useDatabaseStats()
+  const chart = deltas(stats.samples, stats.rows, totals('blks_hit', 'blks_read'), (delta) => {
+    const hit = delta.blks_hit
+    const read = delta.blks_read
+    if (hit == null || read == null || hit + read === 0) return { ratio: null }
+    return { ratio: (hit / (hit + read)) * 100 }
+  })
+  return (
+    <ChartPanel
+      title="Cache hit ratio"
+      sub="per interval"
+      span={4}
+      loading={stats.isPending}
+      label="Cache hit ratio (%)"
+      max={100}
+      formatValue={percent}
+      data={chart}
+      series={[{ key: 'ratio', label: 'All databases' }]}
+      note="Δblks_hit ÷ (Δblks_hit + Δblks_read) between samples"
+    />
+  )
+}
+
+function Transactions() {
+  const stats = useDatabaseStats()
+  const chart = rates(stats.samples, stats.rows, totals('xact_commit', 'xact_rollback'))
+  return (
+    <ChartPanel
+      title="Transactions"
+      sub="commits and rollbacks per second"
+      span={6}
+      loading={stats.isPending}
+      label="Transactions per second"
+      min={0}
+      formatValue={perSecond}
+      data={chart}
+      series={[
+        { key: 'xact_commit', label: 'Commits' },
+        { key: 'xact_rollback', label: 'Rollbacks' },
+      ]}
+      note="Change in xact_commit and xact_rollback ÷ seconds, all databases"
+    />
+  )
+}
+
+function TemporaryFiles() {
+  const stats = useDatabaseStats()
+  const chart = rates(stats.samples, stats.rows, (rows) => {
+    const bytesWritten = totals('temp_bytes')(rows).temp_bytes
+    return { temp_bytes: bytesWritten == null ? null : bytesWritten / MIB }
+  })
+  return (
+    <ChartPanel
+      title="Temporary files written"
+      span={6}
+      loading={stats.isPending}
+      label="Temporary files written (MiB/s)"
+      min={0}
+      formatValue={mibPerSecond}
+      data={chart}
+      series={[{ key: 'temp_bytes', label: 'All databases' }]}
+      note="Change in temp_bytes ÷ seconds"
+    />
+  )
+}
+
+function WalAndCheckpoints() {
+  const samples = useSamples()
+  const target = useTable('postgres_target')
+  const bgwriter = useTable('postgres_bgwriter_stats')
+  const checkpointer = useTable('postgres_checkpointer_stats')
+  const wal = useTable('postgres_wal_stats')
+  const blockSize = num(target.data?.[0], 'block_size_bytes') ?? 8192
+  const pages = (value: number | null) => (value == null ? null : (value * blockSize) / MIB)
+  const sampleList = samples.data ?? []
+  // From PostgreSQL 17 the checkpoint counter moved to pg_stat_checkpointer.
+  const fromCheckpointer = (checkpointer.data?.length ?? 0) > 0
+  const writers = rates(sampleList, bgwriter.data ?? [], (rows) => ({
+    checkpoint: fromCheckpointer ? null : pages(num(rows[0], 'buffers_checkpoint')),
+    bgwriter: pages(num(rows[0], 'buffers_clean')),
+    backend: pages(num(rows[0], 'buffers_backend')),
+  }))
+  const checkpoints = rates(sampleList, checkpointer.data ?? [], (rows) => ({
+    checkpoint: pages(num(rows[0], 'buffers_written')),
+  }))
+  const walRates = rates(sampleList, wal.data ?? [], (rows) => ({
+    wal: rows.length ? (num(rows[0], 'wal_bytes') ?? 0) / MIB : null,
+  }))
+  const hasWal = (wal.data?.length ?? 0) > 0
+  const chart = writers.map((point, index) => ({
+    timestamp: point.timestamp,
+    values: {
+      ...(hasWal ? { wal: walRates[index]?.values.wal ?? null } : {}),
+      ...point.values,
+      ...(fromCheckpointer ? { checkpoint: checkpoints[index]?.values.checkpoint ?? null } : {}),
+    },
+  }))
+  const series = [
+    ...(hasWal ? [{ key: 'wal', label: 'WAL generated' }] : []),
+    { key: 'checkpoint', label: 'Checkpoint writes' },
+    { key: 'bgwriter', label: 'Background writer' },
+    { key: 'backend', label: 'Backend writes' },
+  ]
+  return (
+    <ChartPanel
+      title="WAL and checkpoint writes"
+      span={6}
+      loading={
+        samples.isPending || bgwriter.isPending || checkpointer.isPending || wal.isPending
+      }
+      label="Bytes written (MiB/s)"
+      min={0}
+      formatValue={mibPerSecond}
+      data={chart}
+      series={series}
+      note={`Buffers written per second × block size (${blockSize} bytes).${hasWal ? ' WAL from pg_stat_wal.wal_bytes.' : ' pg_stat_wal needs PostgreSQL 14.'}`}
+    />
   )
 }
 
 function ReplicationLag() {
-  const { data, isPending } = useTable('postgres_replication_aggregates')
+  const replication = useTable('postgres_replication_aggregates')
+  const data = latest(replication.data)
+  const isPending = replication.isPending
   const outcomes = useOutcomes()
   let content
-  if (data?.length) {
+  if (data.length) {
     content = (
       <Table density="compact">
         <TableHeader>
@@ -90,13 +251,13 @@ function ReplicationLag() {
       </Table>
     )
   } else if (collected(outcomes, 'postgres.aggregates.replication')) {
-    content = <Note>No standby was connected when the snapshot was taken.</Note>
+    content = <Note>No standby was connected in the last sample.</Note>
   } else {
     const reason = missingReason(outcomes, 'postgres.aggregates.replication')
     content = <Note>Not recorded in this artifact{reason ? `: ${reason}` : ''}.</Note>
   }
   return (
-    <Panel title="Replication lag" sub="from pg_stat_replication" span={6} loading={isPending}>
+    <Panel title="Replication lag" sub="last sample, from pg_stat_replication" span={6} loading={isPending}>
       {content}
     </Panel>
   )
@@ -138,32 +299,15 @@ function DatabaseSize() {
   )
 }
 
-const NEEDS_SAMPLING = 'needs sampling'
-
 export function Postgres() {
   return (
     <Disclosure summary="PostgreSQL" open>
       <DashboardGrid>
         <ConnectionsByState />
-        <GapPanel title="Cache hit ratio" sub="per interval" span={4} gap={NEEDS_SAMPLING}>
-          postgres_database_stats has blks_hit and blks_read. The ratio per interval needs two
-          samples. The Overview shows the ratio since the last statistics reset.
-        </GapPanel>
-        <GapPanel
-          title="Transactions"
-          sub="commits and rollbacks per second"
-          span={6}
-          gap={NEEDS_SAMPLING}
-        >
-          postgres_database_stats has xact_commit and xact_rollback. A rate needs two samples.
-        </GapPanel>
-        <GapPanel title="Temporary files written" span={6} gap={NEEDS_SAMPLING}>
-          postgres_database_stats has temp_files and temp_bytes. A rate needs two samples.
-        </GapPanel>
-        <GapPanel title="WAL and checkpoint writes" span={6} gap={NEEDS_SAMPLING}>
-          postgres_wal_stats and the checkpointer or bgwriter stats have the counters. A rate
-          needs two samples.
-        </GapPanel>
+        <CacheHitRatio />
+        <Transactions />
+        <TemporaryFiles />
+        <WalAndCheckpoints />
         <ReplicationLag />
         <DatabaseSize />
         <GapPanel title="Largest tables" sub="heap, top 6" span={6} gap="no collector">

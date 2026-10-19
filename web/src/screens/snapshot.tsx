@@ -16,7 +16,14 @@ import {
 } from '@momoi-labs/kiso-react'
 import { useQuery } from '@tanstack/react-query'
 import { Outlet, useNavigate, useParams } from '@tanstack/react-router'
-import { routeId, snapshotQuery, snapshotsQuery, tableQuery, type Row } from '../api.ts'
+import {
+  routeId,
+  samplesQuery,
+  snapshotQuery,
+  snapshotsQuery,
+  tableQuery,
+  type Row,
+} from '../api.ts'
 import { duration, utcMinute } from '../format.tsx'
 
 function ArtifactPicker({ current }: { current: string }) {
@@ -73,6 +80,7 @@ function Subtitle({ id }: { id: string }) {
 export function SnapshotLayout() {
   const { snapshotId } = useParams({ from: '/$snapshotId' })
   const { data, error, isPending } = useQuery(snapshotQuery(snapshotId))
+  const sampleCount = useQuery(samplesQuery(snapshotId)).data?.length
 
   if (isPending) {
     return (
@@ -104,7 +112,9 @@ export function SnapshotLayout() {
   const { snapshot, collector_outcomes: outcomes } = data
   const missing = notCollected(outcomes)
   const took = duration(snapshot.started_at_utc, snapshot.finished_at_utc)
-  const missingCount = missing.reduce((total, group) => total + group.count, 0)
+  // Distinct sources, not one per sample: a source that is unsupported in a
+  // 19-sample session is one missing source.
+  const missingCount = new Set(missing.map((group) => group.source)).size
 
   return (
     <>
@@ -121,8 +131,8 @@ export function SnapshotLayout() {
         <PageHeaderTitle>{snapshot.hostname ?? snapshot.file_name}</PageHeaderTitle>
         <PageHeaderDescription>
           <Subtitle id={snapshotId} /> · captured {utcMinute(snapshot.started_at_utc)}
-          {took && ` in ${took}`} · {outcomes.length} collector{' '}
-          {outcomes.length === 1 ? 'outcome' : 'outcomes'}
+          {took && ` in ${took}`}
+          {sampleCount != null && ` · ${sampleCount} ${sampleCount === 1 ? 'sample' : 'samples'}`}
         </PageHeaderDescription>
       </PageHeader>
       {missing.length > 0 && (
@@ -147,7 +157,9 @@ export function SnapshotLayout() {
                       (<code>{group.errorCode}</code>)
                     </>
                   )}
-                  {group.count > 1 && ` ×${group.count}`}
+                  {sampleCount != null && sampleCount > 1 && group.count === sampleCount
+                    ? ', every sample'
+                    : group.count > 1 && ` ×${group.count}`}
                 </li>
               ))}
             </ul>

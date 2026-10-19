@@ -1,6 +1,7 @@
 import {
   Badge,
   Card,
+  Chart,
   CardAction,
   CardContent,
   CardDescription,
@@ -8,8 +9,11 @@ import {
   CardTitle,
   DashboardPanel,
   Skeleton,
+  type ChartSample,
+  type ChartSeries,
 } from '@momoi-labs/kiso-react'
 import type { ReactNode } from 'react'
+import { formatTime } from '../series.ts'
 
 type Span = 3 | 4 | 6 | 8 | 12
 
@@ -58,4 +62,48 @@ export function GapPanel({
 // Text that explains a value: its formula or why it is missing.
 export function Note({ children }: { children: ReactNode }) {
   return <p className="muted">{children}</p>
+}
+
+type ChartPanelProps = Omit<PanelProps, 'children'> & {
+  // The figure label carries the unit, for example "CPU by state (%)".
+  label: string
+  data: ChartSample[]
+  series: ChartSeries[]
+  variant?: 'line' | 'stacked-area'
+  min?: number
+  max?: number
+  formatValue?: (value: number) => string
+  note?: ReactNode
+}
+
+// A time series panel. Every chart on the page shares one sync id, so
+// inspecting a sample in one panel inspects the same time in the others.
+export function ChartPanel({
+  label,
+  data,
+  series,
+  variant,
+  min,
+  max,
+  formatValue,
+  note,
+  ...panel
+}: ChartPanelProps) {
+  return (
+    <Panel {...panel}>
+      <Chart
+        label={label}
+        data={data}
+        series={series}
+        variant={variant}
+        legend={panel.span >= 6 ? 'table' : 'inline'}
+        min={min}
+        max={max}
+        syncId="session"
+        formatTime={formatTime}
+        formatValue={formatValue}
+      />
+      {note && <Note>{note}</Note>}
+    </Panel>
+  )
 }

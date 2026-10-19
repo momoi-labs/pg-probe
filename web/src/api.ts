@@ -20,6 +20,7 @@ export type TableRows = {
   table: string
   columns: { name: string; type: string; nullable: boolean; primary_key: boolean }[]
   rows: Row[]
+  truncated: boolean
 }
 
 export type SnapshotDetail = {
@@ -57,12 +58,25 @@ export const snapshotQuery = (id: string) =>
     queryFn: () => getJson<SnapshotDetail>(`/api/snapshots/${encodeURIComponent(id)}`),
   })
 
-export const tableQuery = (id: string, table: string) =>
+export type Sample = { sample_id: number; taken_at_utc: string }
+
+export const samplesQuery = (id: string) =>
   queryOptions({
-    queryKey: ['table', id, table],
+    queryKey: ['samples', id],
     queryFn: () =>
-      getJson<TableRows>(
-        `/api/snapshots/${encodeURIComponent(id)}/tables/${encodeURIComponent(table)}`,
-      ),
+      getJson<{ samples: Sample[] }>(`/api/snapshots/${encodeURIComponent(id)}/samples`),
+    select: (data) => data.samples,
+  })
+
+// Filters keep equality on a column, for example { cpu_id: '-1' }.
+export const tableQuery = (id: string, table: string, filters: Record<string, string> = {}) =>
+  queryOptions({
+    queryKey: ['table', id, table, filters],
+    queryFn: () => {
+      const search = new URLSearchParams(filters).toString()
+      return getJson<TableRows>(
+        `/api/snapshots/${encodeURIComponent(id)}/tables/${encodeURIComponent(table)}${search ? `?${search}` : ''}`,
+      )
+    },
     select: (data) => data.rows,
   })

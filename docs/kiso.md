@@ -25,6 +25,7 @@ file has a bug.
 | --- | --- |
 | `Panel` | A dashboard panel: Card with title, optional subtitle and badge, in a DashboardPanel span |
 | `GapPanel` | A panel the artifact cannot draw yet. The badge names the missing work: `needs sampling`, `no collector`, `needs schema change` or `blocked` |
+| `ChartPanel` | A time series panel: a Kiso `Chart` in a `Panel`, on the shared `session` sync id |
 | `Note` | Muted text under a value that states its formula or why it is missing |
 
 ## Product rules
@@ -38,6 +39,11 @@ file has a bug.
   to it. No thresholds, danger markers or health colors for now.
 - A metric that the artifact cannot answer shows the unknown treatment and
   says why: not recorded, or it needs more than one sample.
+- Charts use one point per sample, on the timestamps from `/samples`. Rates
+  come from the change between samples. The first sample and any negative
+  change, such as a counter reset, are gaps, never zero.
+- Tiles show the last sample, or the last interval for rates, with a
+  sparkline of the session.
 
 ## Pattern choices
 
