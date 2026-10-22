@@ -4,6 +4,9 @@ goreleaser = "2.17.1"
 # Match the musl cross-build toolchain in .github/workflows/ci.yml.
 zig = "0.15.2"
 "cargo:cargo-zigbuild" = "0.23.0"
+# Match the console build in .github/workflows/release.yml.
+node = "24"
+pnpm = "12.14.0"
 
 [tasks.web]
 description = "Build the review console that pg-probe analyze embeds"
@@ -13,3 +16,8 @@ run = "pnpm --dir web install --frozen-lockfile && pnpm --dir web build"
 description = "Build the static x86_64 musl release binary"
 depends = ["web"]
 run = "cargo zigbuild --locked --release --target x86_64-unknown-linux-musl"
+
+[tasks.analyze]
+description = "Build the console and review artifacts locally"
+depends = ["web"]
+run = "cargo run --release --locked -- analyze"
