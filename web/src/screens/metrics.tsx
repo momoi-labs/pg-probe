@@ -1,7 +1,5 @@
 import {
   Card,
-  DashboardGrid,
-  DashboardPanel,
   Disclosure,
   Skeleton,
   Stat,
@@ -84,7 +82,7 @@ function Tile({ label, loading, value, context, peak, chart }: TileProps) {
     </Card>
   )
   return (
-    <DashboardPanel span={3}>
+    <div>
       {chart ? (
         <a className="tile-link" href={`#${panelId(chart)}`} aria-label={`${label}: open the ${chart} chart`}>
           {card}
@@ -92,7 +90,7 @@ function Tile({ label, loading, value, context, peak, chart }: TileProps) {
       ) : (
         card
       )}
-    </DashboardPanel>
+    </div>
   )
 }
 
@@ -371,7 +369,7 @@ function Overview() {
           Each value is the last sample, or the last interval for rates. Peaks cover the whole
           session. Select a tile to open its chart.
         </Note>
-        <DashboardGrid>
+        <div className="tile-grid">
           <CpuTile />
           <MemoryTile />
           <DiskTile />
@@ -380,7 +378,7 @@ function Overview() {
           <CacheHitTile />
           <WalTile />
           <ReplicaLagTile />
-        </DashboardGrid>
+        </div>
       </div>
     </Disclosure>
   )

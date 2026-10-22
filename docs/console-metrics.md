@@ -17,6 +17,11 @@ how it is derived, so the screens can stay free of formulas.
 - **Read once.** Settings, database sizes, mounts, relations and host identity
   are read in the first sample only. Their panels show that one reading.
 - **Time.** Every time is UTC.
+- **Not supported.** A panel whose source the observed server or host does
+  not have, such as a view added in a later PostgreSQL release, shows "Not
+  supported on PostgreSQL 9.3" or "Not supported on this host" with the reason.
+  "Not recorded in this artifact" means the source exists but the artifact
+  holds no value for it.
 
 ## Overview tiles
 
@@ -50,6 +55,15 @@ panel below that has the full chart.
 | Pressure stall | `/proc/pressure/{cpu,memory,io}` | `avg10` of the "some" line, as reported by the kernel. Absent on older kernels and in some containers |
 | Filesystem usage | `statvfs` on each mount | Used = total − available. Available excludes space reserved for root, so used includes it. Only local disk filesystems are recorded, and none under `/home` |
 | Processes running and blocked | `/proc/stat` | `procs_running` and `procs_blocked` |
+| Swapped in and out | `/proc/vmstat` | Change in `pswpin` and `pswpout` × 4 KiB page ÷ seconds |
+| Major page faults | `/proc/vmstat` | Change in `pgmajfault` ÷ seconds |
+| Pages scanned for reclaim | `/proc/vmstat` | Change in the sum of `pgscan_kswapd_*` and of `pgscan_direct_*` over zones ÷ seconds. Direct reclaim stalls the process that asks for memory |
+| Packets dropped and errors | `/proc/net/dev` | Change in `rx_dropped`, `tx_dropped`, `rx_errors` and `tx_errors` ÷ seconds, summed over the recorded interfaces |
+| Average read and write latency | `/proc/diskstats` | Change in `read_milliseconds` ÷ change in `reads_completed`, and the same for writes, per whole disk. The five disks with the most completed I/O in the session. An interval without I/O is a gap |
+| Average requests in flight | `/proc/diskstats` | Change in `weighted_io_milliseconds` ÷ milliseconds between samples, per whole disk, the same five disks |
+| Cgroup memory and swap | the probe's cgroup | `memory.current` and `memory.swap.current` (v2) or `memory.usage_in_bytes` (v1) |
+| Cgroup I/O | the probe's cgroup | Change in read and write bytes ÷ seconds, summed over devices. From `io.stat` (v2) or `blkio.io_service_bytes_recursive` (v1) |
+| Cgroup limit events | the probe's cgroup | Change per interval in each counter of `cpu.stat` and `memory.events`, the first five |
 
 ## PostgreSQL
 
@@ -68,6 +82,19 @@ panel below that has the full chart.
 | Database size | `pg_database_size()` | Read once |
 | Largest tables | `pg_class` in each database | (`relpages` of the table + its indexes + its TOAST table) × block size. `relpages` is an estimate updated by ANALYZE and VACUUM, chosen over `pg_total_relation_size()`, which reads every file. Read once |
 | Dead tuples | `pg_stat_user_tables` in each database | `n_dead_tup` and `n_live_tup`, estimates kept by the statistics collector. Dead (%) = dead ÷ (dead + live). Read once |
+| Lock requests waiting | `pg_locks` | Count of locks not granted, per lock type, aggregated by the probe |
+| Longest lock wait | `pg_locks.waitstart`, from PostgreSQL 14 | Longest wait among locks not granted, in seconds |
+| Locks held | `pg_locks` | Count of granted locks per mode. Up to five modes, as in Client connections by state |
+| Longest time in state | `pg_stat_activity` | Longest `now() − state_change` among client backends, per state, for active and idle in transaction |
+| Active backends by wait event type | `pg_stat_activity.wait_event_type`, from 9.6 | Count of active client backends per wait event type. No wait event is shown as "Not waiting" |
+| Deadlocks, recovery conflicts and checksum failures | `pg_stat_database` | Change per interval in `deadlocks`, `conflicts` and, from 12, `checksum_failures`, all databases |
+| Sessions ended abnormally | `pg_stat_database`, from 14 | Change per interval in `sessions_abandoned`, `sessions_fatal` and `sessions_killed` |
+| Time reading and writing blocks | `pg_stat_database` | Change in `blk_read_time` and `blk_write_time` ÷ seconds, in ms per second. Zero unless `track_io_timing` is on |
+| Queries canceled by recovery conflicts | `pg_stat_database_conflicts` | Change per interval in each `confl_*` counter. Zero on a primary |
+| WAL files archived | `pg_stat_archiver`, from 9.4 | Change per interval in `archived_count` and `failed_count` |
+| WAL retained by replication slots | `pg_replication_slots`, from 9.4 | Largest retained WAL per slot type, aggregated by the probe |
+| SLRU blocks read | `pg_stat_slru`, from 13 | Change in `blks_read` ÷ seconds per SLRU. Up to five, as in Client connections by state |
+| I/O by operation | `pg_stat_io`, from 16 | Change in reads, writes and extends × `op_bytes` ÷ seconds, all backends and objects |
 
 The probe reads the 20 largest relations and the 20 with the most dead tuples
 in each database.

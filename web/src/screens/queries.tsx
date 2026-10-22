@@ -1,7 +1,6 @@
-import { DashboardGrid } from '@momoi-labs/kiso-react'
 import { missingReason, sum, useOutcomes, useTable } from '../artifact.ts'
 import { rates, useSamples } from '../series.ts'
-import { ChartPanel, GapPanel, Note, Panel } from './panels.tsx'
+import { ChartPanel, GapPanel, Note, Panel, PanelGrid, Slot } from './panels.tsx'
 
 function RowsPanel() {
   const samples = useSamples()
@@ -17,7 +16,6 @@ function RowsPanel() {
   return (
     <ChartPanel
       title="Rows"
-      span={6}
       loading={isPending || samples.isPending}
       label="Rows per second"
       min={0}
@@ -42,7 +40,7 @@ function QuerySource() {
     .map((row) => String(row.database_name))
   const reason = missingReason(outcomes, 'postgres.extensions')
   return (
-    <Panel title="Query source" sub="stated, never guessed" span={12} loading={isPending}>
+    <Panel title="Query source" sub="stated, never guessed" loading={isPending}>
       <Note>
         {databases.length > 0
           ? `pg_stat_statements is installed in ${databases.join(', ')}. The artifact does not read it yet.`
@@ -55,37 +53,46 @@ function QuerySource() {
 
 export function Queries() {
   return (
-    <DashboardGrid>
-      <QuerySource />
-      <GapPanel
-        title="Query latency"
-        sub="percentiles across the window"
-        span={6}
-        gap="blocked"
-      >
-        pg_stat_statements stores totals and means, never a distribution. Percentiles need the
-        server log, which the probe does not read.
-      </GapPanel>
-      <GapPanel title="Query volume" sub="calls per second" span={6} gap="no collector">
-        {STATEMENTS_GAP}
-      </GapPanel>
-      <RowsPanel />
-      <GapPanel
-        title="Time split"
-        sub="non-I/O against block I/O"
-        span={6}
-        gap="no collector"
-      >
-        {STATEMENTS_GAP} It also needs track_io_timing on the server.
-      </GapPanel>
-      <GapPanel
-        title="Most expensive statements"
-        sub="by total time in the window"
-        span={12}
-        gap="no collector"
-      >
-        {STATEMENTS_GAP}
-      </GapPanel>
-    </DashboardGrid>
+    <PanelGrid id="queries" label="Query panels">
+      <Slot id="query-source" size={12}>
+        <QuerySource />
+      </Slot>
+      <Slot id="query-latency" size={6}>
+        <GapPanel
+          title="Query latency"
+          sub="percentiles across the window"
+          gap="blocked"
+        >
+          pg_stat_statements stores totals and means, never a distribution. Percentiles need the
+          server log, which the probe does not read.
+        </GapPanel>
+      </Slot>
+      <Slot id="query-volume" size={6}>
+        <GapPanel title="Query volume" sub="calls per second" gap="no collector">
+          {STATEMENTS_GAP}
+        </GapPanel>
+      </Slot>
+      <Slot id="rows" size={6}>
+        <RowsPanel />
+      </Slot>
+      <Slot id="time-split" size={6}>
+        <GapPanel
+          title="Time split"
+          sub="non-I/O against block I/O"
+          gap="no collector"
+        >
+          {STATEMENTS_GAP} It also needs track_io_timing on the server.
+        </GapPanel>
+      </Slot>
+      <Slot id="most-expensive-statements" size={12}>
+        <GapPanel
+          title="Most expensive statements"
+          sub="by total time in the window"
+          gap="no collector"
+        >
+          {STATEMENTS_GAP}
+        </GapPanel>
+      </Slot>
+    </PanelGrid>
   )
 }

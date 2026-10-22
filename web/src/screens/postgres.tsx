@@ -1,6 +1,5 @@
 import {
   BarGauge,
-  DashboardGrid,
   Disclosure,
   Table,
   TableBody,
@@ -17,11 +16,12 @@ import {
   num,
   sum,
   useOutcomes,
+  useServerVersion,
   useTable,
 } from '../artifact.ts'
 import { bytes } from '../format.tsx'
 import { deltas, points, rates, useSamples, type Values } from '../series.ts'
-import { ChartPanel, Note, Panel } from './panels.tsx'
+import { ChartPanel, Note, NotSupportedPanel, Panel, PanelGrid, Slot } from './panels.tsx'
 
 const MIB = 1024 ** 2
 const oneDecimal = (value: number) => value.toFixed(1)
@@ -66,7 +66,6 @@ function ConnectionsByState() {
   return (
     <ChartPanel
       title="Connections by state"
-      span={8}
       loading={activity.isPending || samples.isPending}
       label="Client connections by state"
       variant="stacked-area"
@@ -104,7 +103,6 @@ function CacheHitRatio() {
   return (
     <ChartPanel
       title="Cache hit ratio"
-      span={4}
       loading={stats.isPending}
       label="Cache hit ratio per interval (%)"
       max={100}
@@ -121,7 +119,6 @@ function Transactions() {
   return (
     <ChartPanel
       title="Transactions"
-      span={6}
       loading={stats.isPending}
       label="Transactions per second"
       min={0}
@@ -144,7 +141,6 @@ function TemporaryFiles() {
   return (
     <ChartPanel
       title="Temporary files written"
-      span={6}
       loading={stats.isPending}
       label="Temporary files written (MiB/s)"
       min={0}
@@ -213,7 +209,6 @@ function WalAndCheckpoints() {
   return (
     <ChartPanel
       title="WAL and checkpoint writes"
-      span={6}
       loading={
         samples.isPending || bgwriter.isPending || checkpointer.isPending || wal.isPending
       }
@@ -266,7 +261,7 @@ function ReplicationLag() {
     content = <Note>Not recorded in this artifact{reason ? `: ${reason}` : ''}.</Note>
   }
   return (
-    <Panel title="Replication lag" sub="last sample, from pg_stat_replication" span={6} loading={isPending}>
+    <Panel title="Replication lag" sub="last sample, from pg_stat_replication" loading={isPending}>
       {content}
     </Panel>
   )
@@ -286,7 +281,7 @@ function DatabaseSize() {
   const format = (value: number) =>
     `${(value / 1024 ** exponent).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} ${IEC[exponent]}`
   return (
-    <Panel title="Database size" sub="point in time" span={6} loading={isPending}>
+    <Panel title="Database size" sub="point in time" loading={isPending}>
       {sized.length > 0 ? (
         <>
           <BarGauge
@@ -318,7 +313,7 @@ function LargestTables() {
   const largest = [...(data ?? [])].sort((a, b) => pages(b) - pages(a)).slice(0, 6)
   const top = largest.length ? pages(largest[0]) * blockSize : 0
   return (
-    <Panel title="Largest tables" sub="heap, indexes and TOAST, top 6" span={6} loading={isPending}>
+    <Panel title="Largest tables" sub="heap, indexes and TOAST, top 6" loading={isPending}>
       {largest.length > 0 ? (
         <>
           <BarGauge
@@ -397,26 +392,543 @@ function DeadTuples() {
     )
   }
   return (
-    <Panel title="Dead tuples" sub="vacuum backlog, top 6" span={12} loading={isPending}>
+    <Panel title="Dead tuples" sub="vacuum backlog, top 6" loading={isPending}>
       {content}
     </Panel>
+  )
+}
+
+// Counts: whole numbers, with one decimal only for axis steps between them.
+const integerValue = (value: number) =>
+  Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)
+const minutes = (value: number) => (value / 60).toFixed(1)
+
+// Whether the observed server is older than `since`. Without a PostgreSQL
+// target nothing is claimed, and the panel shows its own "not recorded" note.
+function useOlderThan(since: number) {
+  const version = useServerVersion()
+  return {
+    older: version.versionNum != null && version.versionNum < since,
+    on: `PostgreSQL ${version.major}`,
+    isPending: version.isPending,
+  }
+}
+
+// The four keys with the most `count` over the session, plus an Other group
+// when there are more than five, so a chart stays within five series.
+function topKeys(rows: Row[], keyOf: (row: Row) => string, column = 'count') {
+  const totals = new Map<string, number>()
+  for (const row of rows) {
+    totals.set(keyOf(row), (totals.get(keyOf(row)) ?? 0) + (num(row, column) ?? 0))
+  }
+  const ranked = [...totals].sort((a, b) => b[1] - a[1]).map(([key]) => key)
+  const grouped = ranked.length > 5
+  const shown = grouped ? ranked.slice(0, 4) : ranked
+  const read = (sampleRows: Row[]): Values => {
+    const values: Values = Object.fromEntries(shown.map((key) => [key, 0]))
+    if (grouped) values.other = 0
+    for (const row of sampleRows) {
+      const key = shown.includes(keyOf(row)) ? keyOf(row) : 'other'
+      values[key] = (values[key] ?? 0) + (num(row, column) ?? 0)
+    }
+    return values
+  }
+  const series = [
+    ...shown.map((key) => ({ key, label: key })),
+    ...(grouped ? [{ key: 'other', label: 'Other' }] : []),
+  ]
+  return { read, series }
+}
+
+const isGranted = (row: Row) => row.granted === 1
+
+function LockWaits() {
+  const samples = useSamples()
+  const locks = useTable('postgres_lock_aggregates')
+  const waiting = (locks.data ?? []).filter((row) => !isGranted(row))
+  const byType = topKeys(waiting, (row) => String(row.lock_type))
+  // A session without waits keeps one flat series at zero.
+  const series = byType.series.length ? byType.series : [{ key: 'waiting', label: 'Waiting' }]
+  const chart = points(samples.data ?? [], locks.data ?? [], (rows) => {
+    if (rows.length === 0) return Object.fromEntries(series.map(({ key }) => [key, null]))
+    return byType.series.length ? byType.read(rows.filter((row) => !isGranted(row))) : { waiting: 0 }
+  })
+  return (
+    <ChartPanel
+      title="Lock waits"
+      loading={locks.isPending || samples.isPending}
+      label="Lock requests waiting, by lock type"
+      variant="stacked-area"
+      min={0}
+      formatValue={integerValue}
+      data={chart}
+      series={locks.data?.length ? series : []}
+    />
+  )
+}
+
+function LockWaitAge() {
+  const samples = useSamples()
+  const locks = useTable('postgres_lock_aggregates')
+  const version = useOlderThan(140000)
+  const label = 'Longest lock wait (s)'
+  if (version.older) {
+    return (
+      <NotSupportedPanel title="Longest lock wait" label={label} on={version.on}>
+        pg_locks.waitstart exists from PostgreSQL 14.
+      </NotSupportedPanel>
+    )
+  }
+  const chart = points(samples.data ?? [], locks.data ?? [], (rows) => {
+    const ages = rows
+      .filter((row) => !isGranted(row))
+      .map((row) => num(row, 'max_wait_age_seconds') ?? 0)
+    return { wait: rows.length ? Math.max(0, ...ages) : null }
+  })
+  return (
+    <ChartPanel
+      title="Longest lock wait"
+      loading={locks.isPending || samples.isPending || version.isPending}
+      label={label}
+      min={0}
+      formatValue={integerValue}
+      data={chart}
+      series={locks.data?.length ? [{ key: 'wait', label: 'Longest wait' }] : []}
+    />
+  )
+}
+
+function LocksHeld() {
+  const samples = useSamples()
+  const locks = useTable('postgres_lock_aggregates')
+  const granted = (locks.data ?? []).filter(isGranted)
+  const byMode = topKeys(granted, (row) => String(row.lock_mode))
+  const chart = points(samples.data ?? [], granted, byMode.read)
+  return (
+    <ChartPanel
+      title="Locks held"
+      loading={locks.isPending || samples.isPending}
+      label="Locks held, by mode"
+      variant="stacked-area"
+      min={0}
+      formatValue={integerValue}
+      data={chart}
+      series={byMode.series}
+    />
+  )
+}
+
+const LONG_STATES = ['active', 'idle in transaction', 'idle in transaction (aborted)']
+
+function TimeInState() {
+  const samples = useSamples()
+  const activity = useTable('postgres_activity_aggregates')
+  const clients = (activity.data ?? []).filter(isClientBackend)
+  const present = LONG_STATES.filter((state) => clients.some((row) => row.state === state))
+  const chart = points(samples.data ?? [], clients, (rows) =>
+    Object.fromEntries(
+      present.map((state) => {
+        const ages = rows
+          .filter((row) => row.state === state)
+          .map((row) => num(row, 'max_age_seconds'))
+          .filter((age) => age != null)
+        return [state, ages.length ? Math.max(...ages) : null]
+      }),
+    ),
+  )
+  return (
+    <ChartPanel
+      title="Longest time in state"
+      loading={activity.isPending || samples.isPending}
+      label="Longest time in state since state_change (min)"
+      min={0}
+      formatValue={minutes}
+      data={chart}
+      series={present.map((state) => ({ key: state, label: state }))}
+    />
+  )
+}
+
+function WaitEvents() {
+  const samples = useSamples()
+  const activity = useTable('postgres_activity_aggregates')
+  const version = useOlderThan(90600)
+  const label = 'Active backends, by wait event type'
+  if (version.older) {
+    return (
+      <NotSupportedPanel title="Wait events" label={label} on={version.on}>
+        pg_stat_activity.wait_event_type exists from PostgreSQL 9.6.
+      </NotSupportedPanel>
+    )
+  }
+  const active = (activity.data ?? []).filter(
+    (row) => isClientBackend(row) && row.state === 'active',
+  )
+  const waitOf = (row: Row) => (row.wait_event_type == null ? 'Not waiting' : String(row.wait_event_type))
+  const byWait = topKeys(active, waitOf)
+  const chart = points(samples.data ?? [], active, byWait.read)
+  return (
+    <ChartPanel
+      title="Wait events"
+      loading={activity.isPending || samples.isPending || version.isPending}
+      label={label}
+      variant="stacked-area"
+      min={0}
+      formatValue={integerValue}
+      data={chart}
+      series={byWait.series}
+    />
+  )
+}
+
+function DatabaseErrors() {
+  const stats = useDatabaseStats()
+  const version = useOlderThan(120000)
+  const columns = version.older ? ['deadlocks', 'conflicts'] : ['deadlocks', 'conflicts', 'checksum_failures']
+  const chart = deltas(stats.samples, stats.rows, totals(...columns), (delta) => delta)
+  return (
+    <ChartPanel
+      title="Deadlocks and conflicts"
+      loading={stats.isPending || version.isPending}
+      label={
+        version.older
+          ? 'Deadlocks and recovery conflicts per interval'
+          : 'Deadlocks, recovery conflicts and checksum failures per interval'
+      }
+      min={0}
+      formatValue={integerValue}
+      data={chart}
+      series={
+        stats.rows.length
+          ? [
+              { key: 'deadlocks', label: 'Deadlocks' },
+              { key: 'conflicts', label: 'Recovery conflicts' },
+              ...(version.older ? [] : [{ key: 'checksum_failures', label: 'Checksum failures' }]),
+            ]
+          : []
+      }
+    />
+  )
+}
+
+function SessionEnds() {
+  const stats = useDatabaseStats()
+  const version = useOlderThan(140000)
+  const label = 'Sessions ended abnormally per interval'
+  if (version.older) {
+    return (
+      <NotSupportedPanel title="Sessions ended abnormally" label={label} on={version.on}>
+        The session counters of pg_stat_database exist from PostgreSQL 14.
+      </NotSupportedPanel>
+    )
+  }
+  const chart = deltas(
+    stats.samples,
+    stats.rows,
+    totals('sessions_abandoned', 'sessions_fatal', 'sessions_killed'),
+    (delta) => delta,
+  )
+  return (
+    <ChartPanel
+      title="Sessions ended abnormally"
+      loading={stats.isPending || version.isPending}
+      label={label}
+      min={0}
+      formatValue={integerValue}
+      data={chart}
+      series={
+        stats.rows.length
+          ? [
+              { key: 'sessions_abandoned', label: 'Abandoned' },
+              { key: 'sessions_fatal', label: 'Fatal' },
+              { key: 'sessions_killed', label: 'Killed' },
+            ]
+          : []
+      }
+    />
+  )
+}
+
+function BlockIoTime() {
+  const stats = useDatabaseStats()
+  const recorded = stats.rows.some((row) => num(row, 'blk_read_time_ms') != null)
+  const chart = rates(stats.samples, stats.rows, (rows) => {
+    const values = totals('blk_read_time_ms', 'blk_write_time_ms')(rows)
+    return {
+      read: recorded ? values.blk_read_time_ms : null,
+      write: recorded ? values.blk_write_time_ms : null,
+    }
+  })
+  return (
+    <ChartPanel
+      title="Block I/O time"
+      loading={stats.isPending}
+      label="Time reading and writing blocks (ms per second)"
+      min={0}
+      formatValue={oneDecimal}
+      data={chart}
+      series={
+        recorded
+          ? [
+              { key: 'read', label: 'Read' },
+              { key: 'write', label: 'Write' },
+            ]
+          : []
+      }
+    />
+  )
+}
+
+function StandbyConflicts() {
+  const samples = useSamples()
+  const conflicts = useTable('postgres_standby_conflicts')
+  const kinds = ['confl_snapshot', 'confl_lock', 'confl_bufferpin', 'confl_deadlock', 'confl_tablespace']
+  const chart = deltas(samples.data ?? [], conflicts.data ?? [], totals(...kinds), (delta) => delta)
+  return (
+    <ChartPanel
+      title="Standby conflicts"
+      loading={conflicts.isPending || samples.isPending}
+      label="Queries canceled by recovery conflicts per interval"
+      min={0}
+      formatValue={integerValue}
+      data={chart}
+      series={
+        conflicts.data?.length
+          ? [
+              { key: 'confl_snapshot', label: 'Snapshot' },
+              { key: 'confl_lock', label: 'Lock' },
+              { key: 'confl_bufferpin', label: 'Buffer pin' },
+              { key: 'confl_deadlock', label: 'Deadlock' },
+              { key: 'confl_tablespace', label: 'Tablespace' },
+            ]
+          : []
+      }
+    />
+  )
+}
+
+function WalArchiving() {
+  const samples = useSamples()
+  const archiver = useTable('postgres_archiver_stats')
+  const version = useOlderThan(90400)
+  const label = 'WAL files archived per interval'
+  if (version.older) {
+    return (
+      <NotSupportedPanel title="WAL archiving" label={label} on={version.on}>
+        pg_stat_archiver exists from PostgreSQL 9.4.
+      </NotSupportedPanel>
+    )
+  }
+  const chart = deltas(
+    samples.data ?? [],
+    archiver.data ?? [],
+    (rows) => ({
+      archived: num(rows[0], 'archived_count'),
+      failed: num(rows[0], 'failed_count'),
+    }),
+    (delta) => delta,
+  )
+  return (
+    <ChartPanel
+      title="WAL archiving"
+      loading={archiver.isPending || samples.isPending || version.isPending}
+      label={label}
+      min={0}
+      formatValue={integerValue}
+      data={chart}
+      series={
+        archiver.data?.length
+          ? [
+              { key: 'archived', label: 'Archived' },
+              { key: 'failed', label: 'Failed' },
+            ]
+          : []
+      }
+    />
+  )
+}
+
+function ReplicationSlots() {
+  const samples = useSamples()
+  const slots = useTable('postgres_slot_aggregates')
+  const version = useOlderThan(90400)
+  const label = 'WAL retained by replication slots (MiB)'
+  if (version.older) {
+    return (
+      <NotSupportedPanel title="Replication slots" label={label} on={version.on}>
+        Replication slots exist from PostgreSQL 9.4.
+      </NotSupportedPanel>
+    )
+  }
+  const types = [...new Set((slots.data ?? []).map((row) => String(row.slot_type)))].slice(0, 5)
+  const chart = points(samples.data ?? [], slots.data ?? [], (rows) =>
+    Object.fromEntries(
+      types.map((type) => {
+        const retained = rows
+          .filter((row) => row.slot_type === type)
+          .map((row) => num(row, 'max_retained_bytes'))
+          .filter((value) => value != null)
+        return [type, retained.length ? Math.max(...retained) / MIB : null]
+      }),
+    ),
+  )
+  return (
+    <ChartPanel
+      title="Replication slots"
+      loading={slots.isPending || samples.isPending || version.isPending}
+      label={label}
+      min={0}
+      formatValue={oneDecimal}
+      data={chart}
+      series={types.map((type) => ({ key: type, label: `Largest ${type} slot` }))}
+    />
+  )
+}
+
+function SlruReads() {
+  const samples = useSamples()
+  const slru = useTable('postgres_slru_stats')
+  const version = useOlderThan(130000)
+  const label = 'SLRU blocks read from disk per second'
+  if (version.older) {
+    return (
+      <NotSupportedPanel title="SLRU reads" label={label} on={version.on}>
+        pg_stat_slru exists from PostgreSQL 13.
+      </NotSupportedPanel>
+    )
+  }
+  const byName = topKeys(slru.data ?? [], (row) => String(row.name), 'blocks_read')
+  const chart = rates(samples.data ?? [], slru.data ?? [], (rows) =>
+    rows.length ? byName.read(rows) : Object.fromEntries(byName.series.map(({ key }) => [key, null])),
+  )
+  return (
+    <ChartPanel
+      title="SLRU reads"
+      loading={slru.isPending || samples.isPending || version.isPending}
+      label={label}
+      min={0}
+      formatValue={oneDecimal}
+      data={chart}
+      series={byName.series}
+    />
+  )
+}
+
+function IoByOperation() {
+  const samples = useSamples()
+  const io = useTable('postgres_io_stats')
+  const version = useOlderThan(160000)
+  const label = 'I/O by operation, all backends (MiB/s)'
+  if (version.older) {
+    return (
+      <NotSupportedPanel title="I/O by operation" label={label} on={version.on}>
+        pg_stat_io exists from PostgreSQL 16.
+      </NotSupportedPanel>
+    )
+  }
+  const operationBytes = (rows: Row[], column: string) =>
+    rows.reduce((total, row) => total + (num(row, column) ?? 0) * (num(row, 'op_bytes') ?? 0), 0) / MIB
+  const chart = rates(samples.data ?? [], io.data ?? [], (rows) =>
+    rows.length
+      ? {
+          reads: operationBytes(rows, 'reads'),
+          writes: operationBytes(rows, 'writes'),
+          extends: operationBytes(rows, 'extends'),
+        }
+      : { reads: null, writes: null, extends: null },
+  )
+  return (
+    <ChartPanel
+      title="I/O by operation"
+      loading={io.isPending || samples.isPending || version.isPending}
+      label={label}
+      min={0}
+      formatValue={twoDecimals}
+      data={chart}
+      series={
+        io.data?.length
+          ? [
+              { key: 'reads', label: 'Reads' },
+              { key: 'writes', label: 'Writes' },
+              { key: 'extends', label: 'Extends' },
+            ]
+          : []
+      }
+    />
   )
 }
 
 export function Postgres() {
   return (
     <Disclosure summary="PostgreSQL" open>
-      <DashboardGrid>
-        <ConnectionsByState />
-        <CacheHitRatio />
-        <Transactions />
-        <TemporaryFiles />
-        <WalAndCheckpoints />
-        <ReplicationLag />
-        <DatabaseSize />
-        <LargestTables />
-        <DeadTuples />
-      </DashboardGrid>
+      <PanelGrid id="postgres" label="PostgreSQL panels">
+        <Slot id="connections-by-state" size={8}>
+          <ConnectionsByState />
+        </Slot>
+        <Slot id="cache-hit-ratio" size={4}>
+          <CacheHitRatio />
+        </Slot>
+        <Slot id="transactions" size={6}>
+          <Transactions />
+        </Slot>
+        <Slot id="temporary-files-written" size={6}>
+          <TemporaryFiles />
+        </Slot>
+        <Slot id="wal-and-checkpoint-writes" size={6}>
+          <WalAndCheckpoints />
+        </Slot>
+        <Slot id="replication-lag" size={6}>
+          <ReplicationLag />
+        </Slot>
+        <Slot id="database-size" size={6}>
+          <DatabaseSize />
+        </Slot>
+        <Slot id="largest-tables" size={6}>
+          <LargestTables />
+        </Slot>
+        <Slot id="dead-tuples" size={12}>
+          <DeadTuples />
+        </Slot>
+        <Slot id="lock-waits" size={6}>
+          <LockWaits />
+        </Slot>
+        <Slot id="longest-lock-wait" size={6}>
+          <LockWaitAge />
+        </Slot>
+        <Slot id="locks-held" size={6}>
+          <LocksHeld />
+        </Slot>
+        <Slot id="longest-time-in-state" size={6}>
+          <TimeInState />
+        </Slot>
+        <Slot id="wait-events" size={6}>
+          <WaitEvents />
+        </Slot>
+        <Slot id="deadlocks-and-conflicts" size={6}>
+          <DatabaseErrors />
+        </Slot>
+        <Slot id="sessions-ended-abnormally" size={6}>
+          <SessionEnds />
+        </Slot>
+        <Slot id="block-i-o-time" size={6}>
+          <BlockIoTime />
+        </Slot>
+        <Slot id="standby-conflicts" size={6}>
+          <StandbyConflicts />
+        </Slot>
+        <Slot id="wal-archiving" size={6}>
+          <WalArchiving />
+        </Slot>
+        <Slot id="replication-slots" size={6}>
+          <ReplicationSlots />
+        </Slot>
+        <Slot id="slru-reads" size={6}>
+          <SlruReads />
+        </Slot>
+        <Slot id="i-o-by-operation" size={6}>
+          <IoByOperation />
+        </Slot>
+      </PanelGrid>
     </Disclosure>
   )
 }

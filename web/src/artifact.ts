@@ -49,3 +49,24 @@ export function missingReason(outcomes: Row[], source: string) {
 
 export const collected = (outcomes: Row[], source: string) =>
   outcomes.some((row) => row.source === source && row.status === 'collected')
+
+// The error code of a source the collector marked unsupported on the observed
+// server or host, for example "not_in_server_version". Null otherwise.
+export function unsupportedCode(outcomes: Row[], source: string) {
+  const row = outcomes.find((outcome) => outcome.source === source && outcome.status === 'unsupported')
+  return row ? String(row.error_code ?? 'unsupported') : null
+}
+
+// server_version_num and the major version for copy, such as "9.3" or "16".
+// Null without a PostgreSQL target.
+export function useServerVersion() {
+  const { data, isPending } = useTable('postgres_target')
+  const versionNum = num(data?.[0], 'server_version_num')
+  const major =
+    versionNum == null
+      ? null
+      : versionNum >= 100000
+        ? String(Math.floor(versionNum / 10000))
+        : `${Math.floor(versionNum / 10000)}.${Math.floor(versionNum / 100) % 100}`
+  return { versionNum, major, isPending }
+}

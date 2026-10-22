@@ -1,8 +1,8 @@
-import { DashboardGrid, Disclosure, Meter } from '@momoi-labs/kiso-react'
+import { Disclosure, Meter } from '@momoi-labs/kiso-react'
 import type { Row } from '../api.ts'
-import { missingReason, num, useOutcomes, useTable } from '../artifact.ts'
+import { missingReason, num, unsupportedCode, useOutcomes, useTable } from '../artifact.ts'
 import { deltas, points, rates, useSamples, type Values } from '../series.ts'
-import { ChartPanel, Note, Panel } from './panels.tsx'
+import { ChartPanel, Note, NotSupportedPanel, Panel, PanelGrid, Slot } from './panels.tsx'
 
 const GIB = 1024 ** 3
 const MIB = 1024 ** 2
@@ -57,7 +57,6 @@ function CpuUtilization() {
   return (
     <ChartPanel
       title="CPU utilization"
-      span={8}
       loading={isPending}
       label="CPU utilization by state (%)"
       variant="stacked-area"
@@ -87,7 +86,6 @@ function LoadAverage() {
   return (
     <ChartPanel
       title="Load average"
-      span={4}
       loading={isPending || samples.isPending}
       label="Load average, 1 / 5 / 15 minutes"
       min={0}
@@ -137,7 +135,6 @@ function Memory() {
   return (
     <ChartPanel
       title="Memory"
-      span={8}
       loading={isPending || samples.isPending}
       label="Memory by use, up to MemTotal (GiB)"
       variant="stacked-area"
@@ -167,7 +164,6 @@ function Swap() {
   return (
     <ChartPanel
       title="Swap in use"
-      span={4}
       loading={isPending || samples.isPending}
       label="Swap used (GiB)"
       min={0}
@@ -209,7 +205,6 @@ function DiskThroughput() {
   return (
     <ChartPanel
       title="Disk throughput"
-      span={6}
       loading={disks.isPending || samples.isPending}
       label="Disk throughput, all disks (MiB/s)"
       min={0}
@@ -270,7 +265,6 @@ function DiskUtilization() {
   return (
     <ChartPanel
       title="Disk utilization"
-      span={6}
       loading={isPending}
       label="Disk busy time, five busiest disks (%)"
       min={0}
@@ -289,7 +283,7 @@ function PressureStall() {
   if (!isPending && !data?.length) {
     const reason = missingReason(outcomes, 'proc.pressure')
     return (
-      <Panel title="Pressure stall" sub="some, 10s window" span={6}>
+      <Panel title="Pressure stall" sub="some, 10s window">
         <Note>
           Not recorded in this artifact
           {reason
@@ -316,7 +310,6 @@ function PressureStall() {
   return (
     <ChartPanel
       title="Pressure stall"
-      span={6}
       loading={isPending || samples.isPending}
       label="Pressure stall, some tasks, 10 s average (%)"
       min={0}
@@ -337,7 +330,7 @@ function FilesystemUsage() {
     .filter((row) => row.mount_point != null && num(row, 'total_bytes') != null)
     .sort((a, b) => (num(b, 'total_bytes') ?? 0) - (num(a, 'total_bytes') ?? 0))
   return (
-    <Panel title="Filesystem usage" sub="point in time, local disks" span={6} loading={isPending}>
+    <Panel title="Filesystem usage" sub="point in time, local disks" loading={isPending}>
       {mounts.length > 0 ? (
         <>
           <div className="stack-sm">
@@ -371,7 +364,7 @@ function NetworkThroughput() {
   const interfaces = [...new Set((data ?? []).map((row) => String(row.interface)))]
   if (!isPending && interfaces.length === 0) {
     return (
-      <Panel title="Network throughput" sub="all interfaces" span={6}>
+      <Panel title="Network throughput" sub="all interfaces">
         <Note>
           Not recorded in this artifact. Captures before schema version 3 have no network
           counters.
@@ -390,7 +383,6 @@ function NetworkThroughput() {
   return (
     <ChartPanel
       title="Network throughput"
-      span={6}
       loading={isPending || samples.isPending}
       label="Network throughput, all interfaces (MiB/s)"
       min={0}
@@ -414,7 +406,6 @@ function Processes() {
   return (
     <ChartPanel
       title="Processes"
-      span={6}
       loading={isPending || samples.isPending}
       label="Processes running and blocked"
       min={0}
@@ -428,21 +419,402 @@ function Processes() {
   )
 }
 
+// Counts: whole numbers, with one decimal only for axis steps between them.
+const integerValue = (value: number) =>
+  Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)
+
+// Kernel page size for the swap counters in /proc/vmstat.
+const PAGE_BYTES = 4096
+
+const vmEvent = (rows: Row[], key: string) =>
+  num(
+    rows.find((row) => row.key === key),
+    'value',
+  )
+
+// Sum of the per-zone counters that share a prefix, such as pgscan_direct_.
+const vmEvents = (rows: Row[], prefix: string) => {
+  const matching = rows.filter((row) => String(row.key).startsWith(prefix))
+  return matching.length ? matching.reduce((total, row) => total + (num(row, 'value') ?? 0), 0) : null
+}
+
+function SwapActivity() {
+  const samples = useSamples()
+  const { data, isPending } = useTable('linux_vm_event')
+  const chart = rates(samples.data ?? [], data ?? [], (rows) => {
+    const swapIn = vmEvent(rows, 'pswpin')
+    const swapOut = vmEvent(rows, 'pswpout')
+    return {
+      in: swapIn == null ? null : (swapIn * PAGE_BYTES) / MIB,
+      out: swapOut == null ? null : (swapOut * PAGE_BYTES) / MIB,
+    }
+  })
+  return (
+    <ChartPanel
+      title="Swap activity"
+      loading={isPending || samples.isPending}
+      label="Swapped in and out (MiB/s)"
+      min={0}
+      formatValue={oneDecimal}
+      data={chart}
+      series={
+        data?.length
+          ? [
+              { key: 'in', label: 'Swapped in' },
+              { key: 'out', label: 'Swapped out' },
+            ]
+          : []
+      }
+    />
+  )
+}
+
+function MajorFaults() {
+  const samples = useSamples()
+  const { data, isPending } = useTable('linux_vm_event')
+  const chart = rates(samples.data ?? [], data ?? [], (rows) => ({
+    major: vmEvent(rows, 'pgmajfault'),
+  }))
+  return (
+    <ChartPanel
+      title="Major page faults"
+      loading={isPending || samples.isPending}
+      label="Major page faults per second"
+      min={0}
+      formatValue={integerValue}
+      data={chart}
+      series={data?.length ? [{ key: 'major', label: 'Major faults' }] : []}
+    />
+  )
+}
+
+function PageReclaim() {
+  const samples = useSamples()
+  const { data, isPending } = useTable('linux_vm_event')
+  const chart = rates(samples.data ?? [], data ?? [], (rows) => ({
+    kswapd: vmEvents(rows, 'pgscan_kswapd'),
+    direct: vmEvents(rows, 'pgscan_direct_'),
+  }))
+  return (
+    <ChartPanel
+      title="Page reclaim"
+      loading={isPending || samples.isPending}
+      label="Pages scanned for reclaim per second"
+      min={0}
+      formatValue={integerValue}
+      data={chart}
+      series={
+        data?.length
+          ? [
+              { key: 'kswapd', label: 'kswapd, in the background' },
+              { key: 'direct', label: 'Direct, by the allocating process' },
+            ]
+          : []
+      }
+    />
+  )
+}
+
+function NetworkErrors() {
+  const samples = useSamples()
+  const { data, isPending } = useTable('linux_network_io')
+  const total = (rows: Row[], column: string) =>
+    rows.length ? rows.reduce((sum, row) => sum + (num(row, column) ?? 0), 0) : null
+  const chart = rates(samples.data ?? [], data ?? [], (rows) => ({
+    rx_dropped: total(rows, 'rx_dropped'),
+    tx_dropped: total(rows, 'tx_dropped'),
+    rx_errors: total(rows, 'rx_errors'),
+    tx_errors: total(rows, 'tx_errors'),
+  }))
+  return (
+    <ChartPanel
+      title="Network drops and errors"
+      loading={isPending || samples.isPending}
+      label="Packets dropped and errors per second, all interfaces"
+      min={0}
+      formatValue={oneDecimal}
+      data={chart}
+      series={
+        data?.length
+          ? [
+              { key: 'rx_dropped', label: 'Received, dropped' },
+              { key: 'tx_dropped', label: 'Sent, dropped' },
+              { key: 'rx_errors', label: 'Received, errors' },
+              { key: 'tx_errors', label: 'Sent, errors' },
+            ]
+          : []
+      }
+    />
+  )
+}
+
+// The five whole disks with the most completed I/O over the session.
+function busiestDisks(rows: Row[], names: string[]) {
+  const done = (name: string) => {
+    const own = rows.filter((row) => row.kernel_name === name)
+    const count = (row: Row | undefined) =>
+      (num(row, 'reads_completed') ?? 0) + (num(row, 'writes_completed') ?? 0)
+    return own.length < 2 ? 0 : count(own[own.length - 1]) - count(own[0])
+  }
+  return [...names]
+    .map((name) => ({ name, done: done(name) }))
+    .filter(({ done }) => done > 0)
+    .sort((a, b) => b.done - a.done)
+    .slice(0, 5)
+    .map(({ name }) => name)
+}
+
+function DiskLatency({ direction }: { direction: 'read' | 'write' }) {
+  const samples = useSamples()
+  const disks = useDisks()
+  const busiest = busiestDisks(disks.rows, disks.names)
+  const time = `${direction}_milliseconds`
+  const completed = `${direction}s_completed`
+  const counters = (rows: Row[]): Values => {
+    const values: Values = {}
+    for (const name of busiest) {
+      const row = rows.find((candidate) => candidate.kernel_name === name)
+      values[`${name}:ms`] = num(row, time)
+      values[`${name}:ios`] = num(row, completed)
+    }
+    return values
+  }
+  const chart = deltas(samples.data ?? [], disks.rows, counters, (delta) =>
+    Object.fromEntries(
+      busiest.map((name) => {
+        const ms = delta[`${name}:ms`]
+        const ios = delta[`${name}:ios`]
+        return [name, ms == null || ios == null || ios === 0 ? null : ms / ios]
+      }),
+    ),
+  )
+  return (
+    <ChartPanel
+      title={direction === 'read' ? 'Disk read latency' : 'Disk write latency'}
+      loading={disks.isPending || samples.isPending}
+      label={`Average ${direction} latency, five busiest disks (ms)`}
+      min={0}
+      formatValue={oneDecimal}
+      data={chart}
+      series={busiest.map((name) => ({ key: name, label: name }))}
+    />
+  )
+}
+
+function DiskQueue() {
+  const samples = useSamples()
+  const disks = useDisks()
+  const busiest = busiestDisks(disks.rows, disks.names)
+  const chart = deltas(
+    samples.data ?? [],
+    disks.rows,
+    (rows) =>
+      Object.fromEntries(
+        busiest.map((name) => [
+          name,
+          num(
+            rows.find((row) => row.kernel_name === name),
+            'weighted_io_milliseconds',
+          ),
+        ]),
+      ),
+    (delta, seconds) =>
+      Object.fromEntries(
+        Object.entries(delta).map(([name, ms]) => [name, ms == null ? null : ms / (seconds * 1000)]),
+      ),
+  )
+  return (
+    <ChartPanel
+      title="Disk queue depth"
+      loading={disks.isPending || samples.isPending}
+      label="Average requests in flight, five busiest disks"
+      min={0}
+      formatValue={oneDecimal}
+      data={chart}
+      series={busiest.map((name) => ({ key: name, label: name }))}
+    />
+  )
+}
+
+function CgroupMemory() {
+  const samples = useSamples()
+  const { data, isPending } = useTable('linux_cgroup_usage')
+  const recorded = (data ?? []).some(
+    (row) => num(row, 'memory_current_bytes') != null || num(row, 'swap_current_bytes') != null,
+  )
+  const chart = points(samples.data ?? [], data ?? [], (rows) => {
+    const memory = num(rows[0], 'memory_current_bytes')
+    const swap = num(rows[0], 'swap_current_bytes')
+    return {
+      memory: memory == null ? null : memory / GIB,
+      swap: swap == null ? null : swap / GIB,
+    }
+  })
+  return (
+    <ChartPanel
+      title="Cgroup memory"
+      loading={isPending || samples.isPending}
+      label="Memory and swap charged to the cgroup (GiB)"
+      min={0}
+      formatValue={oneDecimal}
+      data={chart}
+      series={
+        recorded
+          ? [
+              { key: 'memory', label: 'Memory' },
+              { key: 'swap', label: 'Swap' },
+            ]
+          : []
+      }
+    />
+  )
+}
+
+function CgroupIo() {
+  const samples = useSamples()
+  const { data, isPending } = useTable('linux_cgroup_io')
+  const outcomes = useOutcomes()
+  const label = 'Cgroup I/O, all devices (MiB/s)'
+  if (unsupportedCode(outcomes, 'proc.cgroup.io')) {
+    return (
+      <NotSupportedPanel title="Cgroup I/O" label={label} on="this host">
+        The probe's cgroup has no io.stat file (cgroup v2) or blkio.io_service_bytes_recursive file (cgroup v1).
+      </NotSupportedPanel>
+    )
+  }
+  const total = (rows: Row[], column: string) =>
+    rows.length ? rows.reduce((sum, row) => sum + (num(row, column) ?? 0), 0) / MIB : null
+  const chart = rates(samples.data ?? [], data ?? [], (rows) => ({
+    read: total(rows, 'read_bytes'),
+    write: total(rows, 'write_bytes'),
+  }))
+  return (
+    <ChartPanel
+      title="Cgroup I/O"
+      loading={isPending || samples.isPending}
+      label={label}
+      min={0}
+      formatValue={oneDecimal}
+      data={chart}
+      series={
+        data?.length
+          ? [
+              { key: 'read', label: 'Read' },
+              { key: 'write', label: 'Write' },
+            ]
+          : []
+      }
+    />
+  )
+}
+
+function CgroupEvents() {
+  const samples = useSamples()
+  const { data, isPending } = useTable('linux_cgroup_event')
+  const outcomes = useOutcomes()
+  const label = 'Cgroup limit events per interval'
+  if (unsupportedCode(outcomes, 'proc.cgroup.events')) {
+    return (
+      <NotSupportedPanel title="Cgroup events" label={label} on="this host">
+        The probe's cgroup has no cpu.stat or memory.events counters.
+      </NotSupportedPanel>
+    )
+  }
+  const keyOf = (row: Row) => `${row.controller}.${row.event_name}`
+  const keys = [...new Set((data ?? []).map(keyOf))].slice(0, 5)
+  const chart = deltas(
+    samples.data ?? [],
+    data ?? [],
+    (rows) =>
+      Object.fromEntries(
+        keys.map((key) => [
+          key,
+          num(
+            rows.find((row) => keyOf(row) === key),
+            'cumulative_value',
+          ),
+        ]),
+      ),
+    (delta) => delta,
+  )
+  return (
+    <ChartPanel
+      title="Cgroup events"
+      loading={isPending || samples.isPending}
+      label={label}
+      min={0}
+      formatValue={integerValue}
+      data={chart}
+      series={keys.map((key) => ({ key, label: key }))}
+    />
+  )
+}
+
 export function System() {
   return (
     <Disclosure summary="System" open>
-      <DashboardGrid>
-        <CpuUtilization />
-        <LoadAverage />
-        <Memory />
-        <Swap />
-        <DiskThroughput />
-        <DiskUtilization />
-        <NetworkThroughput />
-        <PressureStall />
-        <FilesystemUsage />
-        <Processes />
-      </DashboardGrid>
+      <PanelGrid id="system" label="System panels">
+        <Slot id="cpu-utilization" size={8}>
+          <CpuUtilization />
+        </Slot>
+        <Slot id="load-average" size={4}>
+          <LoadAverage />
+        </Slot>
+        <Slot id="memory" size={8}>
+          <Memory />
+        </Slot>
+        <Slot id="swap-in-use" size={4}>
+          <Swap />
+        </Slot>
+        <Slot id="disk-throughput" size={6}>
+          <DiskThroughput />
+        </Slot>
+        <Slot id="disk-utilization" size={6}>
+          <DiskUtilization />
+        </Slot>
+        <Slot id="network-throughput" size={6}>
+          <NetworkThroughput />
+        </Slot>
+        <Slot id="pressure-stall" size={6}>
+          <PressureStall />
+        </Slot>
+        <Slot id="filesystem-usage" size={6}>
+          <FilesystemUsage />
+        </Slot>
+        <Slot id="processes" size={6}>
+          <Processes />
+        </Slot>
+        <Slot id="swap-activity" size={6}>
+          <SwapActivity />
+        </Slot>
+        <Slot id="major-page-faults" size={6}>
+          <MajorFaults />
+        </Slot>
+        <Slot id="page-reclaim" size={6}>
+          <PageReclaim />
+        </Slot>
+        <Slot id="network-drops-and-errors" size={6}>
+          <NetworkErrors />
+        </Slot>
+        <Slot id="disk-read-latency" size={6}>
+          <DiskLatency direction="read" />
+        </Slot>
+        <Slot id="disk-write-latency" size={6}>
+          <DiskLatency direction="write" />
+        </Slot>
+        <Slot id="disk-queue-depth" size={6}>
+          <DiskQueue />
+        </Slot>
+        <Slot id="cgroup-memory" size={6}>
+          <CgroupMemory />
+        </Slot>
+        <Slot id="cgroup-i-o" size={6}>
+          <CgroupIo />
+        </Slot>
+        <Slot id="cgroup-events" size={6}>
+          <CgroupEvents />
+        </Slot>
+      </PanelGrid>
     </Disclosure>
   )
 }

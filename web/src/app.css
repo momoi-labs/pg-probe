@@ -1,5 +1,27 @@
 /* Product CSS. Loaded after the Kiso stylesheet. */
 
+/* The Overview tiles: a fixed row of four. DashboardGrid is a pane grid the
+   reader rearranges, and a pane head is a drag handle, so it cannot hold a
+   tile that is a whole-card link. Columns follow DashboardGrid's widths. */
+.tile-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--presentation-grid-gap);
+}
+.tile-grid > * > [data-slot='card'] {
+  height: 100%;
+}
+@media (max-width: 1024px) {
+  .tile-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .tile-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* A dashboard tile that links to its full chart. Kiso allows a whole Card as a
    Link: elevated surface on hover, focus ring on focus. */
 .tile-link {
@@ -20,11 +42,13 @@
   outline-offset: 2px;
 }
 
-/* The panel a tile links to: clear the sticky header, and mark it briefly. */
+/* The panel a tile links to: clear the sticky header, and mark it briefly.
+   The anchor sits in the pane body, since a pane takes no DOM id. */
 .panel-anchor {
-  scroll-margin-top: calc(var(--spacing-3xl) + var(--spacing-lg));
+  display: block;
+  scroll-margin-top: calc(var(--spacing-3xl) + var(--spacing-lg) + var(--spacing-3xl));
 }
-.panel-anchor:target > [data-slot='card'] {
+.grid-pane:has(> .grid-pane-body > .panel-anchor:target) {
   animation: panel-arrival 1.6s var(--motion-easing-standard);
 }
 @keyframes panel-arrival {
@@ -36,7 +60,7 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .panel-anchor:target > [data-slot='card'] {
+  .grid-pane:has(> .grid-pane-body > .panel-anchor:target) {
     animation: none;
     box-shadow: 0 0 0 2px var(--color-focus);
   }

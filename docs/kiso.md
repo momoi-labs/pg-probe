@@ -7,7 +7,7 @@ file has a bug.
 
 ## Contracts
 
-- Package: `@momoi-labs/kiso-react` 0.17.0 and `@momoi-labs/kiso` 0.21.0 in
+- Package: `@momoi-labs/kiso-react` 0.20.0 and `@momoi-labs/kiso` 0.25.0 in
   `web/`.
 - Contracts: `web/node_modules/@momoi-labs/kiso/kiso/`. Start at `AGENTS.md`.
 
@@ -23,18 +23,22 @@ file has a bug.
 
 | Component | Use |
 | --- | --- |
-| `Panel` | A dashboard panel: Card with title, optional subtitle and badge, in a DashboardPanel span |
+| `PanelGrid` | A section's panels in a `DashboardGrid`, which is a pane grid. The reader moves and resizes them, and the layout is saved in `localStorage` per section. Each child is a `Slot` with the pane id and default size |
+| `Panel` | A dashboard panel: a `DashboardPanel` with title, optional subtitle and badge. Its id is the title as a slug and must match its `Slot`. An anchor in the body is the target of Overview tile links |
 | `GapPanel` | A panel the artifact cannot draw yet. The badge names the missing work: `needs sampling`, `no collector`, `needs schema change` or `blocked` |
-| `ChartPanel` | A time series panel: a Kiso `Chart` in a `Panel`, on the shared `session` sync id |
+| `ChartPanel` | A time series panel: a Kiso `Chart` in a pane, on the shared `session` sync id, where a click pins one time on every chart. The pane heading is the chart label, with measure and unit, and the chart hides its own caption. The legend table shows p50, p75, p95, p99, and the last sample instead of max and average. |
+| `NotSupportedPanel` | A panel whose metric the observed server or host cannot provide. An informational EmptyState: "Not supported on PostgreSQL 9.3" or "on this host", and why |
 | `Note` | Muted text that says why a value is missing. Always visible |
 
 ## Product rules
 
-- Appearance is set once on `<html>` in `web/index.html`: accent `gold`,
-  chart style `rounded`, corner style `rounded`, corner size `medium`, no
-  corner marks, default visual style and app shell, frame scope `panels`,
-  background `dots`. `data-theme` stays off so the console follows the system
-  theme.
+- Appearance is set once on `<html>` in `web/index.html`, from the Kiso
+  settings: accent `gold`; charts with straight lines, dot fill, standard
+  layout and a table legend; solid borders; small rounded corners without
+  marks; default visual style and app shell; frame and marks on panels;
+  quiet dot background on both placements; solid panel fill and theme paper
+  tone. `data-theme` stays off so the console follows the system theme.
+  Charts inherit these attributes and set no chart style props.
 - Show facts and derived values only. The screens carry no formulas: every
   derived value is documented in `docs/console-metrics.md`, which changes with
   the screen that shows the value. No thresholds, danger markers or health
@@ -55,8 +59,8 @@ file has a bug.
 | --- | --- |
 | Shell (`screens/shell.tsx`) | Application shell, `layout="topbar"`. Metrics, Logs and Queries are Header navigation |
 | Snapshot header (`screens/snapshot.tsx`) | Dashboard page framing: PageHeader with the artifact Select, and an Alert for sources that were not collected |
-| Metrics (`screens/metrics.tsx`, `system.tsx`, `postgres.tsx`) | Dashboard, one Disclosure per section |
-| Queries (`screens/queries.tsx`) | Dashboard |
+| Metrics (`screens/metrics.tsx`, `system.tsx`, `postgres.tsx`) | Dashboard, one Disclosure per section. System and PostgreSQL use `PanelGrid`. Overview tiles sit in the product `.tile-grid`: each tile is a whole-card link, and a pane head is a drag handle |
+| Queries (`screens/queries.tsx`) | Dashboard, `PanelGrid` |
 | Logs (`screens/not-collected.tsx`) | Empty states, informational |
 | No snapshots, list error (`screens/start.tsx`) | Empty states, first run; Errors |
 
