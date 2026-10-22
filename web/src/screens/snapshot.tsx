@@ -26,6 +26,7 @@ import {
   type Row,
 } from '../api.ts'
 import { duration, utcMinute } from '../format.tsx'
+import { RangePicker, RangeProvider, runBounds } from '../range.tsx'
 
 function ArtifactPicker({ current }: { current: string }) {
   const navigate = useNavigate()
@@ -81,7 +82,9 @@ function Subtitle({ id }: { id: string }) {
 export function SnapshotLayout() {
   const { snapshotId } = useParams({ from: '/$snapshotId' })
   const { data, error, isPending } = useQuery(snapshotQuery(snapshotId))
-  const sampleCount = useQuery(samplesQuery(snapshotId)).data?.length
+  const samples = useQuery(samplesQuery(snapshotId)).data
+  const sampleCount = samples?.length
+  const bounds = runBounds(samples)
 
   if (isPending) {
     return (
@@ -141,10 +144,11 @@ export function SnapshotLayout() {
   )
 
   return (
-    <>
+    <RangeProvider artifact={snapshotId}>
       <PageHeader
         actions={
           <>
+            {bounds && <RangePicker bounds={bounds} />}
             <StatusBadge tone={snapshot.status === 'complete' ? 'success' : 'neutral'}>
               {snapshot.status}
             </StatusBadge>
@@ -183,6 +187,6 @@ export function SnapshotLayout() {
         </Disclosure>
       )}
       <Outlet />
-    </>
+    </RangeProvider>
   )
 }

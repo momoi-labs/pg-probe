@@ -13,6 +13,7 @@ import {
   type PaneGridLayout,
 } from '@momoi-labs/kiso-react'
 import type { ReactNode } from 'react'
+import { inRange, useRange } from '../range.tsx'
 import { formatTime } from '../series.ts'
 
 // One outlier sets the max and moves the average, so the legend table
@@ -170,6 +171,7 @@ export function ChartPanel({
   max,
   formatValue,
 }: ChartPanelProps) {
+  const { range, setRange } = useRange()
   // Kiso charts take one to five series. None means the artifact holds no
   // data for this panel, for example PostgreSQL panels in a Linux capture.
   if (!loading && series.length === 0) {
@@ -186,13 +188,14 @@ export function ChartPanel({
       ) : (
         <Chart
           label={label}
-          data={data}
+          data={inRange(data, range)}
           series={series}
           variant={variant}
           min={min}
           max={max}
           summary={legendSummary}
           syncId="session"
+          onRangeSelect={setRange}
           formatTime={formatTime}
           formatValue={formatValue}
         />

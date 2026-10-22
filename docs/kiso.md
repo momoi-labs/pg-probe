@@ -26,7 +26,7 @@ file has a bug.
 | `PanelGrid` | A section's panels in a `DashboardGrid`, which is a pane grid. The reader moves and resizes them, and the layout is saved in `localStorage` per section. Each child is a `Slot` with the pane id and default size |
 | `Panel` | A dashboard panel: a `DashboardPanel` with title, optional subtitle and badge. Its id is the title as a slug and must match its `Slot`. An anchor in the body is the target of Overview tile links |
 | `GapPanel` | A panel the artifact cannot draw yet. The badge names the missing work: `needs sampling`, `no collector`, `needs schema change` or `blocked` |
-| `ChartPanel` | A time series panel: a Kiso `Chart` in a pane, on the shared `session` sync id, where a click pins one time on every chart. The pane heading is the chart label, with measure and unit, and the chart hides its own caption. The legend table shows p50, p75, p95, p99, and the last sample instead of max and average. |
+| `ChartPanel` | A time series panel: a Kiso `Chart` in a pane, on the shared `session` sync id, where a click pins one time on every chart. The pane heading is the chart label, with measure and unit, and the chart hides its own caption. The legend table shows p50, p75, p95, p99, and the last sample instead of max and average. A drag across the plot sets the shared time range |
 | `NotSupportedPanel` | A panel whose metric the observed server or host cannot provide. An informational EmptyState: "Not supported on PostgreSQL 9.3" or "on this host", and why |
 | `Note` | Muted text that says why a value is missing. Always visible |
 
@@ -48,6 +48,10 @@ file has a bug.
 - Charts use one point per sample, on the timestamps from `/samples`. Rates
   come from the change between samples. The first sample and any negative
   change, such as a counter reset, are gaps, never zero.
+- One time range, from the `TimeRangeControl` in the snapshot header, scopes
+  every chart and its legend. A drag across any chart sets it. Opening another
+  artifact resets it to the entire run. Overview tiles ignore it and keep
+  covering the whole session.
 - Overview tiles summarize; the panels below explain. A tile shows the last
   sample, or the last interval for rates, one line of context and the session
   peak in text. It has no chart of its own: the whole tile links to the panel
