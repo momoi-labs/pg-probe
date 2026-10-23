@@ -1,3 +1,5 @@
+import { useT } from './i18n.ts'
+
 const NBSP = ' '
 
 const IEC = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB']
@@ -35,8 +37,9 @@ export function Percent({ value }: { value: number }) {
 // Unknown: no value is known. The reason is also shown as adjacent text by the
 // caller, so it does not live only in the accessible label.
 export function Unknown({ reason }: { reason: string }) {
+  const t = useT()
   return (
-    <span className="muted" aria-label={`Unknown, ${reason}`}>
+    <span className="muted" aria-label={t('Unknown, {reason}', { reason })}>
       —
     </span>
   )

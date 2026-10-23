@@ -19,6 +19,7 @@ import {
   useTable,
 } from '../artifact.ts'
 import { bytes } from '../format.tsx'
+import { useT } from '../i18n.ts'
 import { deltas, points, rates, useSamples, type Values } from '../series.ts'
 import { ChartPanel, Note, NotSupportedPanel, Panel, PanelGrid, Section, Slot } from './panels.tsx'
 
@@ -221,6 +222,7 @@ function WalAndCheckpoints() {
 }
 
 function ReplicationLag() {
+  const t = useT()
   const replication = useTable('postgres_replication_aggregates')
   const data = latest(replication.data)
   const isPending = replication.isPending
@@ -231,10 +233,10 @@ function ReplicationLag() {
       <Table density="compact">
         <TableHeader>
           <TableRow>
-            <TableHead>State</TableHead>
-            <TableHead>Sync state</TableHead>
-            <TableHead className="num">Standbys</TableHead>
-            <TableHead className="num">Max lag</TableHead>
+            <TableHead>{t('State')}</TableHead>
+            <TableHead>{t('Sync state')}</TableHead>
+            <TableHead className="num">{t('Standbys')}</TableHead>
+            <TableHead className="num">{t('Max lag')}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -254,10 +256,16 @@ function ReplicationLag() {
       </Table>
     )
   } else if (collected(outcomes, 'postgres.aggregates.replication')) {
-    content = <Note>No standby was connected in the last sample.</Note>
+    content = <Note>{t('No standby was connected in the last sample.')}</Note>
   } else {
     const reason = missingReason(outcomes, 'postgres.aggregates.replication')
-    content = <Note>Not recorded in this artifact{reason ? `: ${reason}` : ''}.</Note>
+    content = (
+      <Note>
+        {reason
+          ? t('Not recorded in this artifact: {reason}.', { reason })
+          : t('Not recorded in this artifact.')}
+      </Note>
+    )
   }
   return (
     <Panel title="Replication lag" sub="last sample, from pg_stat_replication" loading={isPending}>
@@ -269,6 +277,7 @@ function ReplicationLag() {
 const IEC = ['B', 'KiB', 'MiB', 'GiB']
 
 function DatabaseSize() {
+  const t = useT()
   const { data, isPending } = useTable('postgres_database')
   const sized = (data ?? [])
     .filter((row) => num(row, 'size_bytes') != null)
@@ -284,7 +293,8 @@ function DatabaseSize() {
       {sized.length > 0 ? (
         <>
           <BarGauge
-            label="Size per database"
+            label={t('Size per database')}
+            labels={{ notCollected: t('Not collected'), empty: t('No measurements.') }}
             max={largest}
             formatValue={format}
             rows={sized.map((row) => ({
@@ -295,7 +305,7 @@ function DatabaseSize() {
           />
         </>
       ) : (
-        <Note>Not recorded in this artifact.</Note>
+        <Note>{t('Not recorded in this artifact.')}</Note>
       )}
     </Panel>
   )
@@ -304,6 +314,7 @@ function DatabaseSize() {
 const relationName = (row: Row) => `${row.database_name}.${row.schema_name}.${row.relation_name}`
 
 function LargestTables() {
+  const t = useT()
   const target = useTable('postgres_target')
   const { data, isPending } = useTable('postgres_relation')
   const blockSize = num(target.data?.[0], 'block_size_bytes') ?? 8192
@@ -316,7 +327,8 @@ function LargestTables() {
       {largest.length > 0 ? (
         <>
           <BarGauge
-            label="Size per table (GiB)"
+            label={t('Size per table (GiB)')}
+            labels={{ notCollected: t('Not collected'), empty: t('No measurements.') }}
             max={top / 1024 ** 3}
             formatValue={(value) => `${value.toFixed(2)} GiB`}
             rows={largest.map((row) => ({
@@ -327,15 +339,14 @@ function LargestTables() {
           />
         </>
       ) : (
-        <Note>
-          Not recorded in this artifact. Captures before schema version 3 have no relations.
-        </Note>
+        <Note>{t('Not recorded in this artifact. Captures before schema version 3 have no relations.')}</Note>
       )}
     </Panel>
   )
 }
 
 function DeadTuples() {
+  const t = useT()
   const { data, isPending } = useTable('postgres_relation')
   const rows = [...(data ?? [])]
     .filter((row) => (num(row, 'dead_tuples') ?? 0) > 0)
@@ -348,11 +359,11 @@ function DeadTuples() {
         <Table density="compact">
           <TableHeader>
             <TableRow>
-              <TableHead>Table</TableHead>
-              <TableHead className="num">Dead tuples</TableHead>
-              <TableHead className="num">Live tuples</TableHead>
-              <TableHead className="num">Dead (%)</TableHead>
-              <TableHead>Last autovacuum</TableHead>
+              <TableHead>{t('Table')}</TableHead>
+              <TableHead className="num">{t('Dead tuples')}</TableHead>
+              <TableHead className="num">{t('Live tuples')}</TableHead>
+              <TableHead className="num">{t('Dead (%)')}</TableHead>
+              <TableHead>{t('Last autovacuum')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -384,10 +395,10 @@ function DeadTuples() {
   } else if (isPending) {
     content = null
   } else if (data?.length) {
-    content = <Note>No dead tuples in the recorded tables.</Note>
+    content = <Note>{t('No dead tuples in the recorded tables.')}</Note>
   } else {
     content = (
-      <Note>Not recorded in this artifact. Captures before schema version 3 have no relations.</Note>
+      <Note>{t('Not recorded in this artifact. Captures before schema version 3 have no relations.')}</Note>
     )
   }
   return (
@@ -748,6 +759,7 @@ function WalArchiving() {
 }
 
 function ReplicationSlots() {
+  const t = useT()
   const samples = useSamples()
   const slots = useTable('postgres_slot_aggregates')
   const version = useOlderThan(90400)
@@ -779,7 +791,7 @@ function ReplicationSlots() {
       min={0}
       formatValue={oneDecimal}
       data={chart}
-      series={types.map((type) => ({ key: type, label: `Largest ${type} slot` }))}
+      series={types.map((type) => ({ key: type, label: t('Largest {type} slot', { type }) }))}
     />
   )
 }

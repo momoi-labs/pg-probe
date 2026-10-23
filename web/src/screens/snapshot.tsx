@@ -5,6 +5,11 @@ import {
   AlertTitle,
   Button,
   Disclosure,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
   PageHeader,
   PageHeaderDescription,
   PageHeaderTitle,
@@ -18,7 +23,7 @@ import {
 } from '@momoi-labs/kiso-react'
 import { useQuery } from '@tanstack/react-query'
 import { Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
-import { PrinterIcon } from 'lucide-react'
+import { ChevronDownIcon, PrinterIcon } from 'lucide-react'
 import {
   routeId,
   samplesQuery,
@@ -29,6 +34,7 @@ import {
 } from '../api.ts'
 import { duration, utcMinute } from '../format.tsx'
 import { RangePicker, RangeProvider, runBounds } from '../range.tsx'
+import { localeNames, locales, useT } from '../i18n.ts'
 import { useInReport } from '../report.ts'
 
 function ArtifactPicker({ current }: { current: string }) {
@@ -72,12 +78,44 @@ function notCollected(outcomes: Row[]): OutcomeGroup[] {
   return [...groups.values()]
 }
 
+// Opens the printed report in the language the reader picks.
+function PrintReport({ snapshotId }: { snapshotId: string }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button>
+          <PrinterIcon aria-hidden />
+          Print report
+          <ChevronDownIcon aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuLabel>Report language</DropdownMenuLabel>
+        {locales.map((locale) => (
+          <DropdownMenuItem key={locale} asChild>
+            <Link
+              to="/$snapshotId/report"
+              params={{ snapshotId }}
+              search={{ print: true, lang: locale === 'en-US' ? undefined : locale }}
+              lang={locale}
+            >
+              {localeNames[locale]}
+            </Link>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 function Subtitle({ id }: { id: string }) {
+  const t = useT()
   const target = useQuery(tableQuery(id, 'postgres_target')).data?.[0]
   const identity = useQuery(tableQuery(id, 'linux_identity')).data?.[0]
   const parts = [
     target?.server_version != null && `PostgreSQL ${target.server_version}`,
-    identity?.distribution_pretty_name != null && `on ${identity.distribution_pretty_name}`,
+    identity?.distribution_pretty_name != null &&
+      t('on {distribution}', { distribution: identity.distribution_pretty_name }),
   ].filter(Boolean)
   return <>{parts.join(' ')}</>
 }
@@ -89,6 +127,7 @@ export function SnapshotLayout() {
   const sampleCount = samples?.length
   const bounds = runBounds(samples)
   const inReport = useInReport()
+  const t = useT()
 
   if (isPending) {
     return (
@@ -132,7 +171,7 @@ export function SnapshotLayout() {
     <ul>
       {groups.map((group) => (
         <li key={`${group.source}|${group.status}|${group.errorCode}`}>
-          <code>{group.source}</code>: {group.status}
+          <code>{group.source}</code>: {t(group.status)}
           {group.errorCode && (
             <>
               {' '}
@@ -140,14 +179,19 @@ export function SnapshotLayout() {
             </>
           )}
           {sampleCount != null && sampleCount > 1 && group.count === sampleCount
-            ? ', every sample'
+            ? t(', every sample')
             : group.count > 1 && ` ×${group.count}`}
         </li>
       ))}
     </ul>
   )
 
-  const unsupportedSummary = `${distinct(unsupported)} ${distinct(unsupported) === 1 ? 'source is' : 'sources are'} not available on this host or server version`
+  const unsupportedSummary =
+    distinct(unsupported) === 1
+      ? t('1 source is not available on this host or server version')
+      : t('{count} sources are not available on this host or server version', {
+          count: distinct(unsupported),
+        })
 
   return (
     <RangeProvider artifact={snapshotId}>
@@ -159,21 +203,19 @@ export function SnapshotLayout() {
               {snapshot.status}
             </StatusBadge>
             <ArtifactPicker current={snapshotId} />
-            <Button asChild>
-              <Link to="/$snapshotId/report" params={{ snapshotId }} search={{ print: true }}>
-                <PrinterIcon aria-hidden />
-                Print report
-              </Link>
-            </Button>
+            <PrintReport snapshotId={snapshotId} />
           </>
         }
       >
-        {inReport && <p className="report-kicker">PostgreSQL health report</p>}
+        {inReport && <p className="report-kicker">{t('PostgreSQL health report')}</p>}
         <PageHeaderTitle>{snapshot.hostname ?? snapshot.file_name}</PageHeaderTitle>
         <PageHeaderDescription>
-          <Subtitle id={snapshotId} /> · captured {utcMinute(snapshot.started_at_utc)}
-          {took && ` in ${took}`}
-          {sampleCount != null && ` · ${sampleCount} ${sampleCount === 1 ? 'sample' : 'samples'}`}
+          <Subtitle id={snapshotId} /> ·{' '}
+          {took
+            ? t('captured {time} in {duration}', { time: utcMinute(snapshot.started_at_utc), duration: took })
+            : t('captured {time}', { time: utcMinute(snapshot.started_at_utc) })}
+          {sampleCount != null &&
+            ` · ${sampleCount === 1 ? t('1 sample') : t('{count} samples', { count: sampleCount })}`}
         </PageHeaderDescription>
       </PageHeader>
       {failed.length > 0 && (
@@ -181,12 +223,13 @@ export function SnapshotLayout() {
           <AlertContent>
             <AlertTitle>
               {distinct(failed) === 1
-                ? '1 source failed'
-                : `${distinct(failed)} sources failed`}
+                ? t('1 source failed')
+                : t('{count} sources failed', { count: distinct(failed) })}
             </AlertTitle>
             <AlertDescription>
-              These sources have no data in this artifact. Panels that read them show an
-              unknown value.
+              {t(
+                'These sources have no data in this artifact. Panels that read them show an unknown value.',
+              )}
             </AlertDescription>
             {sourceList(failed)}
           </AlertContent>

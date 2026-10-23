@@ -1,4 +1,5 @@
 import { missingReason, sum, useOutcomes, useTable } from '../artifact.ts'
+import { useT } from '../i18n.ts'
 import { rates, useSamples } from '../series.ts'
 import { ChartPanel, GapPanel, Note, Panel, PanelGrid, Slot } from './panels.tsx'
 
@@ -33,6 +34,7 @@ const STATEMENTS_GAP =
   'Needs a new postgres.stats.statements collector, after the decision on whether query text may enter the artifact.'
 
 function QuerySource() {
+  const t = useT()
   const { data, isPending } = useTable('postgres_extension')
   const outcomes = useOutcomes()
   const databases = (data ?? [])
@@ -43,15 +45,18 @@ function QuerySource() {
     <Panel title="Query source" sub="stated, never guessed" loading={isPending}>
       <Note>
         {databases.length > 0
-          ? `pg_stat_statements is installed in ${databases.join(', ')}. The artifact does not read it yet.`
-          : 'pg_stat_statements is not installed in any database the probe visited.'}
-        {reason && ` Some databases were not visited: ${reason}.`}
+          ? t('pg_stat_statements is installed in {databases}. The artifact does not read it yet.', {
+              databases: databases.join(', '),
+            })
+          : t('pg_stat_statements is not installed in any database the probe visited.')}
+        {reason && ` ${t('Some databases were not visited: {reason}.', { reason })}`}
       </Note>
     </Panel>
   )
 }
 
 export function Queries() {
+  const t = useT()
   return (
     <PanelGrid id="queries" label="Query panels">
       <Slot id="query-source" size={12}>
@@ -63,13 +68,14 @@ export function Queries() {
           sub="percentiles across the window"
           gap="blocked"
         >
-          pg_stat_statements stores totals and means, never a distribution. Percentiles need the
-          server log, which the probe does not read.
+          {t(
+            'pg_stat_statements stores totals and means, never a distribution. Percentiles need the server log, which the probe does not read.',
+          )}
         </GapPanel>
       </Slot>
       <Slot id="query-volume" size={6}>
         <GapPanel title="Query volume" sub="calls per second" gap="no collector">
-          {STATEMENTS_GAP}
+          {t(STATEMENTS_GAP)}
         </GapPanel>
       </Slot>
       <Slot id="rows" size={6}>
@@ -81,7 +87,7 @@ export function Queries() {
           sub="non-I/O against block I/O"
           gap="no collector"
         >
-          {STATEMENTS_GAP} It also needs track_io_timing on the server.
+          {`${t(STATEMENTS_GAP)} ${t('It also needs track_io_timing on the server.')}`}
         </GapPanel>
       </Slot>
       <Slot id="most-expensive-statements" size={12}>
@@ -90,7 +96,7 @@ export function Queries() {
           sub="by total time in the window"
           gap="no collector"
         >
-          {STATEMENTS_GAP}
+          {t(STATEMENTS_GAP)}
         </GapPanel>
       </Slot>
     </PanelGrid>

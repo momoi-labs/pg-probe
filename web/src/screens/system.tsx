@@ -1,6 +1,7 @@
 import { Meter } from '@momoi-labs/kiso-react'
 import type { Row } from '../api.ts'
 import { missingReason, num, unsupportedCode, useOutcomes, useTable } from '../artifact.ts'
+import { useT } from '../i18n.ts'
 import { deltas, points, rates, useSamples, type Values } from '../series.ts'
 import { ChartPanel, Note, NotSupportedPanel, Panel, PanelGrid, Section, Slot } from './panels.tsx'
 
@@ -277,6 +278,7 @@ function DiskUtilization() {
 }
 
 function PressureStall() {
+  const t = useT()
   const samples = useSamples()
   const { data, isPending } = useTable('linux_psi', { scope: 'some' })
   const outcomes = useOutcomes()
@@ -285,10 +287,12 @@ function PressureStall() {
     return (
       <Panel title="Pressure stall" sub="some, 10s window">
         <Note>
-          Not recorded in this artifact
           {reason
-            ? `: proc.pressure is ${reason}. Older kernels and some containers have no PSI.`
-            : '.'}
+            ? t(
+                'Not recorded in this artifact: proc.pressure is {reason}. Older kernels and some containers have no PSI.',
+                { reason },
+              )
+            : t('Not recorded in this artifact.')}
         </Note>
       </Panel>
     )
@@ -325,6 +329,7 @@ function PressureStall() {
 }
 
 function FilesystemUsage() {
+  const t = useT()
   const { data, isPending } = useTable('linux_mount')
   const mounts = (data ?? [])
     .filter((row) => row.mount_point != null && num(row, 'total_bytes') != null)
@@ -343,32 +348,29 @@ function FilesystemUsage() {
                   label={`${row.mount_point} (${row.filesystem_type})`}
                   value={used}
                   max={total}
-                  valueText={`${gib(used / GIB)} of ${gib(total / GIB)}`}
+                  valueText={t('{used} of {total}', { used: gib(used / GIB), total: gib(total / GIB) })}
+                  labels={{ notCollected: t('Not collected') }}
                 />
               )
             })}
           </div>
         </>
       ) : (
-        <Note>
-          Not recorded in this artifact. Captures before schema version 3 have no mount sizes.
-        </Note>
+        <Note>{t('Not recorded in this artifact. Captures before schema version 3 have no mount sizes.')}</Note>
       )}
     </Panel>
   )
 }
 
 function NetworkThroughput() {
+  const t = useT()
   const samples = useSamples()
   const { data, isPending } = useTable('linux_network_io')
   const interfaces = [...new Set((data ?? []).map((row) => String(row.interface)))]
   if (!isPending && interfaces.length === 0) {
     return (
       <Panel title="Network throughput" sub="all interfaces">
-        <Note>
-          Not recorded in this artifact. Captures before schema version 3 have no network
-          counters.
-        </Note>
+        <Note>{t('Not recorded in this artifact. Captures before schema version 3 have no network counters.')}</Note>
       </Panel>
     )
   }
@@ -592,7 +594,11 @@ function DiskLatency({ direction }: { direction: 'read' | 'write' }) {
     <ChartPanel
       title={direction === 'read' ? 'Disk read latency' : 'Disk write latency'}
       loading={disks.isPending || samples.isPending}
-      label={`Average ${direction} latency, five busiest disks (ms)`}
+      label={
+        direction === 'read'
+          ? 'Average read latency, five busiest disks (ms)'
+          : 'Average write latency, five busiest disks (ms)'
+      }
       min={0}
       formatValue={oneDecimal}
       data={chart}

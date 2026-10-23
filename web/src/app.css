@@ -122,3 +122,20 @@ p.report-notes {
 .report .grid-pane:not(:has(figure, table, .bar-gauge, .meter)) .report-notes {
   display: none;
 }
+
+/* The page footer in the report's language. Kiso lets a product replace its
+   footer with its own `@page report` rule; the report sets the page language
+   on the root element. */
+:root:lang(pt-BR) {
+  --report-page: "Página ";
+  --report-page-of: " de ";
+}
+:root:lang(es-ES) {
+  --report-page: "Página ";
+  --report-page-of: " de ";
+}
+@page report {
+  @bottom-right {
+    content: var(--report-page, "Page ") counter(page) var(--report-page-of, " of ") counter(pages);
+  }
+}

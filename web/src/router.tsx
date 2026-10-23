@@ -6,6 +6,7 @@ import {
   redirect,
 } from '@tanstack/react-router'
 import { routeId, snapshotsQuery } from './api.ts'
+import { isLocale, type Locale } from './i18n.ts'
 import { Shell } from './screens/shell.tsx'
 import { NoSnapshots, SnapshotsError } from './screens/start.tsx'
 import { SnapshotLayout } from './screens/snapshot.tsx'
@@ -59,12 +60,14 @@ const queriesRoute = createRoute({
 })
 
 // The whole artifact on one page for printing. ?print=true opens the print
-// dialog once it has loaded.
+// dialog once it has loaded, and ?lang= picks the language of the report.
 const reportRoute = createRoute({
   getParentRoute: () => snapshotRoute,
   path: 'report',
-  validateSearch: (search: Record<string, unknown>): { print?: boolean } =>
-    search.print === true || search.print === 'true' ? { print: true } : {},
+  validateSearch: (search: Record<string, unknown>): { print?: boolean; lang?: Locale } => ({
+    ...(search.print === true || search.print === 'true' ? { print: true } : {}),
+    ...(isLocale(search.lang) && search.lang !== 'en-US' ? { lang: search.lang } : {}),
+  }),
   component: Report,
 })
 

@@ -2,6 +2,7 @@ import { useIsFetching } from '@tanstack/react-query'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { utcMinute } from '../format.tsx'
+import { useLocale, useT } from '../i18n.ts'
 import { useRange } from '../range.tsx'
 import { Metrics } from './metrics.tsx'
 import { NotCollected } from './not-collected.tsx'
@@ -30,9 +31,10 @@ type ContentsGroup = { title: string; entries: { id: string; title: string }[] }
 const drawn = 'figure, table, .bar-gauge, .meter'
 
 // The charts and tables of the report by section, read from the drawn page
-// once everything has loaded, for the contents.
+// once everything has loaded, and again in a new language, for the contents.
 function useContents() {
   const fetching = useIsFetching()
+  const locale = useLocale()
   const [sections, setSections] = useState<ContentsGroup[]>([])
   useEffect(() => {
     if (fetching > 0) return
@@ -49,7 +51,7 @@ function useContents() {
       setSections(found)
     }, 200)
     return () => clearTimeout(timer)
-  }, [fetching])
+  }, [fetching, locale])
   return sections
 }
 
@@ -60,13 +62,26 @@ export function Report() {
   const { print } = useSearch({ from: '/$snapshotId/report' })
   const { range } = useRange()
   const contents = useContents()
+  const locale = useLocale()
+  const t = useT()
   usePrintWhenReady(print)
+  // The page language, for hyphenation and screen readers. The console is
+  // English again once the report closes.
+  useEffect(() => {
+    document.documentElement.lang = locale
+    return () => {
+      document.documentElement.lang = 'en'
+    }
+  }, [locale])
   return (
     <div className="report">
       <p className="muted">
         {range
-          ? `Charts cover ${utcMinute(new Date(range.from).toISOString())} to ${utcMinute(new Date(range.to).toISOString())}. Overview tiles cover the whole session.`
-          : 'Charts cover the whole session.'}
+          ? t('Charts cover {from} to {to}. Overview tiles cover the whole session.', {
+              from: utcMinute(new Date(range.from).toISOString()),
+              to: utcMinute(new Date(range.to).toISOString()),
+            })
+          : t('Charts cover the whole session.')}
       </p>
       <Section title="Contents" className="report-contents">
         {contents.map((section) => (

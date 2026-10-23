@@ -18,7 +18,8 @@ import {
   type PaneGridLayout,
 } from '@momoi-labs/kiso-react'
 import type { ReactNode } from 'react'
-import { explain, type Explain } from '../explain.ts'
+import type { Explain } from '../explain.ts'
+import { useExplain, useT, type Translate } from '../i18n.ts'
 import { inRange, useRange } from '../range.tsx'
 import { useInReport } from '../report.ts'
 import { formatTime } from '../series.ts'
@@ -51,9 +52,10 @@ export function Section({
   children: ReactNode
 }) {
   const inReport = useInReport()
+  const t = useT()
   return (
     <Disclosure
-      summary={inReport ? <h2 className="report-section-title">{title}</h2> : title}
+      summary={inReport ? <h2 className="report-section-title">{t(title)}</h2> : title}
       open
       className={className}
     >
@@ -67,6 +69,7 @@ export function Section({
 // report shows them in one static column in source order and saves nothing.
 export function PanelGrid({ id, label, children }: { id: string; label: string; children: ReactNode }) {
   const inReport = useInReport()
+  const t = useT()
   const key = `pg-probe.layout.${id}`
   let saved: PaneGridLayout | undefined
   try {
@@ -76,7 +79,7 @@ export function PanelGrid({ id, label, children }: { id: string; label: string; 
   }
   return (
     <DashboardGrid
-      aria-label={label}
+      aria-label={t(label)}
       static={inReport}
       defaultLayout={inReport ? undefined : saved}
       onLayoutChange={
@@ -111,12 +114,14 @@ function Pane({
   children: ReactNode
 }) {
   const inReport = useInReport()
+  const explain = useExplain()
+  const t = useT()
   const note = inReport ? explain[panelId(title)] : undefined
   return (
     <DashboardPanel
       id={panelId(title)}
-      title={heading}
-      actions={badge && <Badge variant="neutral">{badge}</Badge>}
+      title={t(heading)}
+      actions={badge && <Badge variant="neutral">{t(badge)}</Badge>}
     >
       <span id={panelId(title)} className="panel-anchor" />
       {note ? (
@@ -131,12 +136,13 @@ function Pane({
 // One panel as a page of the printed report: what it shows, what to look
 // for, then the chart.
 function ReportSheet({ note, children }: { note: Explain; children: ReactNode }) {
+  const t = useT()
   return (
     <div className="report-sheet">
       <p className="report-notes">{note.shows}</p>
       <Alert variant="info" className="report-notes">
         <AlertContent>
-          <AlertTitle>What to look for</AlertTitle>
+          <AlertTitle>{t('What to look for')}</AlertTitle>
           <AlertDescription>{note.look}</AlertDescription>
         </AlertContent>
       </Alert>
@@ -146,9 +152,10 @@ function ReportSheet({ note, children }: { note: Explain; children: ReactNode })
 }
 
 export function Panel({ title, sub, badge, loading, children }: PanelProps) {
+  const t = useT()
   return (
     <Pane title={title} badge={badge}>
-      {sub && <p className="muted">{sub}</p>}
+      {sub && <p className="muted">{t(sub)}</p>}
       {loading ? <Skeleton variant="block" /> : children}
     </Pane>
   )
@@ -163,7 +170,7 @@ export function GapPanel({
 }: Omit<PanelProps, 'badge' | 'loading'> & { gap: string }) {
   return (
     <Panel {...panel} badge={gap}>
-      <p className="muted">{children}</p>
+      <Note>{children}</Note>
     </Panel>
   )
 }
@@ -202,6 +209,17 @@ export function NotSupportedPanel({
   )
 }
 
+// The fixed text of a Kiso chart, in the reader's language.
+const chartLabels = (t: Translate) => ({
+  series: t('Series'),
+  current: t('Current'),
+  notCollected: t('Not collected'),
+  empty: t('No collected samples in this window.'),
+  timestamp: t('Timestamp'),
+  values: t('View exact values'),
+  summary: (label: string) => t('{label}: summary', { label }),
+})
+
 // A chart on a report page is taller, to fill the sheet below its notes.
 const reportChartHeight = 340
 
@@ -237,12 +255,13 @@ export function ChartPanel({
 }: ChartPanelProps) {
   const { range, setRange } = useRange()
   const inReport = useInReport()
+  const t = useT()
   // Kiso charts take one to five series. None means the artifact holds no
   // data for this panel, for example PostgreSQL panels in a Linux capture.
   if (!loading && series.length === 0) {
     return (
       <Pane title={title} heading={label}>
-        <Note>Not recorded in this artifact.</Note>
+        <Note>{t('Not recorded in this artifact.')}</Note>
       </Pane>
     )
   }
@@ -252,14 +271,15 @@ export function ChartPanel({
         <Skeleton variant="block" />
       ) : (
         <Chart
-          label={label}
+          label={t(label)}
           data={inRange(data, range)}
           height={inReport ? reportChartHeight : undefined}
-          series={series}
+          series={series.map((item) => ({ ...item, label: item.label && t(item.label) }))}
           variant={variant}
           min={min}
           max={max}
           summary={legendSummary}
+          labels={chartLabels(t)}
           syncId="session"
           onRangeSelect={setRange}
           formatTime={formatTime}

@@ -58,6 +58,12 @@ file has a bug.
   metric. Its explanation text may cite typical values and next steps as
   reading guidance. The charts, tiles and tables in it still carry no
   thresholds, danger markers or health colors.
+- The printed report reads in English, Brazilian Portuguese or Spanish from
+  Spain. The console screens stay in English. Text in the report goes through
+  `useT()` from `web/src/i18n.ts`, keyed by its English source; translations
+  and translated explanations live in `web/src/locales/`. PostgreSQL and Linux
+  names, such as views, settings, lock modes and device names, are not
+  translated.
 - Overview tiles summarize; the panels below explain. A tile shows the last
   sample, or the last interval for rates, one line of context and the session
   peak in text. It has no chart of its own: the whole tile links to the panel
@@ -71,7 +77,7 @@ file has a bug.
 | Snapshot header (`screens/snapshot.tsx`) | Dashboard page framing: PageHeader with the artifact Select, and an Alert for sources that were not collected |
 | Metrics (`screens/metrics.tsx`, `system.tsx`, `postgres.tsx`) | Dashboard, one Disclosure per section. System and PostgreSQL use `PanelGrid`. Overview tiles sit in the product `.tile-grid`: each tile is a whole-card link, and a pane head is a drag handle |
 | Queries (`screens/queries.tsx`) | Dashboard, `PanelGrid` |
-| Report (`screens/report.tsx`) | Report: the snapshot header as the cover with a `.report-kicker`, a linked contents page, then the shared section Disclosures, open. `PanelGrid` passes `static` and ignores the saved layout. Each chart or table prints on its own page. "Print report" in the snapshot header opens it and the print dialog |
+| Report (`screens/report.tsx`) | Report: the snapshot header as the cover with a `.report-kicker`, a linked contents page, then the shared section Disclosures, open. `PanelGrid` passes `static` and ignores the saved layout. Each chart or table prints on its own page. "Print report" in the snapshot header is a DropdownMenu of report languages; an item opens the report with `?lang=` and the print dialog |
 | Logs (`screens/not-collected.tsx`) | Empty states, informational |
 | No snapshots, list error (`screens/start.tsx`) | Empty states, first run; Errors |
 

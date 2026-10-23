@@ -20,6 +20,7 @@ import {
 } from '../artifact.ts'
 import { bytes, Bytes, Percent, Unknown } from '../format.tsx'
 import { deltas, lastValue, points, useSamples } from '../series.ts'
+import { useT, type Translate } from '../i18n.ts'
 import { useInReport } from '../report.ts'
 import { Note, panelId, Section } from './panels.tsx'
 import { isClientBackend, Postgres, useWalRate } from './postgres.tsx'
@@ -49,7 +50,7 @@ type TileProps = {
   chart?: string
 }
 
-function peakText(peak: Peak) {
+function peakText(peak: Peak, t: Translate) {
   let best: number | null = null
   let when = 0
   peak.values.forEach((value, index) => {
@@ -61,21 +62,25 @@ function peakText(peak: Peak) {
   })
   if (best == null || peak.values.filter((value) => value != null).length < 2) return null
   const time = new Date(when).toISOString().slice(11, 16)
-  return `${peak.lowest ? 'Lowest' : 'Peak'} ${peak.format(best)} at ${time}`
+  const values = { value: peak.format(best), time }
+  return peak.lowest ? t('Lowest {value} at {time}', values) : t('Peak {value} at {time}', values)
 }
 
+// The label is translated here. Callers translate the context.
 function Tile({ label, loading, value, context, peak, chart }: TileProps) {
+  const t = useT()
+  const peakLine = peak && peakText(peak, t)
   const card = (
     <Card>
       <Stat>
-        <StatLabel>{label}</StatLabel>
+        <StatLabel>{t(label)}</StatLabel>
         {loading ? (
           <Skeleton variant="text" />
         ) : (
           <>
             <StatValue>{value}</StatValue>
             {context && <StatFoot>{context}</StatFoot>}
-            {peak && peakText(peak) && <StatFoot>{peakText(peak)}</StatFoot>}
+            {peakLine && <StatFoot>{peakLine}</StatFoot>}
           </>
         )}
       </Stat>
@@ -84,7 +89,7 @@ function Tile({ label, loading, value, context, peak, chart }: TileProps) {
   return (
     <div>
       {chart ? (
-        <a className="tile-link" href={`#${panelId(chart)}`} aria-label={`${label}: open the ${chart} chart`}>
+        <a className="tile-link" href={`#${panelId(chart)}`} aria-label={t('{label}: open the {chart} chart', { label: t(label), chart: t(chart) })}>
           {card}
         </a>
       ) : (
@@ -98,7 +103,14 @@ const pct = (value: number) => `${value.toFixed(1)}%`
 const times = (data: ChartSample[]) => data.map((point) => point.timestamp)
 
 function UnknownTile({ label, reason }: { label: string; reason: string }) {
-  return <Tile label={label} value={<Unknown reason={reason} />} context={`Unknown: ${reason}.`} />
+  const t = useT()
+  return (
+    <Tile
+      label={label}
+      value={<Unknown reason={t(reason)} />}
+      context={t('Unknown: {reason}.', { reason: t(reason) })}
+    />
+  )
 }
 
 function CpuTile() {
@@ -123,6 +135,7 @@ function CpuTile() {
 }
 
 function MemoryTile() {
+  const t = useT()
   const samples = useSamples()
   const { data, isPending } = useTable('linux_memory')
   if (isPending || samples.isPending) {
@@ -150,7 +163,7 @@ function MemoryTile() {
     <Tile
       label="Memory used"
       value={<Percent value={(used / total) * 100} />}
-      context={`${usedText.number} of ${totalText.number} ${totalText.unit}`}
+      context={t('{used} of {total} {unit}', { used: usedText.number, total: totalText.number, unit: totalText.unit })}
       peak={{
         values: chart.map((point) => {
           const used = point.values.used
@@ -166,6 +179,7 @@ function MemoryTile() {
 }
 
 function DiskTile() {
+  const t = useT()
   const { all, isPending } = useDiskBusy()
   if (isPending) return <Tile label="Disk busy" loading value={null}  />
   // The busiest disk in each interval.
@@ -182,7 +196,7 @@ function DiskTile() {
     <Tile
       label="Disk busy"
       value={<Percent value={current[1]} />}
-      context={`${current[0]}, the busiest disk`}
+      context={t('{disk}, the busiest disk', { disk: current[0] })}
       peak={{ values: busiest.map((entry) => entry?.[1] ?? null), at: times(all), format: pct }}
       chart="Disk utilization"
     />
@@ -190,6 +204,7 @@ function DiskTile() {
 }
 
 function LoadTile() {
+  const t = useT()
   const samples = useSamples()
   const scheduler = useTable('linux_scheduler')
   const cpus = useTable('linux_cpu_set')
@@ -206,7 +221,7 @@ function LoadTile() {
     <Tile
       label="Load, 1 minute"
       value={load.toFixed(2)}
-      context={online > 0 ? `${online} CPUs online` : undefined}
+      context={online > 0 ? t('{count} CPUs online', { count: online }) : undefined}
       peak={{
         values: chart.map((point) => point.values.load ?? null),
         at: times(chart),
@@ -218,6 +233,7 @@ function LoadTile() {
 }
 
 function ConnectionsTile() {
+  const t = useT()
   const samples = useSamples()
   const activity = useTable('postgres_activity_aggregates')
   const settings = useTable('postgres_setting')
@@ -235,7 +251,7 @@ function ConnectionsTile() {
     <Tile
       label="Connections"
       value={integer(connections)}
-      context={max != null && max > 0 ? `of ${integer(max)} max_connections` : undefined}
+      context={max != null && max > 0 ? t('of {max} max_connections', { max: integer(max) }) : undefined}
       peak={{
         values: chart.map((point) => point.values.connections ?? null),
         at: times(chart),
@@ -247,6 +263,7 @@ function ConnectionsTile() {
 }
 
 function CacheHitTile() {
+  const t = useT()
   const samples = useSamples()
   const { data, isPending } = useTable('postgres_database_stats')
   if (isPending || samples.isPending) {
@@ -292,7 +309,7 @@ function CacheHitTile() {
     <Tile
       label="Cache hit ratio"
       value={<Percent value={(hit / (hit + read)) * 100} />}
-      context="since the last statistics reset"
+      context={t('since the last statistics reset')}
     />
   )
 }
@@ -322,6 +339,7 @@ function WalTile() {
 }
 
 function ReplicaLagTile() {
+  const t = useT()
   const outcomes = useOutcomes()
   const replication = useTable('postgres_replication_aggregates')
   if (replication.isPending) return <Tile label="Replica lag" loading value={null}  />
@@ -334,8 +352,8 @@ function ReplicaLagTile() {
     return (
       <Tile
         label="Replica lag"
-        value={<span className="muted">None</span>}
-        context="No standby connected"
+        value={<span className="muted">{t('None')}</span>}
+        context={t('No standby connected')}
       />
     )
   }
@@ -345,7 +363,7 @@ function ReplicaLagTile() {
     <Tile
       label="Replica lag"
       value={<Bytes value={Math.max(...lags)} />}
-      context="Worst standby"
+      context={t('Worst standby')}
       chart="Replication lag"
     />
   )
@@ -363,12 +381,15 @@ export function Metrics() {
 
 function Overview() {
   const inReport = useInReport()
+  const t = useT()
   return (
     <Section title="Overview">
       <div className="stack-sm">
         <Note>
-          Each value is the last sample, or the last interval for rates. Peaks cover the whole
-          session.{!inReport && ' Select a tile to open its chart.'}
+          {t(
+            'Each value is the last sample, or the last interval for rates. Peaks cover the whole session.',
+          )}
+          {!inReport && ' Select a tile to open its chart.'}
         </Note>
         <div className="tile-grid">
           <CpuTile />
