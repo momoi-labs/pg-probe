@@ -1,4 +1,8 @@
 import {
+  Alert,
+  AlertContent,
+  AlertDescription,
+  AlertTitle,
   Badge,
   Chart,
   EmptyState,
@@ -13,7 +17,9 @@ import {
   type PaneGridLayout,
 } from '@momoi-labs/kiso-react'
 import type { ReactNode } from 'react'
+import { explain, type Explain } from '../explain.ts'
 import { inRange, useRange } from '../range.tsx'
+import { useInReport } from '../report.ts'
 import { formatTime } from '../series.ts'
 
 // One outlier sets the max and moves the average, so the legend table
@@ -75,6 +81,8 @@ function Pane({
   badge?: string
   children: ReactNode
 }) {
+  const inReport = useInReport()
+  const note = inReport ? explain[panelId(title)] : undefined
   return (
     <DashboardPanel
       id={panelId(title)}
@@ -82,8 +90,29 @@ function Pane({
       actions={badge && <Badge variant="neutral">{badge}</Badge>}
     >
       <span id={panelId(title)} className="panel-anchor" />
-      {children}
+      {note ? (
+        <ReportSheet note={note}>{children}</ReportSheet>
+      ) : (
+        children
+      )}
     </DashboardPanel>
+  )
+}
+
+// One panel as a page of the printed report: what it shows, what to look
+// for, then the chart.
+function ReportSheet({ note, children }: { note: Explain; children: ReactNode }) {
+  return (
+    <div className="report-sheet">
+      <p className="report-notes">{note.shows}</p>
+      <Alert variant="info" className="report-notes">
+        <AlertContent>
+          <AlertTitle>What to look for</AlertTitle>
+          <AlertDescription>{note.look}</AlertDescription>
+        </AlertContent>
+      </Alert>
+      <div className="report-figure">{children}</div>
+    </div>
   )
 }
 
@@ -131,6 +160,9 @@ export function NotSupportedPanel({
   on: string
   children: ReactNode
 }) {
+  // The report keeps only what the artifact can show. The summary at its top
+  // lists the sources that are not available.
+  if (useInReport()) return null
   return (
     <Pane title={title} heading={label}>
       <EmptyState variant="informational" size="sm">
@@ -140,6 +172,9 @@ export function NotSupportedPanel({
     </Pane>
   )
 }
+
+// A chart on a report page is taller, to fill the sheet below its notes.
+const reportChartHeight = 340
 
 type ChartPanelProps = {
   // Names the panel's anchor, which Overview tiles link to.
@@ -172,6 +207,7 @@ export function ChartPanel({
   formatValue,
 }: ChartPanelProps) {
   const { range, setRange } = useRange()
+  const inReport = useInReport()
   // Kiso charts take one to five series. None means the artifact holds no
   // data for this panel, for example PostgreSQL panels in a Linux capture.
   if (!loading && series.length === 0) {
@@ -189,6 +225,7 @@ export function ChartPanel({
         <Chart
           label={label}
           data={inRange(data, range)}
+          height={inReport ? reportChartHeight : undefined}
           series={series}
           variant={variant}
           min={min}

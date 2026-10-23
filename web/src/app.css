@@ -65,3 +65,216 @@
     box-shadow: 0 0 0 2px var(--color-focus);
   }
 }
+
+/* The printed report. The page is as wide as the printed sheet on screen too,
+   because charts measure their width when they draw and do not redraw for
+   the print layout. A4 less 12 mm margins is 186 mm. */
+.report {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--presentation-section-gap);
+  width: 186mm;
+  max-width: 100%;
+}
+/* A report is read in order, so its panes are one column at full width.
+   The movable layout of the screens does not apply. */
+.report .pane-grid-body {
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: auto;
+  row-gap: var(--presentation-grid-gap);
+}
+.report .pane-grid-scroll {
+  display: contents;
+}
+.report .pane-grid-body > .grid-pane {
+  grid-area: auto;
+}
+.report .pane-grid-rule {
+  display: none;
+}
+.report .grid-pane-head {
+  cursor: auto;
+}
+.report .grid-pane-resizer {
+  display: none;
+}
+@page {
+  size: A4;
+  margin: 12mm;
+}
+@media print {
+  :root {
+    color-scheme: light;
+    print-color-adjust: exact;
+  }
+  [data-background-style] {
+    --canvas-pattern: none;
+    --canvas-mask: none;
+  }
+  html,
+  body,
+  .app-shell {
+    min-height: 0;
+    background: none;
+  }
+  .topbar,
+  [data-slot='page-header-actions'],
+  .chart-values,
+  .chart-sync-marker,
+  .chart-pin-readout {
+    display: none !important;
+  }
+  .page {
+    padding: 0;
+    max-width: none;
+  }
+  /* Chrome does not grow a grid row when it moves content to the next
+     page, and the content after it overlaps. Everything from the page down to
+     a pane prints as blocks. */
+  .page,
+  .report,
+  .report .pane-grid-body,
+  .report .grid-pane,
+  .report .grid-pane-body {
+    display: block;
+  }
+  .page > * + *,
+  .report > * + *,
+  .report .pane-grid-body > * + *,
+  .report .grid-pane-body > * + * {
+    margin-block-start: var(--presentation-grid-gap);
+  }
+  .report .grid-pane-body {
+    overflow: visible;
+  }
+  /* Paper cannot scroll, so wide tables wrap instead. */
+  .report .table-scroll {
+    overflow: visible;
+  }
+  .report .table :is(th, td) {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .grid-pane {
+    break-inside: avoid;
+  }
+  /* Each section after the first starts a page. */
+  .report > [data-slot='disclosure'] ~ [data-slot='disclosure'],
+  .report > .disclosure ~ .disclosure {
+    break-before: page;
+  }
+}
+
+/* A chart or table of the report prints on its own page, with notes for a
+   reader who does not know the metric. */
+/* Kiso hides the chart caption only for a chart right in the pane body. The
+   pane heading already names the chart. */
+.report-figure > .framed-chart > figcaption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.report-sheet {
+  display: grid;
+  gap: var(--spacing-md);
+}
+p.report-notes {
+  margin: 0;
+}
+.report-contents .disclosure-content {
+  columns: 2;
+  column-gap: var(--spacing-xl);
+}
+.report-contents section {
+  break-inside: avoid;
+  margin-block-end: var(--spacing-md);
+}
+.report-contents h3 {
+  margin: 0 0 var(--spacing-2xs);
+}
+.report-contents ol {
+  margin: 0;
+  padding-inline-start: var(--spacing-xl);
+}
+/* The report reads as a document: sections have headings, not toggles. */
+:root:has(.report) .disclosure > summary {
+  list-style: none;
+  cursor: auto;
+}
+:root:has(.report) .disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.report > .disclosure > summary {
+  margin-block-start: var(--spacing-lg);
+  padding-block: var(--spacing-sm) 0;
+  border-top: 2px solid var(--color-primary);
+  font-family: var(--font-heading);
+  font-size: var(--presentation-page-title-size);
+  font-weight: var(--type-weight-semibold);
+  line-height: var(--type-line-height-tight);
+  letter-spacing: var(--type-letter-spacing-heading);
+}
+.report-kicker {
+  margin: 0;
+  color: var(--color-muted-foreground);
+}
+@page {
+  @bottom-right {
+    content: 'Page ' counter(page) ' of ' counter(pages);
+    font-family: var(--font-body);
+    font-size: var(--type-size-metadata);
+    color: var(--color-muted-foreground);
+  }
+}
+@media print {
+  /* The contents is page 2, after the artifact summary. */
+  .report > .report-contents {
+    break-before: page;
+  }
+  /* On paper a pane is the page, so it drops its frame. */
+  .report .grid-pane {
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    background: none;
+  }
+  /* Without a frame, the pane spacing reads as gaps. The title sits on its
+     notes like a heading on its text. */
+  .report .grid-pane-head {
+    padding: 0;
+    border-bottom: none;
+  }
+  .report .grid-pane-body {
+    padding: var(--spacing-xs) 0 0;
+  }
+  .report .grid-pane-body > .panel-anchor + * {
+    margin-block-start: 0;
+  }
+  .report-sheet {
+    gap: var(--spacing-sm);
+  }
+  /* A chart or table starts a page, except the first of a section, which
+     shares the page with the section title. */
+  .report .grid-pane:has(figure, table) ~ .grid-pane:has(figure, table) {
+    break-before: page;
+  }
+  .tile-grid > * {
+    break-inside: avoid;
+  }
+  .report a {
+    color: inherit;
+  }
+}
+/* Kiso fades the edge of a table that scrolls sideways. A report does not
+   scroll, and in print the fade covers the first letters of the table. */
+.report :is(.table-scroll, .chart-table-scroll) {
+  mask-image: none;
+  animation: none;
+}
+/* A panel with nothing to draw keeps its note and drops the report notes. */
+.report .grid-pane:not(:has(figure, table)) .report-notes {
+  display: none;
+}

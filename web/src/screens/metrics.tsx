@@ -21,6 +21,7 @@ import {
 } from '../artifact.ts'
 import { bytes, Bytes, Percent, Unknown } from '../format.tsx'
 import { deltas, lastValue, points, useSamples } from '../series.ts'
+import { useInReport } from '../report.ts'
 import { Note, panelId } from './panels.tsx'
 import { isClientBackend, Postgres, useWalRate } from './postgres.tsx'
 import { System, useCpuShares, useDiskBusy } from './system.tsx'
@@ -362,12 +363,13 @@ export function Metrics() {
 }
 
 function Overview() {
+  const inReport = useInReport()
   return (
     <Disclosure summary="Overview" open>
       <div className="stack-sm">
         <Note>
           Each value is the last sample, or the last interval for rates. Peaks cover the whole
-          session. Select a tile to open its chart.
+          session.{!inReport && ' Select a tile to open its chart.'}
         </Note>
         <div className="tile-grid">
           <CpuTile />

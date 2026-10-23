@@ -3,6 +3,7 @@ import {
   AlertContent,
   AlertDescription,
   AlertTitle,
+  Button,
   Disclosure,
   PageHeader,
   PageHeaderDescription,
@@ -16,7 +17,8 @@ import {
   StatusBadge,
 } from '@momoi-labs/kiso-react'
 import { useQuery } from '@tanstack/react-query'
-import { Outlet, useNavigate, useParams } from '@tanstack/react-router'
+import { Link, Outlet, useNavigate, useParams } from '@tanstack/react-router'
+import { PrinterIcon } from 'lucide-react'
 import {
   routeId,
   samplesQuery,
@@ -27,6 +29,7 @@ import {
 } from '../api.ts'
 import { duration, utcMinute } from '../format.tsx'
 import { RangePicker, RangeProvider, runBounds } from '../range.tsx'
+import { useInReport } from '../report.ts'
 
 function ArtifactPicker({ current }: { current: string }) {
   const navigate = useNavigate()
@@ -85,6 +88,7 @@ export function SnapshotLayout() {
   const samples = useQuery(samplesQuery(snapshotId)).data
   const sampleCount = samples?.length
   const bounds = runBounds(samples)
+  const inReport = useInReport()
 
   if (isPending) {
     return (
@@ -153,9 +157,16 @@ export function SnapshotLayout() {
               {snapshot.status}
             </StatusBadge>
             <ArtifactPicker current={snapshotId} />
+            <Button asChild>
+              <Link to="/$snapshotId/report" params={{ snapshotId }} search={{ print: true }}>
+                <PrinterIcon aria-hidden />
+                Print report
+              </Link>
+            </Button>
           </>
         }
       >
+        {inReport && <p className="report-kicker t-caps">PostgreSQL health report</p>}
         <PageHeaderTitle>{snapshot.hostname ?? snapshot.file_name}</PageHeaderTitle>
         <PageHeaderDescription>
           <Subtitle id={snapshotId} /> · captured {utcMinute(snapshot.started_at_utc)}
@@ -181,6 +192,8 @@ export function SnapshotLayout() {
       )}
       {unsupported.length > 0 && (
         <Disclosure
+          key={String(inReport)}
+          open={inReport || undefined}
           summary={`${distinct(unsupported)} ${distinct(unsupported) === 1 ? 'source is' : 'sources are'} not available on this host or server version`}
         >
           {sourceList(unsupported)}

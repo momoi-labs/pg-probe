@@ -27,7 +27,8 @@ file has a bug.
 | `Panel` | A dashboard panel: a `DashboardPanel` with title, optional subtitle and badge. Its id is the title as a slug and must match its `Slot`. An anchor in the body is the target of Overview tile links |
 | `GapPanel` | A panel the artifact cannot draw yet. The badge names the missing work: `needs sampling`, `no collector`, `needs schema change` or `blocked` |
 | `ChartPanel` | A time series panel: a Kiso `Chart` in a pane, on the shared `session` sync id, where a click pins one time on every chart. The pane heading is the chart label, with measure and unit, and the chart hides its own caption. The legend table shows p50, p75, p95, p99, and the last sample instead of max and average. A drag across the plot sets the shared time range |
-| `NotSupportedPanel` | A panel whose metric the observed server or host cannot provide. An informational EmptyState: "Not supported on PostgreSQL 9.3" or "on this host", and why |
+| `NotSupportedPanel` | A panel whose metric the observed server or host cannot provide. An informational EmptyState: "Not supported on PostgreSQL 9.3" or "on this host", and why. The printed report leaves it out, since its cover lists the sources that are not available |
+| `ReportSheet` | A panel as a page of the printed report: one sentence on what the chart shows, an info Alert "What to look for", then the chart. The texts live in `web/src/explain.ts`, by panel id |
 | `Note` | Muted text that says why a value is missing. Always visible |
 
 ## Product rules
@@ -52,6 +53,10 @@ file has a bug.
   every chart and its legend. A drag across any chart sets it. Opening another
   artifact resets it to the entire run. Overview tiles ignore it and keep
   covering the whole session.
+- The printed report explains each chart for a reader who does not know the
+  metric. Its explanation text may cite typical values and next steps as
+  reading guidance. The charts, tiles and tables in it still carry no
+  thresholds, danger markers or health colors.
 - Overview tiles summarize; the panels below explain. A tile shows the last
   sample, or the last interval for rates, one line of context and the session
   peak in text. It has no chart of its own: the whole tile links to the panel
@@ -65,6 +70,7 @@ file has a bug.
 | Snapshot header (`screens/snapshot.tsx`) | Dashboard page framing: PageHeader with the artifact Select, and an Alert for sources that were not collected |
 | Metrics (`screens/metrics.tsx`, `system.tsx`, `postgres.tsx`) | Dashboard, one Disclosure per section. System and PostgreSQL use `PanelGrid`. Overview tiles sit in the product `.tile-grid`: each tile is a whole-card link, and a pane head is a drag handle |
 | Queries (`screens/queries.tsx`) | Dashboard, `PanelGrid` |
+| Report (`screens/report.tsx`) | A product report page until Kiso ships one: the snapshot header as a cover, a linked contents page, then every section with one chart or table per printed page. "Print report" in the snapshot header opens it and the print dialog |
 | Logs (`screens/not-collected.tsx`) | Empty states, informational |
 | No snapshots, list error (`screens/start.tsx`) | Empty states, first run; Errors |
 
@@ -82,7 +88,12 @@ palette with the package version, and record the version in the module doc.
 
 ## Exceptions
 
-None.
+- The printed report overrides Kiso internals in `web/src/app.css`, since
+  Kiso 0.25 has no print support: the pane grid becomes one static column,
+  panes lose their frame on paper, disclosure summaries print as headings
+  without a marker, the scroll fade on tables is off, and the chart caption
+  is hidden for a chart wrapped inside a pane. These rules go away once Kiso
+  ships print rules and a report pattern.
 
 ## Verify
 

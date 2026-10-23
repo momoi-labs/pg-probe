@@ -12,6 +12,7 @@ import { SnapshotLayout } from './screens/snapshot.tsx'
 import { Metrics } from './screens/metrics.tsx'
 import { Queries } from './screens/queries.tsx'
 import { NotCollected } from './screens/not-collected.tsx'
+import { Report } from './screens/report.tsx'
 
 const rootRoute = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   component: Shell,
@@ -57,9 +58,19 @@ const queriesRoute = createRoute({
   component: Queries,
 })
 
+// The whole artifact on one page for printing. ?print=true opens the print
+// dialog once it has loaded.
+const reportRoute = createRoute({
+  getParentRoute: () => snapshotRoute,
+  path: 'report',
+  validateSearch: (search: Record<string, unknown>): { print?: boolean } =>
+    search.print === true || search.print === 'true' ? { print: true } : {},
+  component: Report,
+})
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
-  snapshotRoute.addChildren([metricsRoute, logsRoute, queriesRoute]),
+  snapshotRoute.addChildren([metricsRoute, logsRoute, queriesRoute, reportRoute]),
 ])
 
 export function createAppRouter(queryClient: QueryClient) {
