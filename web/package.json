@@ -9,8 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@momoi-labs/kiso": "^0.25.0",
-    "@momoi-labs/kiso-react": "^0.20.0",
+    "@momoi-labs/kiso": "^0.26.0",
+    "@momoi-labs/kiso-react": "^0.21.0",
     "@tanstack/react-query": "^5.104.4",
     "@tanstack/react-router": "^1.170.45",
     "lucide-react": "^1.59.0",

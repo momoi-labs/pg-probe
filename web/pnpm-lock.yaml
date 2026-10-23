@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@momoi-labs/kiso':
-        specifier: ^0.25.0
-        version: 0.25.0
+        specifier: ^0.26.0
+        version: 0.26.0
       '@momoi-labs/kiso-react':
-        specifier: ^0.20.0
-        version: 0.20.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(lucide-react@1.59.0(@types/react@19.3.0)(react@19.3.1))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(redux@5.0.1)
+        specifier: ^0.21.0
+        version: 0.21.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(lucide-react@1.59.0(@types/react@19.3.0)(react@19.3.1))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(redux@5.0.1)
       '@tanstack/react-query':
         specifier: ^5.104.4
         version: 5.104.4(@types/react@19.3.0)(react@19.3.1)
@@ -66,15 +66,15 @@ packages:
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
 
-  '@momoi-labs/kiso-react@0.20.0':
-    resolution: {integrity: sha512-C8/2nljv5EunYFKsHYUOEgRsI6Ots42j5mWzDKlvp+KHZE0o0fDf7O5IRNe2AbrDFSZ8TsB7/5P33H2ShKX1YA==}
+  '@momoi-labs/kiso-react@0.21.0':
+    resolution: {integrity: sha512-p3OW7e9fpbodBlwlZNbkBEnUxlbZNcgFK86ffTBV7AdTx/SQ1SEdaOcHJfDU1wI7+p4BBiWhW5sWDSlDj9qJtQ==}
     peerDependencies:
       lucide-react: '>=1.0.0'
       react: ^19.0.0
       react-dom: ^19.0.0
 
-  '@momoi-labs/kiso@0.25.0':
-    resolution: {integrity: sha512-mfWtAP93pBP71/wFF6rT3z42ksQgPI0pR5/EZo/3DDPmfBjJGzC9tY/Mm2eqkYgdS+SXqW6FgOUlo6B23r8YwA==}
+  '@momoi-labs/kiso@0.26.0':
+    resolution: {integrity: sha512-S5g7VFjtQwTTR1rfr55QdX9iAMep9wFVDrlxrYWzSRBTLgRKekwAn8tOUvXGaWRH09mw2/q9NFNSsWS5arzdFw==}
 
   '@oxc-project/types@0.154.0':
     resolution: {integrity: sha512-KYOUGQFlLWR+s4QMV2Q9ko38TZm7EdO87Qm7rvZLqk/webse/cDjtyxKhg/47l0byCbs/k46LT8qc4PKjAikzA==}
@@ -1399,9 +1399,9 @@ snapshots:
 
   '@floating-ui/utils@0.2.12': {}
 
-  '@momoi-labs/kiso-react@0.20.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(lucide-react@1.59.0(@types/react@19.3.0)(react@19.3.1))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(redux@5.0.1)':
+  '@momoi-labs/kiso-react@0.21.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(lucide-react@1.59.0(@types/react@19.3.0)(react@19.3.1))(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(redux@5.0.1)':
     dependencies:
-      '@momoi-labs/kiso': 0.25.0
+      '@momoi-labs/kiso': 0.26.0
       class-variance-authority: 0.7.1
       clsx: 2.1.1
       lucide-react: 1.59.0(@types/react@19.3.0)(react@19.3.1)
@@ -1415,7 +1415,7 @@ snapshots:
       - '@types/react-dom'
       - redux
 
-  '@momoi-labs/kiso@0.25.0': {}
+  '@momoi-labs/kiso@0.26.0': {}
 
   '@oxc-project/types@0.154.0': {}
 
