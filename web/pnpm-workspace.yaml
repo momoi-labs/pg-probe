@@ -1,4 +1,4 @@
 # Kiso is our own package, so take its release the day it ships.
 minimumReleaseAgeExclude:
-  - '@momoi-labs/kiso-react@0.21.0'
-  - '@momoi-labs/kiso@0.26.0'
+  - '@momoi-labs/kiso-react@0.22.0'
+  - '@momoi-labs/kiso@1.0.0'

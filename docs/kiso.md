@@ -7,7 +7,7 @@ file has a bug.
 
 ## Contracts
 
-- Package: `@momoi-labs/kiso-react` 0.21.0 and `@momoi-labs/kiso` 0.26.0 in
+- Package: `@momoi-labs/kiso-react` 0.22.0 and `@momoi-labs/kiso` 1.0.0 in
   `web/`.
 - Contracts: `web/node_modules/@momoi-labs/kiso/kiso/`. Start at `AGENTS.md`.
 
