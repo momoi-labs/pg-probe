@@ -64,7 +64,7 @@ export function Section({
 
 // A section's panels, which the reader can move and resize. The layout is
 // saved in the browser per section and restored on the next visit. The
-// report keeps the source order and saves nothing.
+// report shows them in one static column in source order and saves nothing.
 export function PanelGrid({ id, label, children }: { id: string; label: string; children: ReactNode }) {
   const inReport = useInReport()
   const key = `pg-probe.layout.${id}`
@@ -77,6 +77,7 @@ export function PanelGrid({ id, label, children }: { id: string; label: string; 
   return (
     <DashboardGrid
       aria-label={label}
+      static={inReport}
       defaultLayout={inReport ? undefined : saved}
       onLayoutChange={
         inReport ? undefined : (layout) => localStorage.setItem(key, JSON.stringify(layout))

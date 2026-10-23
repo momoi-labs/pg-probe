@@ -1,6 +1,6 @@
 import { useIsFetching } from '@tanstack/react-query'
 import { useNavigate, useSearch } from '@tanstack/react-router'
-import { useEffect, useState, type SyntheticEvent } from 'react'
+import { useEffect, useState } from 'react'
 import { utcMinute } from '../format.tsx'
 import { useRange } from '../range.tsx'
 import { Metrics } from './metrics.tsx'
@@ -28,14 +28,6 @@ type ContentsGroup = { title: string; entries: { id: string; title: string }[] }
 // What a report pane draws when it has data: a chart, a table, a bar gauge or
 // a meter. app.css uses the same list for page breaks and notes.
 const drawn = 'figure, table, .bar-gauge, .meter'
-
-// Kiso 0.25 has no static pane grid, so the report stops pane heads from
-// moving panes. The page and the contents keep the source order.
-const holdPanes = (event: SyntheticEvent) => {
-  if (event.target instanceof Element && event.target.closest('[data-slot="grid-pane-head"]')) {
-    event.stopPropagation()
-  }
-}
 
 // The charts and tables of the report by section, read from the drawn page
 // once everything has loaded, for the contents.
@@ -70,7 +62,7 @@ export function Report() {
   const contents = useContents()
   usePrintWhenReady(print)
   return (
-    <div className="report" onKeyDownCapture={holdPanes} onPointerDownCapture={holdPanes}>
+    <div className="report">
       <p className="muted">
         {range
           ? `Charts cover ${utcMinute(new Date(range.from).toISOString())} to ${utcMinute(new Date(range.to).toISOString())}. Overview tiles cover the whole session.`

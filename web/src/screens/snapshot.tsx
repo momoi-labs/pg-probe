@@ -147,6 +147,8 @@ export function SnapshotLayout() {
     </ul>
   )
 
+  const unsupportedSummary = `${distinct(unsupported)} ${distinct(unsupported) === 1 ? 'source is' : 'sources are'} not available on this host or server version`
+
   return (
     <RangeProvider artifact={snapshotId}>
       <PageHeader
@@ -166,7 +168,7 @@ export function SnapshotLayout() {
           </>
         }
       >
-        {inReport && <p className="report-kicker t-caps">PostgreSQL health report</p>}
+        {inReport && <p className="report-kicker">PostgreSQL health report</p>}
         <PageHeaderTitle>{snapshot.hostname ?? snapshot.file_name}</PageHeaderTitle>
         <PageHeaderDescription>
           <Subtitle id={snapshotId} /> · captured {utcMinute(snapshot.started_at_utc)}
@@ -190,15 +192,16 @@ export function SnapshotLayout() {
           </AlertContent>
         </Alert>
       )}
-      {unsupported.length > 0 && (
-        <Disclosure
-          key={String(inReport)}
-          open={inReport || undefined}
-          summary={`${distinct(unsupported)} ${distinct(unsupported) === 1 ? 'source is' : 'sources are'} not available on this host or server version`}
-        >
-          {sourceList(unsupported)}
-        </Disclosure>
-      )}
+      {unsupported.length > 0 &&
+        // The report cover lists them in full, as text and not as a toggle.
+        (inReport ? (
+          <section className="stack-sm">
+            <h2 className="t-label">{unsupportedSummary}</h2>
+            {sourceList(unsupported)}
+          </section>
+        ) : (
+          <Disclosure summary={unsupportedSummary}>{sourceList(unsupported)}</Disclosure>
+        ))}
       <Outlet />
     </RangeProvider>
   )

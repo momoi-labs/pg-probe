@@ -71,7 +71,7 @@ file has a bug.
 | Snapshot header (`screens/snapshot.tsx`) | Dashboard page framing: PageHeader with the artifact Select, and an Alert for sources that were not collected |
 | Metrics (`screens/metrics.tsx`, `system.tsx`, `postgres.tsx`) | Dashboard, one Disclosure per section. System and PostgreSQL use `PanelGrid`. Overview tiles sit in the product `.tile-grid`: each tile is a whole-card link, and a pane head is a drag handle |
 | Queries (`screens/queries.tsx`) | Dashboard, `PanelGrid` |
-| Report (`screens/report.tsx`) | A product report page until Kiso ships one: the snapshot header as a cover, a linked contents page, then every section with one chart or table per printed page. "Print report" in the snapshot header opens it and the print dialog |
+| Report (`screens/report.tsx`) | Report: the snapshot header as the cover with a `.report-kicker`, a linked contents page, then the shared section Disclosures, open. `PanelGrid` passes `static` and ignores the saved layout. Each chart or table prints on its own page. "Print report" in the snapshot header opens it and the print dialog |
 | Logs (`screens/not-collected.tsx`) | Empty states, informational |
 | No snapshots, list error (`screens/start.tsx`) | Empty states, first run; Errors |
 
@@ -89,12 +89,9 @@ palette with the package version, and record the version in the module doc.
 
 ## Exceptions
 
-- The printed report overrides Kiso internals in `web/src/app.css`, since
-  Kiso 0.25 has no print support: the pane grid becomes one static column,
-  panes lose their frame on paper, disclosure summaries print as headings
-  without a marker, the scroll fade on tables is off, and the chart caption
-  is hidden for a chart wrapped inside a pane. These rules go away once Kiso
-  ships print rules and a report pattern.
+- In print, the first block after the anchor in a report pane body has no
+  top margin, since the anchor is an empty first child that Kiso's block
+  spacing would count.
 
 ## Verify
 
