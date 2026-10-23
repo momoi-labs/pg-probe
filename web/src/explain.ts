@@ -6,7 +6,7 @@ export const explain: Record<string, Explain> = {
   'cpu-utilization': {
     shows:
       'Share of CPU time in each state, averaged over all CPUs. User is time in programs such as PostgreSQL backends, and System is time in the kernel. I/O wait is idle time while a disk request was pending. Steal is time the hypervisor gave to other virtual machines.',
-    look: 'Add User and System to get busy time. When busy time stays above 80% for minutes, check Load average. Load above the CPU count at the same time means queries waited for a core. A p95 near 100% with a low p50 in the table means short bursts, not a constant shortage. I/O wait above 10% means CPUs sat idle while disk requests were pending, so check the latency charts. Steal above a few percent means the instance shares its CPUs with busy neighbors.',
+    look: 'Add User and System to get busy time. When busy time stays above 80% for minutes, check Load average. Load above the CPU count at the same time can mean queries waited for a core, but Linux load also counts tasks waiting on disk. A p95 near 100% with a low p50 in the table means short bursts, not a constant shortage. I/O wait above 10% means CPUs sat idle while disk requests were pending, so check the latency charts. Steal above a few percent means the instance shares its CPUs with busy neighbors.',
   },
   'load-average': {
     shows:
@@ -116,8 +116,9 @@ export const explain: Record<string, Explain> = {
     look: 'Most page writes should come from the checkpointer. Backend writes mean a query had to write a dirty page before it could reuse the buffer, and it waited for that write. High backend writes point to a small shared_buffers or a background writer that falls behind. Large checkpoint spikes can saturate the disk, so compare with disk latency.',
   },
   'replication-lag': {
-    shows: 'How far each standby was behind the primary at the last sample, from pg_stat_replication.',
-    look: 'Lag that keeps growing means the standby, its disk or the network cannot keep up. With large lag, reads on the standby return old data. With asynchronous replication, a failover then loses the most recent transactions.',
+    shows:
+      'Standbys at the last sample, from pg_stat_replication, grouped by state and sync state, with the number of standbys and the largest lag in each group.',
+    look: 'This is one moment, so compare with earlier captures to see whether lag grows. Lag that grows means a standby, its disk or the network cannot keep up. With large lag, reads on the standby return old data. With asynchronous replication, a failover then loses the most recent transactions.',
   },
   'database-size': {
     shows: 'Size on disk of each database at capture time.',
