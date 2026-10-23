@@ -1,11 +1,11 @@
-import { Disclosure } from '@momoi-labs/kiso-react'
 import { useIsFetching } from '@tanstack/react-query'
 import { useNavigate, useSearch } from '@tanstack/react-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type SyntheticEvent } from 'react'
 import { utcMinute } from '../format.tsx'
 import { useRange } from '../range.tsx'
 import { Metrics } from './metrics.tsx'
 import { NotCollected } from './not-collected.tsx'
+import { Section } from './panels.tsx'
 import { Queries } from './queries.tsx'
 
 // Opens the print dialog once every table has loaded and the charts have
@@ -23,18 +23,30 @@ function usePrintWhenReady(print: boolean | undefined) {
   }, [print, fetching, navigate])
 }
 
-type Section = { title: string; entries: { id: string; title: string }[] }
+type ContentsGroup = { title: string; entries: { id: string; title: string }[] }
+
+// What a report pane draws when it has data: a chart, a table, a bar gauge or
+// a meter. app.css uses the same list for page breaks and notes.
+const drawn = 'figure, table, .bar-gauge, .meter'
+
+// Kiso 0.25 has no static pane grid, so the report stops pane heads from
+// moving panes. The page and the contents keep the source order.
+const holdPanes = (event: SyntheticEvent) => {
+  if (event.target instanceof Element && event.target.closest('[data-slot="grid-pane-head"]')) {
+    event.stopPropagation()
+  }
+}
 
 // The charts and tables of the report by section, read from the drawn page
 // once everything has loaded, for the contents.
 function useContents() {
   const fetching = useIsFetching()
-  const [sections, setSections] = useState<Section[]>([])
+  const [sections, setSections] = useState<ContentsGroup[]>([])
   useEffect(() => {
     if (fetching > 0) return
     const timer = setTimeout(() => {
-      const found: Section[] = []
-      for (const pane of document.querySelectorAll<HTMLElement>('.report .grid-pane:has(figure, table)')) {
+      const found: ContentsGroup[] = []
+      for (const pane of document.querySelectorAll<HTMLElement>(`.report .grid-pane:has(${drawn})`)) {
         const id = pane.querySelector('.panel-anchor')?.id
         const title = pane.querySelector('.grid-pane-title')?.textContent
         const section = pane.closest('details')?.querySelector(':scope > summary')?.textContent ?? ''
@@ -58,13 +70,13 @@ export function Report() {
   const contents = useContents()
   usePrintWhenReady(print)
   return (
-    <div className="report">
+    <div className="report" onKeyDownCapture={holdPanes} onPointerDownCapture={holdPanes}>
       <p className="muted">
         {range
           ? `Charts cover ${utcMinute(new Date(range.from).toISOString())} to ${utcMinute(new Date(range.to).toISOString())}. Overview tiles cover the whole session.`
           : 'Charts cover the whole session.'}
       </p>
-      <Disclosure summary="Contents" open className="report-contents">
+      <Section title="Contents" className="report-contents">
         {contents.map((section) => (
           <section key={section.title}>
             <h3 className="t-label">{section.title}</h3>
@@ -77,14 +89,14 @@ export function Report() {
             </ol>
           </section>
         ))}
-      </Disclosure>
+      </Section>
       <Metrics />
-      <Disclosure summary="Queries" open>
+      <Section title="Queries">
         <Queries />
-      </Disclosure>
-      <Disclosure summary="Logs" open>
+      </Section>
+      <Section title="Logs">
         <NotCollected what="Logs" />
-      </Disclosure>
+      </Section>
     </div>
   )
 }

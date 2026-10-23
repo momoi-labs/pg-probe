@@ -6,7 +6,7 @@ export const explain: Record<string, Explain> = {
   'cpu-utilization': {
     shows:
       'Share of CPU time in each state, averaged over all CPUs. User is time in programs such as PostgreSQL backends, and System is time in the kernel. I/O wait is idle time while a disk request was pending. Steal is time the hypervisor gave to other virtual machines.',
-    look: 'Add User and System to get busy time. Busy time above 80% for minutes means the host is short of CPU, and queries wait for a core. A p95 near 100% with a low p50 in the table means short bursts, not a constant shortage. I/O wait above 10% points to slow disks, so check the latency charts. Steal above a few percent means the instance shares its CPUs with busy neighbors.',
+    look: 'Add User and System to get busy time. When busy time stays above 80% for minutes, check Load average. Load above the CPU count at the same time means queries waited for a core. A p95 near 100% with a low p50 in the table means short bursts, not a constant shortage. I/O wait above 10% means CPUs sat idle while disk requests were pending, so check the latency charts. Steal above a few percent means the instance shares its CPUs with busy neighbors.',
   },
   'load-average': {
     shows:
@@ -88,8 +88,8 @@ export const explain: Record<string, Explain> = {
   },
   'cgroup-events': {
     shows:
-      'Times per interval the cgroup hit its memory limits, and times the kernel killed a process in it for lack of memory.',
-    look: 'Any value above zero means the cgroup ran out of memory at least once. High and max events mean the cgroup ran into its limits and had to free memory. An out of memory kill of any PostgreSQL process restarts the server and drops every connection.',
+      'Change per interval of up to five counters of the cgroup of the probe, named controller.counter, from cpu.stat, memory.events and pids.events. CPU counters ending in usec are microseconds of CPU time. The other counters count events.',
+    look: 'cpu.nr_throttled above zero means the CPU limit of the cgroup paused its tasks. memory.high counts times the kernel throttled the cgroup and reclaimed memory at its soft limit, which never kills a process. memory.max counts times the cgroup reached its hard limit. The kernel kills a process only when reclaim fails there, and memory.oom_kill counts those kills. A kill of any PostgreSQL process restarts the server. pids.max means the cgroup could not start a process, so new connections fail.',
   },
   'connections-by-state': {
     shows:
@@ -124,8 +124,9 @@ export const explain: Record<string, Explain> = {
     look: 'Compare the total with the free space on the data filesystem. Compare with earlier captures to get the growth rate. Fast growth without new data can be bloat, so check Dead tuples.',
   },
   'largest-tables': {
-    shows: 'The six largest tables, with the space used by the rows (heap), the indexes and TOAST data.',
-    look: 'Indexes much larger than the heap can be bloat or indexes no query uses. A large table that also appears in Dead tuples needs vacuum tuning. A full scan of these tables costs the most I/O.',
+    shows:
+      'The six largest tables. Each bar is the estimated size of the table with its indexes and TOAST data, from the page counts in pg_class.',
+    look: 'The page counts update at VACUUM, ANALYZE and some DDL, so a table that grew since then shows smaller than it is. A table that also appears in Dead tuples needs vacuum tuning. A full scan of these tables costs the most I/O.',
   },
   'dead-tuples': {
     shows:
@@ -151,8 +152,8 @@ export const explain: Record<string, Explain> = {
   },
   'wait-events': {
     shows:
-      'Active backends at each sample, by what they waited for. Backends with no wait event were running on the CPU.',
-    look: 'Lock waits mean sessions blocked each other. IO waits mean storage was slow. LWLock waits point to contention inside PostgreSQL, for example on WAL or on the buffer mapping.',
+      'Active backends at each sample, by the type of wait event they reported. No wait event means PostgreSQL reported none. The backend was running on a CPU or waiting for the operating system to schedule it.',
+    look: 'Lock waits mean sessions blocked each other. IO waits are time spent waiting for reads, writes or flushes, so compare them with the disk latency charts. LWLock waits point to contention inside PostgreSQL, for example on WAL or on the buffer mapping. Many backends with no wait event on a busy host can mean they queue for CPU.',
   },
   'deadlocks-and-conflicts': {
     shows: 'Deadlocks, recovery conflicts and checksum failures per interval, over all databases.',
@@ -160,8 +161,8 @@ export const explain: Record<string, Explain> = {
   },
   'sessions-ended-abnormally': {
     shows:
-      'Sessions per interval that ended without a clean disconnect. Abandoned means the client went away, Fatal means an error ended the session and Killed means an operator or a timeout ended it.',
-    look: 'Abandoned sessions point to network problems, client crashes or a pooler that drops connections. Killed sessions match pg_terminate_backend calls or timeouts such as idle_in_transaction_session_timeout. The server log has the cause of each fatal error.',
+      'Sessions per interval that ended without a clean disconnect. Abandoned means the client went away. Fatal means an error ended the session, timeouts such as idle_in_transaction_session_timeout included. Killed means an operator ended it, for example with pg_terminate_backend.',
+    look: 'Abandoned sessions point to network problems, client crashes or a pooler that drops connections. Fatal sessions come from errors and timeouts, and the server log has the cause of each. Killed sessions match pg_terminate_backend calls by an operator or a tool.',
   },
   'block-i-o-time': {
     shows:
@@ -178,8 +179,9 @@ export const explain: Record<string, Explain> = {
     look: 'Any failure means the archive falls behind, and point in time recovery cannot go past the last archived file. PostgreSQL keeps every WAL file it could not archive, so pg_wal grows until the archive command works again and can fill the disk. Archived files should keep pace with the WAL generated.',
   },
   'replication-slots': {
-    shows: 'WAL that PostgreSQL keeps on disk for each replication slot.',
-    look: 'A slot keeps WAL until its consumer confirms it. A line that only grows means the consumer is slow, down or gone. Without max_slot_wal_keep_size, that WAL can fill the disk and stop the server. Drop slots nobody uses.',
+    shows:
+      'WAL that PostgreSQL keeps on disk for replication slots, as the largest amount retained by any slot of each type, physical or logical.',
+    look: 'A slot keeps WAL until its consumer confirms it. A line that only grows means a consumer is slow, down or gone. Without max_slot_wal_keep_size, that WAL can fill the disk and stop the server. Drop slots nobody uses.',
   },
   'slru-reads': {
     shows:
@@ -190,5 +192,10 @@ export const explain: Record<string, Explain> = {
     shows:
       'Data read, written and extended per second by all backends, from pg_stat_io. Extends are new blocks added to the end of a table or index file.',
     look: 'Large reads point to scans of tables that do not fit in memory. Writes should follow the checkpoints and the background writer, so compare with WAL and checkpoint writes. Steady extends are normal for tables that grow.',
+  },
+  rows: {
+    shows:
+      'Rows per second over all databases. Read is rows returned by scans. Written is rows inserted, updated and deleted.',
+    look: 'Read counts every row a scan returned, before filters, so a high read rate with few transactions points to sequential scans of large tables. A written rate that rises with WAL generated is normal. Compare the shape with Transactions per second.',
   },
 }

@@ -217,6 +217,12 @@ p.report-notes {
   line-height: var(--type-line-height-tight);
   letter-spacing: var(--type-letter-spacing-heading);
 }
+.report-section-title {
+  display: inline;
+  margin: 0;
+  font: inherit;
+  letter-spacing: inherit;
+}
 .report-kicker {
   margin: 0;
   color: var(--color-muted-foreground);
@@ -258,7 +264,7 @@ p.report-notes {
   }
   /* A chart or table starts a page, except the first of a section, which
      shares the page with the section title. */
-  .report .grid-pane:has(figure, table) ~ .grid-pane:has(figure, table) {
+  .report .grid-pane:has(figure, table, .bar-gauge, .meter) ~ .grid-pane:has(figure, table, .bar-gauge, .meter) {
     break-before: page;
   }
   .tile-grid > * {
@@ -274,7 +280,8 @@ p.report-notes {
   mask-image: none;
   animation: none;
 }
-/* A panel with nothing to draw keeps its note and drops the report notes. */
-.report .grid-pane:not(:has(figure, table)) .report-notes {
+/* A panel with nothing to draw keeps its note and drops the report notes.
+   The list of what a pane draws matches `drawn` in screens/report.tsx. */
+.report .grid-pane:not(:has(figure, table, .bar-gauge, .meter)) .report-notes {
   display: none;
 }

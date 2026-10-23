@@ -1,6 +1,5 @@
 import {
   BarGauge,
-  Disclosure,
   Table,
   TableBody,
   TableCell,
@@ -21,7 +20,7 @@ import {
 } from '../artifact.ts'
 import { bytes } from '../format.tsx'
 import { deltas, points, rates, useSamples, type Values } from '../series.ts'
-import { ChartPanel, Note, NotSupportedPanel, Panel, PanelGrid, Slot } from './panels.tsx'
+import { ChartPanel, Note, NotSupportedPanel, Panel, PanelGrid, Section, Slot } from './panels.tsx'
 
 const MIB = 1024 ** 2
 const oneDecimal = (value: number) => value.toFixed(1)
@@ -860,7 +859,7 @@ function IoByOperation() {
 
 export function Postgres() {
   return (
-    <Disclosure summary="PostgreSQL" open>
+    <Section title="PostgreSQL">
       <PanelGrid id="postgres" label="PostgreSQL panels">
         <Slot id="connections-by-state" size={8}>
           <ConnectionsByState />
@@ -929,6 +928,6 @@ export function Postgres() {
           <IoByOperation />
         </Slot>
       </PanelGrid>
-    </Disclosure>
+    </Section>
   )
 }

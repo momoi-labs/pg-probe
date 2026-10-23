@@ -1,6 +1,5 @@
 import {
   Card,
-  Disclosure,
   Skeleton,
   Stat,
   StatFoot,
@@ -22,7 +21,7 @@ import {
 import { bytes, Bytes, Percent, Unknown } from '../format.tsx'
 import { deltas, lastValue, points, useSamples } from '../series.ts'
 import { useInReport } from '../report.ts'
-import { Note, panelId } from './panels.tsx'
+import { Note, panelId, Section } from './panels.tsx'
 import { isClientBackend, Postgres, useWalRate } from './postgres.tsx'
 import { System, useCpuShares, useDiskBusy } from './system.tsx'
 
@@ -365,7 +364,7 @@ export function Metrics() {
 function Overview() {
   const inReport = useInReport()
   return (
-    <Disclosure summary="Overview" open>
+    <Section title="Overview">
       <div className="stack-sm">
         <Note>
           Each value is the last sample, or the last interval for rates. Peaks cover the whole
@@ -382,6 +381,6 @@ function Overview() {
           <ReplicaLagTile />
         </div>
       </div>
-    </Disclosure>
+    </Section>
   )
 }

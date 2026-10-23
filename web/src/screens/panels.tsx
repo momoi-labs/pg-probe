@@ -5,6 +5,7 @@ import {
   AlertTitle,
   Badge,
   Chart,
+  Disclosure,
   EmptyState,
   EmptyStateDescription,
   EmptyStateTitle,
@@ -38,9 +39,34 @@ type PanelProps = {
 // Overview tiles link to it.
 export const panelId = (title: string) => title.toLowerCase().replace(/[^a-z0-9]+/g, '-')
 
+// A section of the metrics screens and the report. In the report its summary
+// is an h2, so each section is a heading for assistive technology too.
+export function Section({
+  title,
+  className,
+  children,
+}: {
+  title: string
+  className?: string
+  children: ReactNode
+}) {
+  const inReport = useInReport()
+  return (
+    <Disclosure
+      summary={inReport ? <h2 className="report-section-title">{title}</h2> : title}
+      open
+      className={className}
+    >
+      {children}
+    </Disclosure>
+  )
+}
+
 // A section's panels, which the reader can move and resize. The layout is
-// saved in the browser per section and restored on the next visit.
+// saved in the browser per section and restored on the next visit. The
+// report keeps the source order and saves nothing.
 export function PanelGrid({ id, label, children }: { id: string; label: string; children: ReactNode }) {
+  const inReport = useInReport()
   const key = `pg-probe.layout.${id}`
   let saved: PaneGridLayout | undefined
   try {
@@ -51,8 +77,10 @@ export function PanelGrid({ id, label, children }: { id: string; label: string; 
   return (
     <DashboardGrid
       aria-label={label}
-      defaultLayout={saved}
-      onLayoutChange={(layout) => localStorage.setItem(key, JSON.stringify(layout))}
+      defaultLayout={inReport ? undefined : saved}
+      onLayoutChange={
+        inReport ? undefined : (layout) => localStorage.setItem(key, JSON.stringify(layout))
+      }
     >
       {children}
     </DashboardGrid>

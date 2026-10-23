@@ -1,8 +1,8 @@
-import { Disclosure, Meter } from '@momoi-labs/kiso-react'
+import { Meter } from '@momoi-labs/kiso-react'
 import type { Row } from '../api.ts'
 import { missingReason, num, unsupportedCode, useOutcomes, useTable } from '../artifact.ts'
 import { deltas, points, rates, useSamples, type Values } from '../series.ts'
-import { ChartPanel, Note, NotSupportedPanel, Panel, PanelGrid, Slot } from './panels.tsx'
+import { ChartPanel, Note, NotSupportedPanel, Panel, PanelGrid, Section, Slot } from './panels.tsx'
 
 const GIB = 1024 ** 3
 const MIB = 1024 ** 2
@@ -752,7 +752,7 @@ function CgroupEvents() {
 
 export function System() {
   return (
-    <Disclosure summary="System" open>
+    <Section title="System">
       <PanelGrid id="system" label="System panels">
         <Slot id="cpu-utilization" size={8}>
           <CpuUtilization />
@@ -815,6 +815,6 @@ export function System() {
           <CgroupEvents />
         </Slot>
       </PanelGrid>
-    </Disclosure>
+    </Section>
   )
 }
