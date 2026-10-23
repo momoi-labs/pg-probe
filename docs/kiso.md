@@ -23,7 +23,8 @@ file has a bug.
 
 | Component | Use |
 | --- | --- |
-| `PanelGrid` | A section's panels in a `DashboardGrid`, which is a pane grid. The reader moves and resizes them, and the layout is saved in `localStorage` per section. Each child is a `Slot` with the pane id and default size |
+| `Section` | A section of Metrics and the report: an open Disclosure. In the report its summary is an `h2` |
+| `PanelGrid` | A section's panels in a `DashboardGrid`, which is a pane grid. The reader moves and resizes them, and the layout is saved in `localStorage` per section. The report keeps the source order and saves nothing. Each child is a `Slot` with the pane id and default size |
 | `Panel` | A dashboard panel: a `DashboardPanel` with title, optional subtitle and badge. Its id is the title as a slug and must match its `Slot`. An anchor in the body is the target of Overview tile links |
 | `GapPanel` | A panel the artifact cannot draw yet. The badge names the missing work: `needs sampling`, `no collector`, `needs schema change` or `blocked` |
 | `ChartPanel` | A time series panel: a Kiso `Chart` in a pane, on the shared `session` sync id, where a click pins one time on every chart. The pane heading is the chart label, with measure and unit, and the chart hides its own caption. The legend table shows p50, p75, p95, p99, and the last sample instead of max and average. A drag across the plot sets the shared time range |
