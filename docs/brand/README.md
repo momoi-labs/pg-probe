@@ -26,6 +26,7 @@ The light and `-mono` files have it; the `-dark` files do not.
 | `lockup-stacked.svg`, `lockup-stacked-dark.svg`, `lockup-stacked-mono.svg` | Emblem above the wordmark. |
 | `wordmark.svg` | The wordmark alone, in `currentColor`. |
 | `elephant-mono.svg` | The elephant alone, in `currentColor`. |
+| `favicon.svg` | The favicon, a copy of `web/public/favicon.svg`. Keep the two the same. |
 | `usage.html` | A page that shows each file in use. Open it in a browser. |
 
 ## In the console
