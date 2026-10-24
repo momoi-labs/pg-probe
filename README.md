@@ -271,7 +271,8 @@ cargo test --all-targets --locked
 ```
 
 CI also builds both static musl release targets and exercises the packaging
-scripts. Releases come from a Changesets version PR: add a changeset with
+scripts. Each job runs only when a file it reads changes, so a change to the
+docs or to `web/` alone runs no job. Releases come from a Changesets version PR: add a changeset with
 `npm run changeset` for each user-visible change. See
 [docs/releases.md](docs/releases.md).
 
