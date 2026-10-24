@@ -1,0 +1,17 @@
+# Cloudflare Workers static assets headers: https://developers.cloudflare.com/workers/static-assets/headers/
+#
+# NOTE: unlike classic Cloudflare Pages, when two matching rules set the SAME
+# header name here, Workers assets joins both values with a comma instead of
+# letting the more specific rule win. So each header name below is defined in
+# exactly one rule — otherwise /_astro/* would inherit a broken, concatenated
+# Cache-Control (short-cache from the general rule + immutable from its own).
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+
+# Hashed, content-addressed build output (_astro/*.HASH.ext) never changes
+# under the same URL, so it's safe to cache forever.
+/_astro/*
+  Cache-Control: public, max-age=31536000, immutable

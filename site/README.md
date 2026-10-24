@@ -1,0 +1,50 @@
+# pg-probe site
+
+The marketing site for pg-probe, at https://pg-probe.dev. It is a static Astro
+site, served by Cloudflare Workers as static assets.
+
+```sh
+pnpm install
+pnpm dev          # http://localhost:4321
+pnpm build        # -> dist/
+pnpm check        # astro check, 0 errors expected
+pnpm preview      # serve dist/
+```
+
+## Screenshots
+
+Every image in `src/assets/shots/` is a real pg-probe screen. `mise run demo`
+in the repository root produces them in `target/demo/screenshots/`. The report
+pages come from the PDFs there:
+
+```sh
+pdftoppm -png -r 110 -f 1 -l 1 -singlefile report-en.pdf report-page-cover-en
+```
+
+The hero is drawn in HTML from one real 3 minute capture of `db-prod-01`:
+`src/components/TermCapture.astro` holds the last frame of `pg-probe capture`,
+and `public/demo/console/` is a static copy of the page that `pg-probe
+analyze` serves for the same file, with the console's own CSS. Queries and the
+sections below the overview are removed from the copy.
+
+## Placeholders
+
+- The install command, `curl -fsSL https://pg-probe.dev/install.sh | sh`, is
+  shown before `install.sh` exists.
+
+## Deploy
+
+A Cloudflare Workers project named `pg-probe-site`, connected to this
+repository, builds and deploys the site. `wrangler.jsonc` declares the worker
+name and the assets directory, so do not delete it: without it, `wrangler
+deploy` runs a setup wizard that installs the Cloudflare adapter and switches
+the build to server output.
+
+| Setting        | Value                  |
+|----------------|------------------------|
+| Root directory | `site`                 |
+| Build command  | `pnpm build`           |
+| Deploy command | `npx wrangler deploy`  |
+
+Add `pg-probe.dev` and `www.pg-probe.dev` under Settings, Domains & Routes,
+and redirect `www` to the apex with a zone Redirect Rule.

@@ -1,0 +1,96 @@
+---
+// Three charts from the demo capture of db-prod-01, drawn as SVG at build
+// time, with one moment pinned in all of them, as the console does. The
+// series come from the artifact: TPS and CPU busy as the console computes
+// them, and ungranted locks by type.
+import series from '../data/demo-series.json';
+
+type Row = { t: string; tps?: number; cpu?: number; transactionid: number; tuple: number };
+const rows = series as Row[];
+const pin = rows.findIndex((r) => r.t === '15:04:34');
+const W = 300;
+const H = 90;
+
+function path(values: (number | undefined)[], max: number): string {
+  const step = W / (values.length - 1);
+  let d = '';
+  values.forEach((v, i) => {
+    if (v == null) return;
+    const x = (i * step).toFixed(1);
+    const y = (H - (v / max) * H).toFixed(1);
+    d += d === '' ? `M${x} ${y}` : ` L${x} ${y}`;
+  });
+  return d;
+}
+function area(values: (number | undefined)[], max: number): string {
+  const line = path(values, max);
+  const first = values.findIndex((v) => v != null) * (W / (values.length - 1));
+  return `${line} L${W} ${H} L${first.toFixed(1)} ${H} Z`;
+}
+const pinX = pin * (W / (rows.length - 1));
+const at = rows[pin];
+
+const cards = [
+  {
+    title: 'Transactions per second',
+    value: at.tps!.toLocaleString('en-US'),
+    unit: 'tps',
+    max: 7000,
+    lines: [{ values: rows.map((r) => r.tps), color: 'var(--c1)' }],
+  },
+  {
+    title: 'Lock requests waiting, by type',
+    value: String(at.transactionid + at.tuple),
+    unit: `${at.transactionid} transactionid, ${at.tuple} tuple`,
+    max: 70,
+    lines: [
+      { values: rows.map((r) => r.transactionid), color: 'var(--c1)' },
+      { values: rows.map((r) => r.tuple), color: 'var(--c2)' },
+    ],
+  },
+  {
+    title: 'CPU busy',
+    value: `${at.cpu}%`,
+    unit: 'of the host',
+    max: 40,
+    lines: [{ values: rows.map((r) => r.cpu), color: 'var(--c1)' }],
+  },
+];
+---
+<div class="console-cards">
+  {cards.map((card) => (
+    <figure class="chart-card">
+      <figcaption>
+        <span class="title">{card.title}</span>
+        <span class="value"><b>{card.value}</b> {card.unit}</span>
+      </figcaption>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={`${card.title}, ${card.value} ${card.unit} at ${at.t} UTC`}>
+        {card.lines.map((line, i) => i === 0 && card.lines.length === 1 && (
+          <path d={area(line.values, card.max)} fill={line.color} opacity="0.12" />
+        ))}
+        {card.lines.map((line) => (
+          <path d={path(line.values, card.max)} fill="none" stroke={line.color} stroke-width="1.5" vector-effect="non-scaling-stroke" stroke-linejoin="round" />
+        ))}
+        <line x1={pinX} x2={pinX} y1="0" y2={H} class="pin" vector-effect="non-scaling-stroke" />
+      </svg>
+      <div class="axis"><span>{rows[0].t.slice(0, 5)}</span><span class="at" style={`left:${(pinX / W) * 100}%`}>{at.t}</span><span>{rows.at(-1)!.t.slice(0, 5)}</span></div>
+    </figure>
+  ))}
+</div>
+
+<style>
+  .console-cards { --c1: #a793f4; --c2: #5bd295; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 2.5rem; }
+  .chart-card { margin: 0; display: grid; gap: 0.75rem; padding: 1.1rem 1.1rem 0.9rem; border: 1px solid #3a3834; border-radius: 12px; background: #211f1c; }
+  figcaption { display: grid; gap: 0.2rem; }
+  .title { color: #aba9a5; font-size: 0.85rem; }
+  .value { color: #aba9a5; font-size: 0.8rem; }
+  .value b { color: #eeece9; font-size: 1.6rem; font-weight: 500; letter-spacing: -0.02em; margin-right: 0.2rem; }
+  svg { width: 100%; height: 90px; overflow: visible; }
+  .pin { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 3 3; }
+  .axis { position: relative; display: flex; justify-content: space-between; font: 400 0.7rem var(--mono); color: #94928e; }
+  .at { position: absolute; transform: translateX(-50%); color: var(--accent); }
+
+  @media (max-width: 860px) {
+    .console-cards { grid-template-columns: 1fr; }
+  }
+</style>

@@ -1,0 +1,193 @@
+---
+import { Image } from 'astro:assets';
+import Base from '../layouts/Base.astro';
+import Flow from '../components/Flow.astro';
+import TopDemo from '../components/TopDemo.astro';
+import ConsoleCards from '../components/ConsoleCards.astro';
+import coverEn from '../assets/shots/report-page-cover-en.png';
+import coverPtBr from '../assets/shots/report-page-cover-pt-br.png';
+import coverEs from '../assets/shots/report-page-cover-es.png';
+import locksEn from '../assets/shots/report-page-locks-en.png';
+import locksPtBr from '../assets/shots/report-page-locks-pt-br.png';
+import locksEs from '../assets/shots/report-page-locks-es.png';
+
+const releases = 'https://github.com/momoi-labs/pg-probe/releases/latest';
+const repo = 'https://github.com/momoi-labs/pg-probe';
+
+const covers = [
+  { lang: 'en', label: 'English', image: coverEn, locks: locksEn },
+  { lang: 'pt-BR', label: 'Português (BR)', image: coverPtBr, locks: locksPtBr },
+  { lang: 'es', label: 'Español (ES)', image: coverEs, locks: locksEs },
+];
+
+---
+<Base
+  title="pg-probe: PostgreSQL diagnostics in one file"
+  description="Your client runs one command on their PostgreSQL server and sends you one file. Review it in a local console and print a report in English, Portuguese, or Spanish."
+>
+  <nav class="nav">
+    <div class="wrap">
+      <a class="brand" href="/"><img src="/lockup.svg" alt="pg-probe" width="152" height="28" /></a>
+      <ul>
+        <li><a href="#how">How it works</a></li>
+        <li><a href="#report">Report</a></li>
+        <li><a href="#top">Live view</a></li>
+        <li><a href={repo}>GitHub</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main>
+    <section class="hero">
+      <div class="wrap">
+        <span class="eyebrow">For PostgreSQL engineers</span>
+        <h1>Your client runs one command. You get the full picture.</h1>
+        <p class="lead">pg-probe records PostgreSQL and the Linux host metrics into one file. Open it in a local console, or print a report your client can read.</p>
+        <div class="cta">
+          <a class="btn" href="#install">Install pg-probe</a>
+        </div>
+        <div class="how" id="how">
+          <span class="eyebrow">How it works</span>
+          <h2>Capture there. Review here.</h2>
+        </div>
+        <Flow />
+      </div>
+    </section>
+
+    <section class="sec" id="report">
+      <div class="wrap split">
+        <div>
+          <span class="eyebrow">The printed report</span>
+          <h2>A report your client can read.</h2>
+          <p>Print the whole session to PDF from the console: 39 charts of the host and the database, from CPU and disks to locks and WAL. Each chart gets its own page, with what it measures and how to read it.</p>
+          <ul class="ticks">
+            <li><b>Cover and contents</b>, linked to every chart</li>
+            <li><b>"What to look for"</b> on each page, written for a reader who does not know the metric</li>
+            <li><b>Sources that were not available</b> listed after the cover, never drawn as zero</li>
+          </ul>
+          <div class="langs" role="group" aria-label="Report language">
+            {covers.map((cover, index) => (
+              <button type="button" data-lang={cover.lang} aria-pressed={index === 0 ? 'true' : 'false'}>{cover.label}</button>
+            ))}
+          </div>
+        </div>
+        <div class="sheets">
+          <div class="sheet back">
+            {covers.map((cover, index) => (
+              <Image src={cover.image} alt={`Report cover in ${cover.label}`} data-cover={cover.lang} hidden={index !== 0} widths={[480, 720]} sizes="(max-width: 860px) 68vw, 420px" />
+            ))}
+          </div>
+          <div class="sheet front">
+            {covers.map((cover, index) => (
+              <Image src={cover.locks} alt={`A report page in ${cover.label}: lock requests waiting, with a What to look for box above the chart`} data-cover={cover.lang} hidden={index !== 0} widths={[480, 720]} sizes="(max-width: 860px) 68vw, 420px" />
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" style="padding-top: 0">
+      <div class="wrap">
+        <span class="eyebrow">The console</span>
+        <h2>Built for reading a session.</h2>
+        <p class="lead">Click a chart to pin one moment, or drag to select a range. Every chart and every legend follows.</p>
+        <ConsoleCards />
+        <p class="fine">From the demo capture: pinned at 15:04:34 UTC, transactions fell to 2.6 per second while 32 lock requests waited, and the CPU was 3.4% busy.</p>
+        <div class="grid3">
+          <div><h4>Percentiles, not averages</h4><p>Every legend shows p50, p75, p95, p99, and the current value.</p></div>
+          <div><h4>Rates from samples</h4><p><code>--duration</code> and <code>--interval</code> record how counters change. A counter reset is a gap, never a value.</p></div>
+          <div><h4>Your own SQL</h4><p>The artifact is plain SQLite. Open it with <code>sqlite3</code> when the console is not enough.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" style="padding-top: 0">
+      <div class="wrap">
+        <span class="eyebrow">For your client's security team</span>
+        <h2>No agent. No account. No upload.</h2>
+        <p class="lead">Your client does not install a monitoring stack, and you do not need access to their server.</p>
+        <div class="grid3">
+          <div><h4>Read-only session</h4><p>One connection with <code>default_transaction_read_only=on</code> and a statement timeout.</p></div>
+          <div><h4>Strict allowlist</h4><p>No credentials, environment variables, command lines, or network identifiers in the file.</p></div>
+          <div><h4>Inspectable</h4><p>Your client can open the file before sending it. Nothing leaves the server on its own.</p></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" id="top" style="padding-top: 0">
+      <div class="wrap">
+        <div class="top-box">
+          <span class="eyebrow">Also in the binary</span>
+          <h2><code class="cmd-title">pg-probe top</code>, for live calls.</h2>
+          <p class="lead">When you are on a call with the client, see the queries running now, longest first. It works from PostgreSQL 9.3 on.</p>
+          <div class="top-grid">
+            <TopDemo />
+            <aside class="cost">
+              <h3>What it costs</h3>
+              <div><b>1</b><span>read-only connection</span></div>
+              <div><b>0.7 ms</b><span>per refresh</span></div>
+              <div><b>0.15%</b><span>of one core</span></div>
+              <p class="fine">Measured on a test server with 206 connections under pgbench. One SELECT over pg_stat_activity per refresh. The lock views, the query page, and the popups add one query each, only while open.</p>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" id="install" style="padding-top: 0">
+      <div class="wrap">
+        <span class="eyebrow">Install</span>
+        <h2>Runs on the servers your clients have.</h2>
+        <div class="compat">
+          <div><b>9.3 and newer</b><span>PostgreSQL versions</span></div>
+          <div><b>EL7 and newer</b><span>RHEL, CentOS, Rocky. rpm, tested on Rocky Linux 9</span></div>
+          <div><b>Ubuntu 18.04 and newer</b><span>deb, tested on Ubuntu 24.04</span></div>
+          <div><b>x86_64 · arm64</b><span>static binary, no dependencies</span></div>
+        </div>
+        <!-- TODO: install.sh does not exist yet. Placeholder until it ships on main. -->
+        <div class="install">
+          <code><b>$</b> curl -fsSL https://pg-probe.dev/install.sh | sh</code>
+          <button type="button" data-copy="curl -fsSL https://pg-probe.dev/install.sh | sh" aria-label="Copy the install command">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5v-1a1.5 1.5 0 00-1.5-1.5H4a1.5 1.5 0 00-1.5 1.5V9A1.5 1.5 0 004 10.5h1"/></svg>
+          </button>
+        </div>
+        <div class="cta">
+          <a class="btn" href={releases}>Download for Linux</a>
+          <span class="muted">deb, rpm, or a static binary, with no dependencies.</span>
+        </div>
+        <p class="fine">Open source under the PostgreSQL License. The capture, the console, and the report ship in the same binary.</p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="foot">
+    <div class="wrap">
+      <span class="mono">© 2026 <a href="https://momoi-labs.dev">Momoi Labs</a> · PostgreSQL License</span>
+      <ul>
+        <li><a href={repo}>GitHub</a></li>
+        <li><a href={releases}>Releases</a></li>
+        <li><a href="https://momoi-labs.dev">Momoi Labs</a></li>
+      </ul>
+    </div>
+  </footer>
+
+  <script>
+    const buttons = document.querySelectorAll<HTMLButtonElement>('.langs button');
+    const covers = document.querySelectorAll<HTMLImageElement>('[data-cover]');
+    for (const button of buttons) {
+      button.addEventListener('click', () => {
+        for (const other of buttons) other.setAttribute('aria-pressed', String(other === button));
+        for (const cover of covers) cover.hidden = cover.dataset.cover !== button.dataset.lang;
+      });
+    }
+
+    for (const button of document.querySelectorAll<HTMLButtonElement>('[data-copy]')) {
+      button.addEventListener('click', async () => {
+        await navigator.clipboard.writeText(button.dataset.copy!);
+        button.classList.add('done');
+        setTimeout(() => button.classList.remove('done'), 1500);
+      });
+    }
+  </script>
+</Base>

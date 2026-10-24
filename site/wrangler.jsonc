@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Static assets only: no Worker script, no adapter, no SSR. Having this file
+  // committed stops `wrangler deploy` from running its interactive first-run
+  // wizard, which would install @astrojs/cloudflare and switch the build to
+  // server output.
+  "name": "pg-probe-site",
+  "compatibility_date": "2026-10-24",
+  "assets": {
+    "directory": "dist"
+  }
+}

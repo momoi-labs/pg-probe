@@ -1,0 +1,142 @@
+---
+// The hero visual: capture on the client's server, the file changing hands
+// outside pg-probe, then review on the consultant's laptop. Every value comes
+// from one real capture of db-prod-01.
+import Handoff from './Handoff.astro';
+import TermCapture from './TermCapture.astro';
+
+const slug = 'db-prod-01-2026-10-24-19h37m27s';
+const size = '534 KiB';
+---
+<div class="flow">
+  <div class="flow-steps" role="tablist" aria-label="How pg-probe is used">
+    <button class="flow-step" role="tab" aria-selected="true" data-step="1"><span class="num">1</span><span><b>Capture</b><small>On the client's server</small></span><i class="prog"></i></button>
+    <button class="hand" role="tab" aria-selected="false" data-step="h"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h8l5 5v15H6z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M14 2v5h5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg><span>The file changes hands<small>outside pg-probe</small></span><i class="prog"></i></button>
+    <button class="flow-step" role="tab" aria-selected="false" data-step="2"><span class="num">2</span><span><b>Review</b><small>On your laptop</small></span><i class="prog"></i></button>
+  </div>
+  <div class="stage" data-at="1">
+    <div class="panel" role="tabpanel" data-panel="1">
+      <div class="win term">
+        <div class="bar"><i></i><i></i><i></i><span>ssh db-prod-01</span></div>
+        <TermCapture />
+      </div>
+      <p class="cap">The output is one file in the current directory. Nothing leaves the server.</p>
+    </div>
+    <div class="panel mail" role="tabpanel" data-panel="h" hidden>
+      <Handoff file={`${slug}.sqlite.gz`} size={size} />
+    </div>
+    <div class="panel review" role="tabpanel" data-panel="2" hidden>
+      <div class="win term cmd-win">
+        <div class="bar"><i></i><i></i><i></i><span>Terminal, on your laptop</span></div>
+        <pre><span class="ps">you@laptop:~$</span> pg-probe analyze -d ~/clients/acme
+<span class="out">pg-probe: review console listening on</span> <u>http://127.0.0.1:3080/console/</u></pre>
+      </div>
+      <div class="win browser">
+        <div class="bar"><i></i><i></i><i></i><span>127.0.0.1:3080/console/<mark>{slug}</mark></span></div>
+        <div class="console"><iframe src="/demo/console/" title="The pg-probe review console" tabindex="-1" loading="lazy" width="1200" height="1000"></iframe></div>
+      </div>
+      <p class="cap">Open the address in your browser. The console reads the same file, on your machine.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Advance once through capture, hand-off and review; stop on the last step
+  // or on the first click.
+  const order = ['1', 'h', '2'];
+  const steps = document.querySelector<HTMLElement>('.flow .flow-steps')!;
+  const buttons = [...steps.querySelectorAll<HTMLButtonElement>('button')];
+  const panels = [...document.querySelectorAll<HTMLElement>('.flow [data-panel]')];
+  const stage = document.querySelector<HTMLElement>('.flow .stage')!;
+  let index = 0;
+  function show(step: string) {
+    index = order.indexOf(step);
+    buttons.forEach((b) => b.setAttribute('aria-selected', String(b.dataset.step === step)));
+    panels.forEach((p) => (p.hidden = p.dataset.panel !== step));
+    stage.dataset.at = step;
+  }
+  function stop() {
+    window.clearInterval(timer);
+    steps.classList.add('manual');
+  }
+  const timer = window.setInterval(() => {
+    show(order[index + 1]);
+    if (index === order.length - 1) stop();
+  }, 5000);
+  buttons.forEach((b) =>
+    b.addEventListener('click', () => {
+      stop();
+      show(b.dataset.step!);
+    }),
+  );
+
+  // The console copy renders 1200 px wide and scales to its frame.
+  const box = document.querySelector<HTMLElement>('.flow .console')!;
+  new ResizeObserver(() => box.style.setProperty('--k', String(box.clientWidth / 1200))).observe(box);
+</script>
+
+<style>
+  .flow { display: grid; grid-template-columns: 17rem 1fr; gap: 1.5rem; align-items: start; text-align: left; margin-top: 2.5rem; }
+  [hidden] { display: none !important; }
+
+  .flow-steps { display: grid; gap: 0.75rem; position: sticky; top: 5rem; }
+  .flow-steps button { position: relative; overflow: hidden; display: flex; align-items: center; text-align: left; gap: 0.25rem; padding: 0.9rem 1rem; border-radius: 12px; font: inherit; cursor: pointer; }
+  .flow-steps small { display: block; color: var(--dim); font-size: 0.8rem; }
+  .flow-step { border: 1px solid var(--border); background: var(--panel); color: var(--muted); }
+  .flow-step b { display: block; color: var(--fg); font-weight: 500; }
+  .flow-step[aria-selected='true'] { border-color: var(--accent); background: var(--panel-2); }
+  .num { display: inline-grid; place-items: center; width: 1.6rem; height: 1.6rem; border-radius: 50%; border: 1px solid var(--accent); color: var(--accent); font: 500 0.8rem var(--mono); margin-right: 0.6rem; flex: none; }
+  .hand { border: 1px dashed var(--border); background: transparent; color: var(--muted); font-size: 0.85rem; gap: 0.6rem !important; }
+  .hand svg { width: 18px; height: 18px; color: var(--accent); flex: none; }
+  .hand[aria-selected='true'] { border-color: var(--muted); color: var(--fg); }
+  .prog { position: absolute; left: 0; bottom: 0; height: 2px; width: 0; background: var(--accent); }
+  .flow-steps:not(.manual) [aria-selected='true'] .prog { animation: fill 5s linear; }
+  @keyframes fill { to { width: 100%; } }
+
+  /* One fixed size for every panel; the tint says where the step runs:
+     blue on the server, gold on the laptop. */
+  .stage { min-width: 0; position: relative; aspect-ratio: 16 / 11; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; box-shadow: 0 40px 120px -40px rgb(229 181 59 / 0.18); }
+  .stage::before, .stage::after { content: ''; position: absolute; inset: 0; transition: opacity 0.5s; pointer-events: none; opacity: 0; }
+  .stage::before { background: linear-gradient(180deg, rgb(68 116 166 / 0.26), transparent 70%); }
+  .stage::after { background: linear-gradient(180deg, rgb(229 181 59 / 0.16), transparent 70%); }
+  .stage[data-at='1']::before, .stage[data-at='h']::before { opacity: 1; }
+  .stage[data-at='2']::after, .stage[data-at='h']::after { opacity: 1; }
+  .stage[data-at='h']::before { background: linear-gradient(90deg, rgb(68 116 166 / 0.14), transparent 55%); }
+  .stage[data-at='h']::after { background: linear-gradient(270deg, rgb(229 181 59 / 0.1), transparent 55%); }
+
+  .panel { position: absolute; inset: 1.5rem; z-index: 1; display: flex; flex-direction: column; }
+  .panel.mail { justify-content: center; align-items: center; }
+  .panel.review { gap: 0.9rem; }
+  .cap { flex: none; color: var(--muted); font-size: 0.9rem; margin-top: 0.9rem; text-align: center; }
+
+  .win { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--panel); box-shadow: 0 30px 90px -40px rgb(0 0 0 / 0.8); }
+  .win.term { background: #09090b; }
+  .win > :global(.tc) { flex: 1; min-height: 0; }
+  .bar { flex: none; display: flex; align-items: center; gap: 0.4rem; height: 34px; padding: 0 0.9rem; border-bottom: 1px solid var(--border); font: 400 0.75rem var(--mono); color: var(--dim); }
+  .bar i { width: 9px; height: 9px; border-radius: 50%; background: var(--border); }
+  .bar span { margin-left: 0.6rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  mark { background: rgb(229 181 59 / 0.18); color: var(--accent); border-radius: 3px; padding: 0 0.2rem; }
+
+  .cmd-win { flex: none; }
+  .cmd-win pre { margin: 0; padding: 0.8rem 1rem; font-size: 0.8rem; line-height: 1.7; white-space: pre-wrap; }
+  .ps { color: var(--accent); }
+  .out { color: var(--dim); }
+  .cmd-win u { color: var(--fg); text-decoration-color: var(--accent); text-underline-offset: 3px; }
+  /* The command runs first; the page opens after it. */
+  .browser { animation: open 0.6s ease-out 0.9s both; }
+  @keyframes open { from { opacity: 0; transform: translateY(12px); } }
+  .console { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+  .console iframe { position: absolute; top: 0; left: 0; border: 0; transform-origin: 0 0; transform: scale(var(--k, 0.7)); pointer-events: none; }
+
+  @media (max-width: 860px) {
+    .flow { grid-template-columns: 1fr; }
+    .flow-steps { position: static; }
+    .stage { aspect-ratio: auto; }
+    .panel { position: relative; inset: auto; padding: 1rem; }
+    .console { flex: none; aspect-ratio: 12 / 7; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .browser, .prog { animation: none !important; }
+  }
+</style>

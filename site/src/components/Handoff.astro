@@ -1,0 +1,39 @@
+---
+// The hand-off between the two steps: an email with the capture attached.
+// It is drawn as something the client does, not as a pg-probe step.
+interface Props {
+  file: string;
+  size: string;
+  note?: boolean;
+}
+const { file, size, note = true } = Astro.props;
+---
+<div class="handoff">
+  <div class="mail">
+    <div class="head">
+      <span><em>From</em> ops@acme.com</span>
+      <span><em>To</em> you</span>
+      <span><em>Subject</em> Capture from db-prod-01</span>
+    </div>
+    <p>Here is the capture from this morning's slowdown.</p>
+    <div class="att">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h8l5 5v15H6z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M14 2v5h5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+      <code>{file}</code><span>{size}</span>
+    </div>
+  </div>
+  {note && <p class="note">Not a pg-probe step. Your client sends the file the way they send any file: email, ticket, or shared folder. pg-probe uploads nothing.</p>}
+</div>
+
+<style>
+  .handoff { display: grid; gap: 0.75rem; max-width: 30rem; min-width: 0; }
+  .handoff > * { min-width: 0; }
+  .mail { border: 1px solid var(--border); border-radius: 12px; background: #f4f4f5; color: #18181b; padding: 1rem 1.1rem; box-shadow: 0 24px 60px -20px rgb(0 0 0 / 0.9); font-size: 0.85rem; }
+  .head { display: grid; gap: 0.15rem; padding-bottom: 0.6rem; border-bottom: 1px solid #d4d4d8; color: #3f3f46; }
+  .head em { font-style: normal; color: #71717a; display: inline-block; width: 4.2rem; }
+  .mail > p { margin: 0.7rem 0; }
+  .att { display: flex; align-items: center; gap: 0.5rem; border: 1px solid #d4d4d8; border-radius: 8px; padding: 0.5rem 0.65rem; background: #fff; min-width: 0; }
+  .att svg { width: 18px; height: 18px; color: #9d7832; flex: none; }
+  .att code { background: #fef3c7; border: 0; color: #18181b; font-size: 0.75rem; padding: 0.1rem 0.3rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .att span { color: #71717a; font-size: 0.75rem; flex: none; }
+  .note { color: var(--dim); font-size: 0.8rem; line-height: 1.5; }
+</style>

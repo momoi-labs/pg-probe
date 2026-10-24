@@ -21,3 +21,8 @@ run = "cargo zigbuild --locked --release --target x86_64-unknown-linux-musl"
 description = "Build the console and review artifacts locally"
 depends = ["web"]
 run = "cargo run --release --locked -- analyze"
+
+[tasks.site]
+description = "Serve the marketing site locally"
+dir = "site"
+run = "pnpm install --frozen-lockfile && pnpm dev"

@@ -1,0 +1,69 @@
+---
+// One real `pg-probe top` screen, captured from a terminal 160 columns wide
+// and converted from ANSI to HTML. The text scales to the width of its box.
+// `cols` and `rows` set how many cells show; `x` and `y` skip the first
+// columns and rows, to frame one part of the screen.
+interface Props {
+  name: string;
+  cols?: number;
+  rows?: number;
+  x?: number;
+  y?: number;
+}
+const { name, cols = 160, rows, x = 0, y = 0 } = Astro.props;
+const screens = import.meta.glob<string>('../assets/top/*.html', { query: '?raw', import: 'default', eager: true });
+const screen = screens[`../assets/top/${name}.html`];
+if (!screen) throw new Error(`no top screen named ${name}`);
+---
+<div class="tui" style={`--cols:${cols};--x:${x};--y:${y};${rows ? `--rows:${rows}` : ''}`} data-rows={rows ? '' : undefined}>
+  <pre set:html={screen} />
+</div>
+
+<style>
+  .tui { container-type: inline-size; background: #211f1c; overflow: hidden; }
+  pre {
+    margin: 0;
+    padding: 0.4em 0;
+    color: #eeece9;
+    font-family: var(--mono);
+    /* JetBrains Mono advances 0.6 em per cell. */
+    font-size: calc(100cqw / (var(--cols) * 0.6));
+    line-height: 1.3;
+    white-space: pre;
+    overflow: hidden;
+    /* A terminal draws -> as two cells, not as a ligature. */
+    font-variant-ligatures: none;
+    margin: calc(var(--y) * -1.3em) 0 0 calc(var(--x) * -0.6em);
+  }
+  /* Box drawing, blocks, and dots come from a fallback font; each sits in
+     one cell so the columns after it stay aligned. */
+  pre :global(i) { font-style: normal; display: inline-block; width: 1ch; overflow: hidden; vertical-align: top; text-align: center; }
+  /* Box drawing and blocks are painted to fill the whole cell, so lines join
+     across rows. Each layer is one stroke in the text color. */
+  pre :global(i.x) {
+    --l: 0.08em;
+    --hv: 0.16em;
+    --c: linear-gradient(currentColor, currentColor);
+    /* One pixel taller than the row and pulled back by a negative margin,
+       so rounding cannot leave a gap between rows. Positioned, so the next
+       row's span backgrounds, a little taller than the row, paint under it. */
+    position: relative;
+    height: calc(1.3em + 1px);
+    margin-bottom: -1px;
+    background-repeat: no-repeat;
+  }
+  pre :global(i.v) { background: var(--c) 50% 0 / var(--l) 100% no-repeat; }
+  pre :global(i.V) { background: var(--c) 50% 0 / var(--hv) 100% no-repeat; }
+  pre :global(i.h) { background: var(--c) 0 50% / 100% var(--l) no-repeat; }
+  pre :global(i.H) { background: var(--c) 0 50% / 100% var(--hv) no-repeat; }
+  pre :global(i.tl) { background: var(--c) 100% 50% / 50% var(--l) no-repeat, var(--c) 50% 100% / var(--l) 50% no-repeat; }
+  pre :global(i.tr) { background: var(--c) 0 50% / 50% var(--l) no-repeat, var(--c) 50% 100% / var(--l) 50% no-repeat; }
+  pre :global(i.bl) { background: var(--c) 100% 50% / 50% var(--l) no-repeat, var(--c) 50% 0 / var(--l) 50% no-repeat; }
+  pre :global(i.br) { background: var(--c) 0 50% / 50% var(--l) no-repeat, var(--c) 50% 0 / var(--l) 50% no-repeat; }
+  pre :global(i.lt) { background: var(--c) 50% 0 / var(--l) 100% no-repeat, var(--c) 100% 50% / 50% var(--l) no-repeat; }
+  pre :global(i.lb) { background: var(--c) 50% 0 / var(--l) 50% no-repeat, var(--c) 100% 50% / 50% var(--l) no-repeat; }
+  pre :global(i.lo) { background: var(--c) 0 100% / 100% 50% no-repeat; }
+  pre :global(i.up) { background: var(--c) 0 0 / 100% 50% no-repeat; }
+  pre :global(i.le) { background: var(--c) 0 0 / 50% 100% no-repeat; }
+  .tui[data-rows] pre { max-height: calc(var(--rows) * 1.3em + 0.8em); }
+</style>

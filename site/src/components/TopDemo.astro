@@ -1,0 +1,120 @@
+---
+// pg-probe top, one view at a time. Every screen is a real capture of
+// `pg-probe top` in a terminal of 120 columns and 35 rows under pgbench,
+// drawn as HTML. The keys above the screen, the keys of top, and the key
+// hints drawn in the screen switch views.
+import TopScreen from './TopScreen.astro';
+
+const views = [
+  { key: '1', label: 'Running', screen: 'running', note: 'Every active backend, longest first, with its own CPU, I/O, and I/O wait from <code>/proc</code>.' },
+  { key: '2', label: 'Waiting', screen: 'waiting', note: 'Backends waiting on a lock, and the lock each one waits on.' },
+  { key: '3', label: 'Blocking', screen: 'blocking', note: 'Who holds the lock, with the queue behind each holder as a tree.' },
+  { key: '4', label: 'Vacuum', screen: 'vacuum', note: 'Every autovacuum and manual vacuum, with its phase and how much of the table it has scanned.' },
+  { key: 'Enter', label: 'Query', screen: 'query', note: 'One backend: the full query, every age, and its CPU, memory, and I/O.' },
+  { key: 'e', label: 'Plan', screen: 'query-plan', note: 'The estimated plan. <code>EXPLAIN</code> without <code>ANALYZE</code>, so the query never runs again.' },
+  { key: 'f', label: 'Function', screen: 'query-functions', note: 'The plpgsql function it calls: signature, call statistics, and source.' },
+];
+---
+<div class="top-demo">
+  <div class="seg" role="tablist" aria-label="pg-probe top views">
+    {views.map((v, i) => (
+      <button type="button" role="tab" aria-selected={i === 0 ? 'true' : 'false'} data-go={v.screen}><kbd>{v.key}</kbd><span>{v.label}</span></button>
+    ))}
+  </div>
+  <div class="screen">
+    {views.map((v, i) => (
+      <div role="tabpanel" data-panel={v.screen} hidden={i !== 0}><TopScreen name={v.screen} cols={120} /></div>
+    ))}
+    <div class="card">
+      {views.map((v, i) => (
+        <div data-note={v.screen} hidden={i !== 0}><b>{v.label}</b><p set:html={v.note} /></div>
+      ))}
+    </div>
+  </div>
+</div>
+
+<script>
+  // The keys work like top: 1 to 4 switch views, Enter opens the backend,
+  // e and f its plan and function, Esc goes back. Unlike top, e and f work
+  // from any view, so a visitor does not need Enter first.
+  const root = document.querySelector<HTMLElement>('.top-demo')!;
+  const lists = ['running', 'waiting', 'blocking', 'vacuum'];
+  let current = 'running';
+  let lastList = 'running';
+
+  function show(screen: string) {
+    current = screen;
+    if (lists.includes(screen)) lastList = screen;
+    root.querySelectorAll<HTMLElement>('[data-go]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.go === screen)));
+    root.querySelectorAll<HTMLElement>('[data-panel]').forEach((p) => (p.hidden = p.dataset.panel !== screen));
+    root.querySelectorAll<HTMLElement>('[data-note]').forEach((n) => (n.hidden = n.dataset.note !== screen));
+  }
+
+  function press(key: string): boolean {
+    let to: string | undefined;
+    if (['1', '2', '3', '4'].includes(key)) to = lists[Number(key) - 1];
+    else if (key === 'Enter') to = 'query';
+    else if (key === 'e') to = 'query-plan';
+    else if (key === 'f') to = 'query-functions';
+    else if (key === 'Escape') to = current === 'query' ? lastList : current.startsWith('query-') ? 'query' : undefined;
+    if (to) show(to);
+    return to !== undefined;
+  }
+
+  root.querySelectorAll<HTMLElement>('[data-go]').forEach((b) => b.addEventListener('click', () => show(b.dataset.go!)));
+
+  // The keys of top, while the demo is on screen.
+  window.addEventListener('keydown', (event) => {
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (event.target instanceof HTMLElement && event.target.closest('input, textarea, [contenteditable]')) return;
+    const box = root.getBoundingClientRect();
+    if (box.bottom < 0 || box.top > innerHeight) return;
+    if (press(event.key)) event.preventDefault();
+  });
+
+  // The key hints drawn in the screens can be clicked too.
+  const hints: Record<string, string> = { enter: 'Enter', e: 'e', f: 'f', esc: 'Escape' };
+  for (const span of root.querySelectorAll<HTMLSpanElement>('.tui pre span')) {
+    const text = span.textContent!;
+    const label = span.nextElementSibling as HTMLElement | null;
+    let key: string | undefined;
+    if (/^ [1-4] $/.test(text)) key = text.trim();
+    else if (text in hints && label?.textContent?.startsWith(' ')) key = hints[text];
+    if (!key || !label) continue;
+    for (const part of [span, label]) {
+      part.classList.add('hot');
+      part.addEventListener('click', () => press(key!));
+    }
+  }
+</script>
+
+<style>
+  .top-demo { max-width: 840px; margin-top: 2.5rem; }
+  [hidden] { display: none !important; }
+
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; margin-bottom: 0.75rem; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+  .seg button { display: flex; align-items: center; gap: 0.45rem; padding: 0.3rem 0.45rem; border: 0; border-radius: 7px; background: none; color: var(--muted); font: inherit; font-size: 0.85rem; cursor: pointer; }
+  .seg button:hover { color: var(--fg); }
+  .seg button { padding-right: 0.65rem; }
+  .seg button:focus { outline: none; }
+  .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .seg button[aria-selected='true'] { background: var(--panel-2); color: var(--fg); }
+  .seg button[aria-selected='true'] kbd { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .seg kbd { font-size: 0.75rem; }
+
+  /* The height follows the 35 rows of the capture. */
+  .screen { position: relative; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: #211f1c; box-shadow: 0 30px 90px -40px rgb(0 0 0 / 0.8); }
+
+  /* Above the key hints on the last row of the screen. */
+  .card { position: absolute; right: 0.9rem; bottom: 2.6rem; width: min(19rem, 46%); padding: 0.85rem 0.95rem; border: 1px solid var(--accent); border-radius: 12px; background: rgb(9 9 11 / 0.9); backdrop-filter: blur(8px); }
+  .card [data-note] { display: grid; gap: 0.3rem; }
+  .card b { font-weight: 500; font-size: 0.95rem; }
+  .card p { margin: 0; color: var(--muted); font-size: 0.85rem; line-height: 1.5; }
+
+  .top-demo :global(.tui pre span.hot) { cursor: pointer; }
+  .top-demo :global(.tui pre span.hot:hover) { text-decoration: underline; text-decoration-color: #f2c438; text-underline-offset: 2px; }
+
+  @media (max-width: 860px) {
+    .card { position: static; width: auto; margin: 0.75rem; }
+  }
+</style>
