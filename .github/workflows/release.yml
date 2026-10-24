@@ -375,6 +375,9 @@ jobs:
           (cd dist && sha256sum -c SHA256SUMS)
 
       - name: Attest release assets
+        # GitHub stores artifact attestations only for public repositories on
+        # the organization's current plan, so a private repository skips them.
+        if: ${{ !github.event.repository.private }}
         # actions/attest-build-provenance@v2.4.0
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
         with:
@@ -393,6 +396,22 @@ jobs:
           tag="${TAG}"
           version="${{ needs.validate.outputs.version }}"
           changes="$(node scripts/release-version.mjs notes)"
+          attest_notes=""
+          if [[ "${{ github.event.repository.private }}" != "true" ]]; then
+            attest_notes="$(cat <<EOF
+          ### Verify attestations
+
+          The assets carry GitHub build provenance attestations.
+
+          \`\`\`sh
+          gh attestation verify --repo ${{ github.repository }} \\
+            pg-probe-v${version}-x86_64-unknown-linux-musl.tar.gz
+          gh attestation verify --repo ${{ github.repository }} \\
+            pg-probe-v${version}-aarch64-unknown-linux-musl.tar.gz
+          \`\`\`
+          EOF
+          )"
+          fi
           notes="$(cat <<EOF
           ## pg-probe ${tag}
 
@@ -424,18 +443,11 @@ jobs:
           sha256sum -c SHA256SUMS
           \`\`\`
 
-          ### Verify attestations
+          ${attest_notes}
 
-          \`\`\`sh
-          gh attestation verify --repo ${{ github.repository }} \\
-            pg-probe-v${version}-x86_64-unknown-linux-musl.tar.gz
-          gh attestation verify --repo ${{ github.repository }} \\
-            pg-probe-v${version}-aarch64-unknown-linux-musl.tar.gz
-          \`\`\`
-
-          Builds are repeatable and provenance-verifiable. This project does not
-          claim bit-for-bit reproducible Rust binaries until independent
-          rebuild-and-compare evidence exists.
+          Builds are repeatable. This project does not claim bit-for-bit
+          reproducible Rust binaries until independent rebuild-and-compare
+          evidence exists.
           EOF
           )"
           gh release create "$tag" \

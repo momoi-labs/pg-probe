@@ -43,8 +43,10 @@ gh attestation verify --repo momoi-labs/pg-probe \
   pg-probe-v0.1.0-x86_64-unknown-linux-musl.tar.gz
 ```
 
-Builds are repeatable and provenance-verifiable through GitHub artifact
-attestations. This project does not claim bit-for-bit reproducible Rust
+Builds are repeatable. Once the repository is public, they are also
+provenance-verifiable through GitHub artifact attestations; until then the
+release skips them, since the organization's plan does not store them for
+private repositories. This project does not claim bit-for-bit reproducible Rust
 binaries until independent rebuild-and-compare evidence exists.
 
 ## Build

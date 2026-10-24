@@ -41,8 +41,9 @@ The release workflow checks that the tag, `package.json`, `Cargo.toml` and
 `Cargo.lock` agree, runs fmt, clippy and the tests, builds the review console,
 and builds both musl targets with GoReleaser. It fails when the console is not
 embedded in a binary. It smoke-tests the archives on Ubuntu, Rocky Linux and
-Alpine, verifies `SHA256SUMS`, attests the assets, and publishes the release
-with that version's section of `CHANGELOG.md` as its notes.
+Alpine, verifies `SHA256SUMS`, attests the assets when the repository is
+public, and publishes the release with that version's section of
+`CHANGELOG.md` as its notes.
 
 GoReleaser also wraps each binary in a `.deb` and an `.rpm`. The binary is
 static musl, so the packages declare no dependencies, not even libc. The
