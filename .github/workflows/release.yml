@@ -281,7 +281,9 @@ jobs:
             -v "${PWD}/scripts/smoke-test-release-binary.sh:/smoke.sh:ro" \
             -v "${PWD}/work/rocky:/work" \
             rockylinux@sha256:d7be1c094cc5845ee815d4632fe377514ee6ebcf8efaed6892889657e5ddaaa6 \
-            bash -lc 'dnf install -y sqlite gzip >/dev/null && bash /smoke.sh /usr/local/bin/pg-probe /work'
+            bash -lc 'dnf install -y gzip >/dev/null && SMOKE_SQL_CHECK=0 bash /smoke.sh /usr/local/bin/pg-probe /work'
+          # Rocky's sqlite3 is too old for STRICT tables; check on the host.
+          scripts/smoke-test-release-binary.sh --check-artifact work/rocky
 
       - name: Install and smoke-test the RPM package inside Rocky Linux
         run: |
@@ -301,8 +303,9 @@ jobs:
                 exit 1
               fi
               rpm -i /pg-probe.rpm
-              dnf install -y sqlite gzip >/dev/null
-              bash /smoke.sh /usr/bin/pg-probe /work'
+              dnf install -y gzip >/dev/null
+              SMOKE_SQL_CHECK=0 bash /smoke.sh /usr/bin/pg-probe /work'
+          scripts/smoke-test-release-binary.sh --check-artifact work/rpm
 
       - name: Smoke-test inside Alpine
         run: |
