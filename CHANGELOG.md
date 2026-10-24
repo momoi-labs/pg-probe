@@ -1,5 +1,43 @@
 # pg-probe
 
+## 0.2.0
+
+### Minor Changes
+
+- e34f667: `pg-probe capture --cleanup` deletes the `.sqlite.partial` files left by
+  earlier captures. It lists them and asks to confirm: `y` deletes them and the
+  capture continues; any other answer aborts with exit code 2 and deletes
+  nothing.
+- 5d98798: `pg-probe capture` shows its progress by default. On a terminal, a summary
+  redraws in place: samples taken, collector counts per domain, sample time p95
+  and p99, pg-probe's own CPU, peak memory and disk writes, and the errors and
+  unsupported sources so far. `--refresh` sets how often it redraws, half the
+  `--interval` by default and at least 1s. Off a terminal, it appends a line only
+  when something changes, plus one progress line per minute. `--verbose` still
+  prints one line per collector outcome.
+- 0c5157b: The review console shows more host and PostgreSQL metrics: swap, page
+  faults, reclaim, network drops, disk latency, cgroup usage, locks, wait
+  events, conflicts, archiving, replication slots, SLRU and `pg_stat_io`.
+  A metric the server or host cannot provide says "Not supported on
+  PostgreSQL 9.3" or "on this host" and why. Panels can be moved and resized,
+  and the layout is kept per section. Chart legends show p50, p75, p95, p99
+  and the last sample. Hover marks the same time on every chart, and a click
+  pins it.
+- d4e68f6: The review console prints a report of the artifact. "Print report" in the
+  header opens it: a cover, a linked contents page, then one chart or table
+  per page with a note on what it shows and what to look for.
+- 3204db2: The review console prints the report in English, Brazilian Portuguese or Spanish. "Print report" asks for the language.
+- 813a39e: A time range in the review console header limits every chart and its
+  legend to part of the capture. A drag across any chart sets it, and
+  "Entire run" restores the whole capture.
+- 7ccbeef: `pg-probe top` and the capture progress screen follow Kiso's terminal look.
+  Both set the terminal's own background and text color while they run and
+  put them back when they end. Sections are a title and a rule, the selected
+  row has a gold bar, the views are tabs with their session counts, query
+  details open as a page, and help, functions and explain open as dialogs. On
+  a narrow screen the query moves under the figures of its row. Keys and saved
+  settings stay the same.
+
 ## 0.1.0
 
 ### Minor Changes
