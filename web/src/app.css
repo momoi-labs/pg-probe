@@ -142,12 +142,19 @@ p.report-notes {
 
 /* The brand shows the pg-probe emblem where Kiso puts a BrandMark. It has the
    height of a small control. The elephant takes the text color; the probe
-   keeps its brand colors in both themes. See Exceptions in docs/kiso.md. */
+   keeps its brand colors in both themes. In the light theme, a stroke makes
+   the elephant a little heavier, as in the light files of docs/brand/. See
+   Exceptions in docs/kiso.md. */
 .brand-emblem {
   flex: none;
   height: var(--size-control-sm);
   width: auto;
   color: var(--color-foreground);
+}
+.brand-emblem .brand-elephant {
+  stroke: light-dark(currentColor, transparent);
+  stroke-width: 3;
+  stroke-linejoin: round;
 }
 .brand-emblem .brand-probe {
   fill: light-dark(#9d7832, #cba65e);

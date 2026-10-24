@@ -11,6 +11,11 @@ eye, and the tusk are cut out, so they show the background. The wordmark is
 | Elephant and wordmark | `#1b1a1e` | `#eeece9` (Kiso foreground) |
 | Probe waves | `#9d7832` | `#cba65e` |
 
+On a light background, the elephant has a stroke 3 units wide in its own
+color. A light cut-out in a dark shape looks wider than a dark cut-out in a
+light shape, so the stroke narrows the cut-outs to look like the dark files.
+The light and `-mono` files have it; the `-dark` files do not.
+
 ## Files
 
 | File | Use |
