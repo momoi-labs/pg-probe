@@ -1,13 +1,12 @@
 import {
   ApplicationShell,
-  BrandMark,
   Navigation,
   NavigationItem,
   NavigationLink,
   NavigationList,
-  TerminalIcon,
 } from '@momoi-labs/kiso-react'
 import { Link, Outlet, useMatches, useParams } from '@tanstack/react-router'
+import { PgProbeMark } from './mark.tsx'
 
 const sections = [
   { to: '/$snapshotId', routeId: '/$snapshotId/', label: 'Metrics' },
@@ -45,9 +44,7 @@ export function Shell() {
       layout="topbar"
       brand={
         <Link to="/" className="brand">
-          <BrandMark>
-            <TerminalIcon />
-          </BrandMark>
+          <PgProbeMark className="brand-emblem" />
           pg-probe
         </Link>
       }

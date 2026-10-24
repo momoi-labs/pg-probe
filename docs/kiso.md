@@ -16,7 +16,7 @@ file has a bug.
 | What | Where |
 | --- | --- |
 | Screens | `web/src/screens/` |
-| Product components | `web/src/screens/panels.tsx` |
+| Product components | `web/src/screens/panels.tsx`, `web/src/screens/mark.tsx` |
 | Product CSS | `web/src/app.css` |
 
 ## Product components
@@ -31,6 +31,7 @@ file has a bug.
 | `NotSupportedPanel` | A panel whose metric the observed server or host cannot provide. An informational EmptyState: "Not supported on PostgreSQL 9.3" or "on this host", and why. The printed report leaves it out, since its cover lists the sources that are not available |
 | `ReportSheet` | A panel as a page of the printed report: one sentence on what the chart shows, an info Alert "What to look for", then the chart. The texts live in `web/src/explain.ts`, by panel id |
 | `Note` | Muted text that says why a value is missing. Always visible |
+| `PgProbeMark` | The pg-probe emblem in the shell's brand. The brand kit is in `docs/brand/` |
 
 ## Product rules
 
@@ -129,6 +130,10 @@ each with its column title.
 
 ## Exceptions
 
+- The shell's brand shows the pg-probe emblem in place of a BrandMark, 32 px
+  high, with no fill behind it. Kiso 1.0's BrandMark holds a letter or a
+  14 px line icon on the primary fill, and the emblem cannot be read at that
+  size. Kiso needs a BrandMark for a product logo.
 - In print, the first block after the anchor in a report pane body has no
   top margin, since the anchor is an empty first child that Kiso's block
   spacing would count.
