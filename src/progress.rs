@@ -29,6 +29,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use pg_probe::top::palette;
+use ratatui::backend::IntoCrossterm;
 use ratatui::crossterm::style::{
     Attribute, Color as CColor, SetAttribute, SetBackgroundColor, SetForegroundColor,
 };
@@ -455,7 +456,7 @@ impl State {
             }
         } else {
             self.sample_times.push(took);
-            if self.sample_times.len() % PERCENTILE_STEP == 0 {
+            if self.sample_times.len().is_multiple_of(PERCENTILE_STEP) {
                 self.p95 = percentile(&self.sample_times, 95);
                 self.p99 = percentile(&self.sample_times, 99);
             }
@@ -1039,9 +1040,9 @@ fn clock(duration: Duration) -> String {
 /// A whole duration as the CLI takes it: `30m`, `1h`, `90s`.
 fn span(duration: Duration) -> String {
     let seconds = duration.as_secs();
-    if seconds > 0 && seconds % 3600 == 0 {
+    if seconds > 0 && seconds.is_multiple_of(3600) {
         format!("{}h", seconds / 3600)
-    } else if seconds > 0 && seconds % 60 == 0 {
+    } else if seconds > 0 && seconds.is_multiple_of(60) {
         format!("{}m", seconds / 60)
     } else {
         format!("{seconds}s")
@@ -1204,10 +1205,10 @@ pub fn cleanup_page(data_dir: &Path, partials: &[PathBuf]) {
     );
     write_styled(&mut text, base.patch(palette::muted()), " [y/N] ", color);
     if color {
-        let _ =
-            SetForegroundColor(CColor::from(base.fg.unwrap_or(Color::Reset))).write_ansi(&mut text);
-        let _ =
-            SetBackgroundColor(CColor::from(base.bg.unwrap_or(Color::Reset))).write_ansi(&mut text);
+        let _ = SetForegroundColor(base.fg.unwrap_or(Color::Reset).into_crossterm())
+            .write_ansi(&mut text);
+        let _ = SetBackgroundColor(base.bg.unwrap_or(Color::Reset).into_crossterm())
+            .write_ansi(&mut text);
     }
     let mut out = std::io::stderr().lock();
     let _ = out.write_all(text.as_bytes());
@@ -1284,8 +1285,8 @@ fn write_styled(out: &mut String, style: Style, text: &str, color: bool) {
         out.push_str(text);
         return;
     }
-    let fg = CColor::from(style.fg.unwrap_or(Color::Reset));
-    let bg = CColor::from(style.bg.unwrap_or(Color::Reset));
+    let fg: CColor = style.fg.unwrap_or(Color::Reset).into_crossterm();
+    let bg: CColor = style.bg.unwrap_or(Color::Reset).into_crossterm();
     let _ = SetForegroundColor(fg).write_ansi(out);
     let _ = SetBackgroundColor(bg).write_ansi(out);
     if style.add_modifier.contains(Modifier::BOLD) {

@@ -8,7 +8,7 @@
 
 use std::sync::OnceLock;
 
-use ratatui::style::{Color, Style, Stylize};
+use ratatui::style::{Color, Style};
 use ratatui::widgets::Block;
 
 /// `background`, dark.900.

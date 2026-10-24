@@ -37,7 +37,7 @@ This is a single-context repository. See `docs/agents/domain.md`.
 `pg-probe` is a single Rust CLI crate (no long-running service). Standard commands
 live in `README.md` (`## Development`) and `.github/workflows/ci.yml`.
 
-- The crate sets `rust-version = "1.85"` in `Cargo.toml` and pins an exact
+- The crate sets `rust-version = "1.88"` in `Cargo.toml` and pins an exact
   channel in `rust-toolchain.toml` for CI/release reproducibility. Prefer that
   pin (currently 1.97.1) over an unpinned older toolchain.
 - Lint/test/build: `cargo fmt --all -- --check`, `cargo clippy --all-targets --all-features

@@ -5,7 +5,7 @@ edition = "2021"
 description = "Capture a portable PostgreSQL and Linux diagnostic snapshot"
 license = "PostgreSQL"
 repository = "https://github.com/momoi-labs/pg-probe"
-rust-version = "1.85"
+rust-version = "1.88"
 
 [dependencies]
 axum = "0.8.4"
@@ -26,8 +26,10 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 tokio = { version = "1.49.0", features = ["macros", "net", "rt-multi-thread", "signal"] }
 uuid = { version = "1.20.0", features = ["v4"] }
 webpki-roots = "1.0.6"
-ratatui = "0.29.0"
+ratatui = "0.30.2"
 sqlformat = "0.5.0"
+tui-kiso = { git = "https://github.com/momoi-labs/blueprint", rev = "49350a4f960501f3e4b2c86936586a295c9b7964" }
+kiso-tokens = { git = "https://github.com/momoi-labs/blueprint", rev = "49350a4f960501f3e4b2c86936586a295c9b7964" }
 
 [dev-dependencies]
 assert_cmd = "2.1.2"
