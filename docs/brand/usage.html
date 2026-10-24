@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pg-probe brand usage</title>
+<link rel="icon" type="image/svg+xml" href="../../web/public/favicon.svg">
+<style>
+/* Colors from Kiso 1.0's tokens, default theme with the gold accent, as in
+   the console: background, card, foreground, muted foreground, border, link,
+   success, and danger. */
+.light { --bg: #f4f2ee; --card: #faf9f7; --fg: #1b1a1e; --muted: #5f5b57; --border: #e0dcd6; --link: #745200; --success: #0c6b43; --danger: #ad2f29; }
+.dark { --bg: #211f1c; --card: #2d2b28; --fg: #eeece9; --muted: #aba9a5; --border: #494744; --link: #ffd45c; --success: #5bd295; --danger: #f5807f; }
+:root { color-scheme: light dark; --bg: light-dark(#f4f2ee, #211f1c); --card: light-dark(#faf9f7, #2d2b28); --fg: light-dark(#1b1a1e, #eeece9); --muted: light-dark(#5f5b57, #aba9a5); --border: light-dark(#e0dcd6, #494744); --success: light-dark(#0c6b43, #5bd295); --danger: light-dark(#ad2f29, #f5807f); }
+body { margin: 0; padding: 32px; background: var(--bg); color: var(--fg); font-family: Inter, system-ui, sans-serif; }
+main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+h1 { font-size: 20px; margin: 0; }
+h2 { font-size: 15px; margin: 0 0 4px; }
+p { margin: 0 0 12px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+code, .cap { font-family: "JetBrains Mono", ui-monospace, monospace; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.tile { border-radius: 8px; padding: 20px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; justify-content: center; border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
+.tile img { max-width: 100%; }
+.cap { font-size: 12px; color: var(--muted); }
+.hdr { display: flex; align-items: center; gap: 10px; padding: 16px 20px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
+.hdr img { height: 32px; width: auto; }
+.hdr .name { font-weight: 600; font-size: 15px; }
+.hdr .name { color: var(--link); }
+.nav { margin-left: auto; display: flex; gap: 16px; font-size: 13px; color: var(--muted); }
+.tab { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 8px 8px 0 0; font-size: 13px; background: var(--card); border: 1px solid var(--border); }
+.tab img { width: 16px; height: 16px; }
+.sizes { display: flex; align-items: flex-end; gap: 24px; flex-wrap: wrap; }
+.sizes div { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.rules { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.rules .tile { justify-content: flex-start; background: var(--card); }
+.rules ul { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.6; }
+.rules h3 { font-size: 13px; margin: 0 0 6px; }
+.ok h3 { color: var(--success); }
+.no h3 { color: var(--danger); }
+@media (max-width: 560px) { body { padding: 16px; } .grid, .rules { grid-template-columns: 1fr; } .nav { display: none; } }
+</style>
+</head>
+<body>
+<main>
+<h1>pg-probe brand usage</h1>
+
+<section>
+<h2>1. In the console</h2>
+<p>The header shows the emblem 32 px high in place of Kiso's BrandMark. The elephant takes the text color. The waves and the database keep the brand colors in both themes.</p>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div class="hdr light"><img src="mark.svg" alt=""><span class="name">pg-probe</span><span class="nav"><span>Overview</span><span>Metrics</span><span>Report</span></span></div>
+<div class="hdr dark"><img src="mark-dark.svg" alt=""><span class="name">pg-probe</span><span class="nav"><span>Overview</span><span>Metrics</span><span>Report</span></span></div>
+</div>
+</section>
+
+<section>
+<h2>2. In the browser tab</h2>
+<p>The favicon is the elephant and the waves, without the database, so it reads at 16 px. It follows the system theme. Switch your system theme to see the other colors.</p>
+<span class="tab"><img src="../../web/public/favicon.svg" alt="">pg-probe console</span>
+</section>
+
+<section>
+<h2>3. Lockups: pick the file by the background</h2>
+<p>Use the light file on a light background and <code>-dark</code> on a dark one. Use the stacked lockup where space is narrow.</p>
+<div class="grid">
+<div class="tile light"><img src="lockup.svg" alt="" style="height: 52px"><span class="cap">lockup.svg</span></div>
+<div class="tile dark"><img src="lockup-dark.svg" alt="" style="height: 52px"><span class="cap">lockup-dark.svg</span></div>
+<div class="tile light"><img src="lockup-stacked.svg" alt="" style="height: 120px"><span class="cap">lockup-stacked.svg</span></div>
+<div class="tile dark"><img src="lockup-stacked-dark.svg" alt="" style="height: 120px"><span class="cap">lockup-stacked-dark.svg</span></div>
+</div>
+</section>
+
+<section>
+<h2>4. One color: currentColor</h2>
+<p>The <code>-mono</code> files and the wordmark use <code>currentColor</code>. Through <code>&lt;img&gt;</code>, as here, they are black. Inline the SVG to give them the CSS <code>color</code>.</p>
+<div class="grid">
+<div class="tile light"><img src="lockup-mono.svg" alt="" style="height: 44px"><span class="cap">lockup-mono.svg</span></div>
+<div class="tile light"><img src="mark-mono.svg" alt="" style="height: 48px"><span class="cap">mark-mono.svg</span></div>
+<div class="tile light"><img src="elephant-mono.svg" alt="" style="height: 72px"><span class="cap">elephant-mono.svg</span></div>
+<div class="tile light"><img src="wordmark.svg" alt="" style="height: 32px"><span class="cap">wordmark.svg</span></div>
+</div>
+</section>
+
+<section>
+<h2>5. Minimum size</h2>
+<p>The emblem reads from 32 px high. Below that, use the favicon. This sample follows the system theme.</p>
+<div class="tile"><div class="sizes">
+<div><picture><source srcset="mark-dark.svg" media="(prefers-color-scheme: dark)"><img src="mark.svg" alt="" style="height: 64px"></picture><span class="cap">64 px</span></div>
+<div><picture><source srcset="mark-dark.svg" media="(prefers-color-scheme: dark)"><img src="mark.svg" alt="" style="height: 32px"></picture><span class="cap">32 px</span></div>
+<div><picture><source srcset="mark-dark.svg" media="(prefers-color-scheme: dark)"><img src="mark.svg" alt="" style="height: 16px; opacity: .5"></picture><span class="cap">16 px: no</span></div>
+<div><img src="../../web/public/favicon.svg" alt="" style="height: 16px"><span class="cap">16 px: favicon</span></div>
+</div></div>
+</section>
+
+<section>
+<h2>6. Rules</h2>
+<div class="rules">
+<div class="tile ok"><h3>Do</h3><ul><li>Use SVG, not PNG.</li><li>Pick the file by the background.</li><li>Keep the emblem's colors.</li><li>Leave clear space around it.</li></ul></div>
+<div class="tile no"><h3>Do not</h3><ul><li>Change the wordmark's font.</li><li>Stretch or rotate the emblem.</li><li>Use the emblem below 32 px high.</li><li>Put the light file on a dark background.</li></ul></div>
+</div>
+</section>
+</main>
+</body>
+</html>
