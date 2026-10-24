@@ -18,6 +18,11 @@
 //! Showing progress adds no work on the observed server (principle 1), and it
 //! states facts without judging them (principle 2): no thresholds and no
 //! health colors.
+//!
+//! It draws with `tui-kiso`, as `pg-probe top` does, and leaves its cells
+//! unpainted. While the live block shows, the terminal's own background and
+//! text color are Kiso's, set with OSC 11 and OSC 10, and they come back
+//! when the progress ends.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Write as _};
@@ -28,18 +33,22 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use pg_probe::top::palette;
+use pg_probe::top::{paint_terminal, restore_terminal, restore_terminal_on_panic};
 use ratatui::backend::IntoCrossterm;
+use ratatui::buffer::Buffer;
 use ratatui::crossterm::style::{
     Attribute, Color as CColor, SetAttribute, SetBackgroundColor, SetForegroundColor,
 };
 use ratatui::crossterm::Command;
+use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use ratatui::widgets::Widget;
 use tracing::field::{Field, Visit};
 use tracing::level_filters::LevelFilter;
 use tracing::span::{Attributes, Id, Record};
 use tracing::{Event, Level, Metadata, Subscriber};
+use tui_kiso::{KeyHints, Theme, Toast};
 
 /// Samples between percentile updates, so the values hold still on screen.
 /// The first p95 and p99 appear once this many samples exist.
@@ -50,12 +59,62 @@ const HEARTBEAT: Duration = Duration::from_secs(60);
 const MAX_ERROR_LINES: usize = 6;
 const BAR_WIDTH: usize = 30;
 
+fn theme() -> Theme {
+    pg_probe::top::theme()
+}
+
+/// A field's label in a column 16 cells wide, two cells in.
+fn label(t: &Theme, text: &str) -> Span<'static> {
+    Span::styled(format!("  {text:<16}"), t.muted())
+}
+
+/// A section: its title in `muted-foreground`, then the rule to two cells
+/// before the edge.
+fn section(t: &Theme, width: usize, title: &str) -> Line<'static> {
+    let rule = width.saturating_sub(title.chars().count() + 5);
+    let mut spans = vec![Span::styled(format!("  {title} "), t.muted())];
+    spans.extend(t.look().rule.spans(t, rule));
+    Line::from(spans)
+}
+
+/// A widget drawn on one row `width` cells wide, as a line.
+fn widget_line(widget: impl Widget, width: usize) -> Line<'static> {
+    let width = u16::try_from(width).unwrap_or(u16::MAX);
+    let mut buffer = Buffer::empty(Rect::new(0, 0, width, 1));
+    widget.render(buffer.area, &mut buffer);
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    // A wide character takes two cells; the second is not written again.
+    let mut covered = 0;
+    for x in 0..width {
+        if covered > 0 {
+            covered -= 1;
+            continue;
+        }
+        let cell = &buffer[(x, 0)];
+        covered = Span::raw(cell.symbol()).width().saturating_sub(1);
+        let style = cell.style();
+        match spans.last_mut() {
+            Some(last) if last.style == style => {
+                last.content = format!("{}{}", last.content, cell.symbol()).into();
+            }
+            _ => spans.push(Span::styled(cell.symbol().to_owned(), style)),
+        }
+    }
+    Line::from(spans)
+}
+
 /// Installs the progress subscriber as the global default and returns the
 /// handle that ends the display once the capture returns.
 /// `refresh` is the time between redraws on a terminal.
 pub fn install(refresh: Duration) -> Progress {
     let live = std::io::stderr().is_terminal();
     let color = use_color();
+    if live && color {
+        // A panic may skip the drop of `Progress`, so the hook puts the
+        // colors back too.
+        restore_terminal_on_panic(std::io::stderr);
+        paint_terminal(&mut std::io::stderr(), theme().tokens());
+    }
     let state = Arc::new(Mutex::new(State::new(live, color)));
     let stop = Arc::new(AtomicBool::new(false));
 
@@ -102,6 +161,14 @@ impl Progress {
             let _ = ticker.join();
         }
         lock(&self.state).finish(interrupted, artifact);
+    }
+}
+
+/// The capture is over, done, stopped or failed, or `main` returned early:
+/// the terminal's own colors come back.
+impl Drop for Progress {
+    fn drop(&mut self) {
+        restore_terminal(&mut std::io::stderr());
     }
 }
 
@@ -625,19 +692,20 @@ impl State {
     fn print(&mut self, line: &str) {
         let mut out = std::io::stderr().lock();
         if self.live {
+            let t = theme();
             // On the page, the level sits in the label column.
             let (label, style, text) = if let Some(text) = line.strip_prefix("error: ") {
-                ("error", palette::danger(), text)
+                ("error", t.danger(), text)
             } else if let Some(text) = line.strip_prefix("warning: ") {
-                ("warning", palette::warning(), text)
+                ("warning", t.warning(), text)
             } else {
-                ("info", palette::muted(), line)
+                ("info", t.muted(), line)
             };
             let mut page = String::new();
             write_line(
                 &mut page,
                 &Line::from(vec![
-                    Span::styled(format!(" {label:<16}"), style),
+                    Span::styled(format!("  {label:<16}"), style),
                     Span::raw(text.to_string()),
                 ]),
                 terminal_width(),
@@ -687,20 +755,19 @@ impl State {
         self.drawn = lines.len();
     }
 
-    /// The live block, drawn like a page of `pg-probe top`: the brand badge,
-    /// full-width section bars and a label column.
+    /// The live block, drawn like a page of `pg-probe top`: sections with a
+    /// rule, a label column and the keys on the last row.
     fn block(&self, width: usize) -> Vec<Line<'static>> {
-        let label = |text: &str| Span::styled(format!(" {text:<16}"), palette::muted());
+        let t = theme();
         let field = |name: &str, value: Vec<Span<'static>>| {
-            let mut spans = vec![label(name)];
+            let mut spans = vec![label(&t, name)];
             spans.extend(value);
             Line::from(spans)
         };
-        let section =
-            |name: &str| Line::from(format!(" {name:<width$}")).style(palette::table_header());
-        let strong = |text: String| Span::styled(text, palette::strong());
-        let plain = |text: String| Span::raw(text);
-        let muted = |text: String| Span::styled(text, palette::muted());
+        let section = |name: &str| section(&t, width, name);
+        let strong = |text: String| Span::styled(text, t.strong());
+        let plain = |text: String| Span::styled(text, t.text());
+        let muted = |text: String| Span::styled(text, t.muted());
 
         let elapsed = self.elapsed();
         let mut lines = Vec::new();
@@ -716,8 +783,8 @@ impl State {
                     vec![
                         strong(clock(elapsed)),
                         muted(format!(" of {}  ", clock(duration))),
-                        Span::styled("█".repeat(filled), palette::link()),
-                        Span::styled("░".repeat(BAR_WIDTH - filled), palette::subtle()),
+                        Span::styled("━".repeat(filled), t.fg(t.tokens().primary)),
+                        Span::styled("─".repeat(BAR_WIDTH - filled), t.border()),
                     ],
                 ));
                 if self.finish == Finish::Running {
@@ -775,7 +842,7 @@ impl State {
         ));
         let counts = |counts: Counts, errors: usize, note: &str| {
             let errors = if errors > 0 {
-                Span::styled(format!("{errors:>8}"), palette::danger())
+                Span::styled(format!("{errors:>8}"), t.danger())
             } else {
                 muted(format!("{errors:>8}"))
             };
@@ -818,9 +885,9 @@ impl State {
                 vec![
                     strong(short(*last)),
                     muted(" last · p95 ".to_string()),
-                    percentile_span(self.p95),
+                    percentile_span(&t, self.p95),
                     muted(" · p99 ".to_string()),
-                    percentile_span(self.p99),
+                    percentile_span(&t, self.p99),
                     muted(format!(" · {} samples", self.sample_times.len())),
                 ],
             ));
@@ -865,8 +932,8 @@ impl State {
             shared.sort_by_key(|(_, errors)| std::cmp::Reverse(errors.last_sample));
             for ((status, code), errors) in shared.iter().take(MAX_ERROR_LINES) {
                 let mut spans = vec![
-                    Span::styled(format!(" {:<16}", "error"), palette::danger()),
-                    Span::styled(format!("{status}  {code}"), palette::danger()),
+                    Span::styled(format!("  {:<16}", "error"), t.danger()),
+                    Span::styled(format!("{status}  {code}"), t.danger()),
                     muted(format!("  last in sample {}", errors.last_sample)),
                 ];
                 if errors.recovered {
@@ -897,11 +964,27 @@ impl State {
         }
 
         lines.push(Line::default());
-        if self.finish == Finish::Running {
-            lines.push(Line::from(muted(
-                " Ctrl-C stops and keeps what was collected".to_string(),
-            )));
+        // The keys while it runs; a toast once it ends.
+        let room = width.saturating_sub(4);
+        let mut foot = vec![Span::raw("  ")];
+        match self.finish {
+            Finish::Running => {
+                let hints = KeyHints::new(&t, [("ctrl+c", "stop and keep what was collected")]);
+                foot.extend(widget_line(hints, room).spans);
+            }
+            Finish::Done => {
+                foot.extend(widget_line(Toast::new(&t, "Capture finished"), room).spans);
+            }
+            Finish::Interrupted => foot.extend(
+                widget_line(
+                    Toast::new(&t, "Capture interrupted, what was collected is kept")
+                        .label("STOPPED"),
+                    room,
+                )
+                .spans,
+            ),
         }
+        lines.push(Line::from(foot));
         lines
     }
 
@@ -976,10 +1059,10 @@ fn percentile(values: &[Duration], p: usize) -> Option<Duration> {
     Some(sorted[rank - 1])
 }
 
-fn percentile_span(value: Option<Duration>) -> Span<'static> {
+fn percentile_span(t: &Theme, value: Option<Duration>) -> Span<'static> {
     match value {
-        Some(value) => Span::styled(short(value), palette::strong()),
-        None => Span::styled("—", palette::muted()),
+        Some(value) => Span::styled(short(value), t.strong()),
+        None => Span::styled("—", t.muted()),
     }
 }
 
@@ -1065,7 +1148,10 @@ fn iec(bytes: u64) -> String {
 
 /// Whether stderr is a terminal that takes color.
 fn use_color() -> bool {
-    std::io::stderr().is_terminal() && std::env::var_os("NO_COLOR").is_none()
+    pg_probe::top::takes_terminal_colors(
+        std::io::stderr().is_terminal(),
+        std::env::var_os("NO_COLOR").is_some(),
+    )
 }
 
 /// Columns for a page, one short of the terminal so a full line never wraps.
@@ -1085,12 +1171,14 @@ pub fn header(sampling: Option<(Duration, Duration)>) {
     }
     let width = terminal_width();
     let color = use_color();
+    let t = theme();
     let title = Line::from(vec![
+        Span::raw("  "),
         Span::styled(
             concat!(" pg-probe ", env!("CARGO_PKG_VERSION"), " "),
-            palette::brand(),
+            t.brand(),
         ),
-        Span::styled(" Capture", palette::strong()),
+        Span::styled(" Capture", t.strong()),
         Span::styled(
             match sampling {
                 Some((duration, interval)) => {
@@ -1098,7 +1186,7 @@ pub fn header(sampling: Option<(Duration, Duration)>) {
                 }
                 None => " · single snapshot".to_string(),
             },
-            palette::muted(),
+            t.muted(),
         ),
     ]);
     let mut text = String::new();
@@ -1111,17 +1199,14 @@ pub fn header(sampling: Option<(Duration, Duration)>) {
 
 const CLEANUP_QUESTION: &str = "Delete them and continue?";
 
-fn cleanup_label(text: &str) -> Span<'static> {
-    Span::styled(format!(" {text:<16}"), palette::muted())
-}
-
 /// Prints the `--cleanup` section: the partial files about to be deleted,
 /// then the confirmation prompt. The prompt ends without a newline and leaves
 /// the page colors on, so the typed answer reads as part of the page.
 pub fn cleanup_page(data_dir: &Path, partials: &[PathBuf]) {
     let width = terminal_width();
     let color = use_color();
-    let muted = |text: String| Span::styled(text, palette::muted());
+    let t = theme();
+    let muted = |text: String| Span::styled(text, t.muted());
     let rows: Vec<(String, String, String)> = partials
         .iter()
         .map(|path| {
@@ -1159,29 +1244,30 @@ pub fn cleanup_page(data_dir: &Path, partials: &[PathBuf]) {
         .sum();
 
     let mut lines = vec![
-        Line::from(format!(
-            " {:<width$}",
-            format!(
+        section(
+            &t,
+            width,
+            &format!(
                 "Cleanup · partial files from earlier captures in {}",
                 data_dir.display()
-            )
-        ))
-        .style(palette::table_header()),
-        Line::from(muted(format!(
-            " {:<name_width$}  {:>10}  {}",
-            "File", "Size", "Modified"
-        ))),
+            ),
+        ),
+        Line::default(),
+        Line::from(Span::styled(
+            format!("  {:<name_width$}  {:>10}  {}", "File", "Size", "Modified"),
+            t.subtle(),
+        )),
     ];
     for (name, size, modified) in rows {
         lines.push(Line::from(vec![
-            Span::raw(format!(" {name:<name_width$}  ")),
-            Span::styled(format!("{size:>10}"), palette::strong()),
+            Span::styled(format!("  {name:<name_width$}  "), t.text()),
+            Span::styled(format!("{size:>10}"), t.strong()),
             muted(format!("  {modified}")),
         ]));
     }
     lines.push(Line::from(vec![
-        muted(format!(" {} files, ", partials.len())),
-        Span::styled(iec(total), palette::strong()),
+        muted(format!("  {} files, ", partials.len())),
+        Span::styled(iec(total), t.strong()),
         muted(" in total".to_string()),
     ]));
     lines.push(Line::default());
@@ -1190,20 +1276,15 @@ pub fn cleanup_page(data_dir: &Path, partials: &[PathBuf]) {
     for line in &lines {
         write_line(&mut text, line, width, color);
     }
-    let base = palette::base();
+    let base = t.text();
     write_styled(
         &mut text,
-        base.patch(palette::muted()),
-        &format!(" {:<16}", "Confirm"),
+        base.patch(t.muted()),
+        &format!("  {:<16}", "Confirm"),
         color,
     );
-    write_styled(
-        &mut text,
-        base.patch(palette::strong()),
-        CLEANUP_QUESTION,
-        color,
-    );
-    write_styled(&mut text, base.patch(palette::muted()), " [y/N] ", color);
+    write_styled(&mut text, base.patch(t.strong()), CLEANUP_QUESTION, color);
+    write_styled(&mut text, base.patch(t.muted()), " [y/N] ", color);
     if color {
         let _ = SetForegroundColor(base.fg.unwrap_or(Color::Reset).into_crossterm())
             .write_ansi(&mut text);
@@ -1219,11 +1300,8 @@ pub fn cleanup_page(data_dir: &Path, partials: &[PathBuf]) {
 /// then the result.
 pub fn cleanup_answered(answer: &str, result: &str, failed: bool) {
     let mut text = String::new();
-    let result_style = if failed {
-        palette::danger()
-    } else {
-        palette::strong()
-    };
+    let t = theme();
+    let result_style = if failed { t.danger() } else { t.strong() };
     if std::io::stderr().is_terminal() {
         let width = terminal_width();
         let color = use_color();
@@ -1237,13 +1315,13 @@ pub fn cleanup_answered(answer: &str, result: &str, failed: bool) {
             "\r\x1b[K"
         });
         let prompt = Line::from(vec![
-            cleanup_label("Confirm"),
-            Span::styled(CLEANUP_QUESTION, palette::strong()),
-            Span::styled(" [y/N] ", palette::muted()),
-            Span::styled(answer.to_string(), palette::strong()),
+            label(&t, "Confirm"),
+            Span::styled(CLEANUP_QUESTION, t.strong()),
+            Span::styled(" [y/N] ", t.muted()),
+            Span::styled(answer.to_string(), t.strong()),
         ]);
         let outcome = Line::from(vec![
-            cleanup_label("Result"),
+            label(&t, "Result"),
             Span::styled(result.to_string(), result_style),
         ]);
         for line in [&prompt, &outcome, &Line::default()] {
@@ -1261,10 +1339,9 @@ pub fn cleanup_answered(answer: &str, result: &str, failed: bool) {
 }
 
 /// Writes one line cut to `width` characters, so it never wraps and the block
-/// keeps its height. With color, the canvas is painted to the edge, as `top`
-/// paints its screen.
+/// keeps its height. The cells stay unpainted, on the terminal's background.
 fn write_line(out: &mut String, line: &Line<'_>, width: usize, color: bool) {
-    let base = palette::base().patch(line.style);
+    let base = theme().text().patch(line.style);
     let mut left = width;
     for span in &line.spans {
         if left == 0 {
@@ -1274,8 +1351,8 @@ fn write_line(out: &mut String, line: &Line<'_>, width: usize, color: bool) {
         left -= text.chars().count();
         write_styled(out, base.patch(span.style), &text, color);
     }
-    if color && left > 0 {
-        write_styled(out, base, &" ".repeat(left), color);
+    if !color {
+        out.truncate(out.trim_end_matches(' ').len());
     }
     out.push('\n');
 }
@@ -1350,6 +1427,29 @@ mod tests {
         state.outcome("postgres.stats.database".into(), failed.clone());
         state.outcome("postgres.stats.database".into(), collected);
         assert_eq!(state.current["postgres.stats.database"], failed);
+    }
+
+    #[test]
+    fn the_terminal_colors_are_set_and_put_back_once() {
+        let mut out = Vec::new();
+        restore_terminal(&mut out);
+        assert!(
+            out.is_empty(),
+            "nothing to put back before the colors are set"
+        );
+        paint_terminal(&mut out, theme().tokens());
+        paint_terminal(&mut out, theme().tokens());
+        let [r, g, b] = theme().tokens().background;
+        let set = String::from_utf8_lossy(&out).into_owned();
+        assert!(
+            set.starts_with(&format!("\x1b]11;#{r:02x}{g:02x}{b:02x}\x1b\\\x1b]10;#")),
+            "{set:?}"
+        );
+        assert_eq!(set.matches("\x1b]11;").count(), 1, "{set:?}");
+        out.clear();
+        restore_terminal(&mut out);
+        restore_terminal(&mut out);
+        assert_eq!(out, b"\x1b]111\x1b\\\x1b]110\x1b\\");
     }
 
     #[test]

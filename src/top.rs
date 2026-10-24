@@ -14,22 +14,28 @@
 mod explain;
 mod function;
 mod os;
-pub mod palette;
 mod settings;
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::io::{self, IsTerminal, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use ratatui::layout::{Alignment, Constraint, Layout, Rect};
-use ratatui::style::Style;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Cell, Clear, Paragraph, Row, Table, TableState, Wrap};
+use ratatui::layout::Rect;
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::Widget;
 use ratatui::{DefaultTerminal, Frame};
 use serde::{Deserialize, Serialize};
 use sqlformat::{Dialect, FormatOptions, QueryParams};
 use thiserror::Error;
+use tui_kiso::{
+    braille, fit, set_background, set_foreground, Columns, KeyHints, Mark, Modal, Page, Scroll,
+    Tabs, Theme, Title,
+};
 
 use settings::Settings;
 
@@ -228,6 +234,11 @@ pub struct Backend {
 }
 
 impl Backend {
+    /// Whether the running view lists the backend: any state but idle.
+    fn is_running(&self) -> bool {
+        !self.state.is_empty() && self.state != "idle"
+    }
+
     fn waits_on_lock(&self) -> bool {
         self.wait_type == "Lock"
     }
@@ -296,7 +307,7 @@ struct Popup {
     memory: Option<ProcessMemory>,
     /// The backend is gone; the panel keeps its last known details.
     ended: bool,
-    scroll: u16,
+    scroll: Scroll,
     /// The definitions of the functions the query calls, opened with `f`.
     function: Option<FunctionPanel>,
     /// The estimated plan of the query, opened with `e`.
@@ -307,7 +318,7 @@ struct ExplainPanel {
     database: String,
     /// The plan lines, or why there is no plan.
     result: Result<Vec<String>, String>,
-    scroll: u16,
+    scroll: Scroll,
 }
 
 struct FunctionPanel {
@@ -315,7 +326,7 @@ struct FunctionPanel {
     /// The functions found, or why the lookup failed.
     result: Result<Vec<function::FunctionDef>, String>,
     index: usize,
-    scroll: u16,
+    scroll: Scroll,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -327,12 +338,14 @@ enum View {
 }
 
 impl View {
-    const fn title(self) -> &'static str {
+    const ALL: [Self; 4] = [Self::Running, Self::Waiting, Self::Blocking, Self::Vacuum];
+
+    const fn name(self) -> &'static str {
         match self {
-            Self::Running => "RUNNING QUERIES",
-            Self::Waiting => "WAITING QUERIES",
-            Self::Blocking => "BLOCKING QUERIES",
-            Self::Vacuum => "VACUUM",
+            Self::Running => "Running",
+            Self::Waiting => "Waiting",
+            Self::Blocking => "Blocking",
+            Self::Vacuum => "Vacuum",
         }
     }
 }
@@ -378,6 +391,7 @@ impl Group {
 }
 
 struct App {
+    theme: Theme,
     server: Server,
     interval: Duration,
     view: View,
@@ -408,7 +422,11 @@ struct App {
     vacuums: Vec<Vacuum>,
     /// Local `/proc` metrics, present only when the server runs on this host.
     os: Option<OsState>,
-    table: TableState,
+    /// The selected row of the list, and where the list is scrolled.
+    selected: usize,
+    list: Scroll,
+    /// Refreshes so far: the spinner turns once per refresh.
+    tick: u32,
 }
 
 struct OsState {
@@ -497,14 +515,81 @@ pub fn run(params: &ConnectionParams, interval: Duration) -> Result<(), TopError
     app.refresh(&client, &sql)?;
 
     let mut terminal = ratatui::try_init()?;
+    // A panic skips the end of `run`, so the panic hook puts the colors
+    // back too, before ratatui's hook leaves the alternate screen.
+    restore_terminal_on_panic(io::stdout);
+    // The view leaves its cells unpainted, so the terminal's own colors
+    // become the theme's for the run, and come back when it ends. With
+    // NO_COLOR, or off a terminal, they stay as they are.
+    if takes_terminal_colors(
+        io::stdout().is_terminal(),
+        std::env::var_os("NO_COLOR").is_some(),
+    ) {
+        paint_terminal(&mut io::stdout(), app.theme.tokens());
+    }
     let result = app.event_loop(&client, &sql, &mut terminal);
+    restore_terminal(&mut io::stdout());
     ratatui::restore();
     result
 }
 
+/// The Kiso theme of the terminal views: the dark theme with the gold
+/// accent the console uses. It sends 24-bit color only when `COLORTERM`
+/// says the terminal takes it, and the nearest xterm-256 colors otherwise.
+pub fn theme() -> Theme {
+    Theme::new(kiso_tokens::GOLD_DARK)
+}
+
+/// Sets the terminal's background and text color to the theme's with OSC 11
+/// and OSC 10, or puts the terminal's own colors back with `None`.
+fn terminal_colors(out: &mut impl Write, tokens: Option<&kiso_tokens::Theme>) -> io::Result<()> {
+    set_background(out, tokens.map(|tokens| tokens.background))?;
+    set_foreground(out, tokens.map(|tokens| tokens.foreground))
+}
+
+/// Whether a view may set the terminal's colors: only on a terminal, and
+/// not when `NO_COLOR` is set.
+pub fn takes_terminal_colors(is_terminal: bool, no_color: bool) -> bool {
+    is_terminal && !no_color
+}
+
+/// Whether the terminal's colors are Kiso's now. `top` and the capture
+/// progress set them and put them back only through it, on the normal and
+/// the panic paths, so each happens at most once per process.
+static TERMINAL_COLORS: AtomicBool = AtomicBool::new(false);
+
+/// Sets the terminal's background and text color to `tokens`, unless they
+/// are set already.
+pub fn paint_terminal(out: &mut impl Write, tokens: &kiso_tokens::Theme) {
+    if !TERMINAL_COLORS.swap(true, Ordering::SeqCst) {
+        let _ = terminal_colors(out, Some(tokens));
+    }
+}
+
+/// Puts the terminal's own colors back, if `paint_terminal` changed them
+/// and nothing has put them back since.
+pub fn restore_terminal(out: &mut impl Write) {
+    if TERMINAL_COLORS.swap(false, Ordering::SeqCst) {
+        let _ = terminal_colors(out, None);
+    }
+}
+
+/// Chains a panic hook before the current one that puts the terminal's
+/// colors back on the writer `out` returns.
+pub fn restore_terminal_on_panic<W: Write + 'static>(out: fn() -> W) {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        restore_terminal(&mut out());
+        previous(info);
+    }));
+}
+
 impl App {
     fn new(server: Server, interval: Duration, local: bool) -> Self {
+        let list = Scroll::default();
+        list.top();
         Self {
+            theme: theme(),
             server,
             interval,
             view: View::Running,
@@ -522,7 +607,9 @@ impl App {
             blocks: HashMap::new(),
             vacuums: Vec::new(),
             os: local.then(OsState::new),
-            table: TableState::default().with_selected(Some(0)),
+            selected: 0,
+            list,
+            tick: 0,
         }
     }
 
@@ -581,23 +668,17 @@ impl App {
                                 popup.function = None;
                             }
                         }
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            panel.scroll = panel.scroll.saturating_add(1)
-                        }
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            panel.scroll = panel.scroll.saturating_sub(1)
-                        }
-                        KeyCode::PageDown => {
-                            panel.scroll = panel.scroll.saturating_add(PAGE as u16)
-                        }
-                        KeyCode::PageUp => panel.scroll = panel.scroll.saturating_sub(PAGE as u16),
+                        KeyCode::Down | KeyCode::Char('j') => panel.scroll.by(1),
+                        KeyCode::Up | KeyCode::Char('k') => panel.scroll.by(-1),
+                        KeyCode::PageDown => panel.scroll.by(PAGE as isize),
+                        KeyCode::PageUp => panel.scroll.by(-(PAGE as isize)),
                         KeyCode::Right | KeyCode::Char('l') if panel.index + 1 < count => {
                             panel.index += 1;
-                            panel.scroll = 0;
+                            panel.scroll.top();
                         }
                         KeyCode::Left | KeyCode::Char('h') if panel.index > 0 => {
                             panel.index -= 1;
-                            panel.scroll = 0;
+                            panel.scroll.top();
                         }
                         _ => {}
                     }
@@ -610,16 +691,10 @@ impl App {
                                 popup.explain = None;
                             }
                         }
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            panel.scroll = panel.scroll.saturating_add(1)
-                        }
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            panel.scroll = panel.scroll.saturating_sub(1)
-                        }
-                        KeyCode::PageDown => {
-                            panel.scroll = panel.scroll.saturating_add(PAGE as u16)
-                        }
-                        KeyCode::PageUp => panel.scroll = panel.scroll.saturating_sub(PAGE as u16),
+                        KeyCode::Down | KeyCode::Char('j') => panel.scroll.by(1),
+                        KeyCode::Up | KeyCode::Char('k') => panel.scroll.by(-1),
+                        KeyCode::PageDown => panel.scroll.by(PAGE as isize),
+                        KeyCode::PageUp => panel.scroll.by(-(PAGE as isize)),
                         _ => {}
                     }
                     continue;
@@ -638,16 +713,10 @@ impl App {
                             self.popup = None
                         }
                         KeyCode::Char(' ') => self.paused = !self.paused,
-                        KeyCode::Down | KeyCode::Char('j') => {
-                            popup.scroll = popup.scroll.saturating_add(1)
-                        }
-                        KeyCode::Up | KeyCode::Char('k') => {
-                            popup.scroll = popup.scroll.saturating_sub(1)
-                        }
-                        KeyCode::PageDown => {
-                            popup.scroll = popup.scroll.saturating_add(PAGE as u16)
-                        }
-                        KeyCode::PageUp => popup.scroll = popup.scroll.saturating_sub(PAGE as u16),
+                        KeyCode::Down | KeyCode::Char('j') => popup.scroll.by(1),
+                        KeyCode::Up | KeyCode::Char('k') => popup.scroll.by(-1),
+                        KeyCode::PageDown => popup.scroll.by(PAGE as isize),
+                        KeyCode::PageUp => popup.scroll.by(-(PAGE as isize)),
                         _ => {}
                     }
                     continue;
@@ -663,11 +732,11 @@ impl App {
                     KeyCode::Char('h') => self.compact_header = !self.compact_header,
                     KeyCode::Char('g') => {
                         self.group = self.group.next();
-                        self.table.select(Some(0));
+                        self.select_first();
                     }
                     KeyCode::Char('t') => {
                         self.tree = !self.tree;
-                        self.table.select(Some(0));
+                        self.select_first();
                     }
                     KeyCode::Char('v') | KeyCode::Enter => self.open_popup(client)?,
                     KeyCode::F(1) | KeyCode::Char('1') => self.view = View::Running,
@@ -678,7 +747,7 @@ impl App {
                     KeyCode::Up | KeyCode::Char('k') => self.select_by(-1),
                     KeyCode::PageDown => self.select_by(PAGE as isize),
                     KeyCode::PageUp => self.select_by(-(PAGE as isize)),
-                    KeyCode::Home => self.table.select(Some(0)),
+                    KeyCode::Home => self.select_first(),
                     KeyCode::End => self.select_by(isize::MAX / 2),
                     _ => {}
                 }
@@ -690,7 +759,7 @@ impl App {
                     }
                 }
                 if self.view != view {
-                    self.table.select(Some(0));
+                    self.select_first();
                     if !self.paused {
                         self.refresh(client, sql)?;
                         next_refresh = Instant::now() + self.interval;
@@ -729,6 +798,7 @@ impl App {
             os.refresh(&observed);
         }
         self.refresh_popup(client)?;
+        self.tick = self.tick.wrapping_add(1);
         self.blocks = if self.view == View::Blocking {
             fetch_blocks(client, blocking_sql(self.server.version_num))?
         } else {
@@ -739,10 +809,9 @@ impl App {
     }
 
     fn open_popup(&mut self, client: &ConnectedClient) -> Result<(), TopError> {
-        let selected = self.table.selected().unwrap_or(0);
         let Some(pid) = self
             .visible()
-            .get(selected)
+            .get(self.selected)
             .map(|backend| backend.pid.clone())
         else {
             return Ok(());
@@ -752,7 +821,7 @@ impl App {
             details: None,
             memory: None,
             ended: false,
-            scroll: 0,
+            scroll: Scroll::default(),
             function: None,
             explain: None,
         });
@@ -783,7 +852,7 @@ impl App {
                 database,
                 result,
                 index: 0,
-                scroll: 0,
+                scroll: Scroll::default(),
             });
         }
     }
@@ -813,7 +882,7 @@ impl App {
             popup.explain = Some(ExplainPanel {
                 database,
                 result,
-                scroll: 0,
+                scroll: Scroll::default(),
             });
         }
     }
@@ -895,7 +964,7 @@ impl App {
             .backends
             .iter()
             .filter(|backend| match self.view {
-                View::Running => !backend.state.is_empty() && backend.state != "idle",
+                View::Running => backend.is_running(),
                 View::Waiting => backend.waits_on_lock(),
                 View::Blocking => self.blocks.contains_key(&backend.pid),
                 View::Vacuum => false,
@@ -957,856 +1026,1309 @@ impl App {
     }
 
     fn select_by(&mut self, delta: isize) {
-        let len = self.visible().len();
-        if len == 0 {
-            self.table.select(Some(0));
-            return;
-        }
-        let current = self.table.selected().unwrap_or(0) as isize;
-        let next = current.saturating_add(delta).clamp(0, len as isize - 1);
-        self.table.select(Some(next as usize));
+        let last = self.visible().len().saturating_sub(1);
+        self.selected = self.selected.saturating_add_signed(delta).min(last);
+        self.list.follow();
+    }
+
+    /// Back to the first row, with the list at the top.
+    fn select_first(&mut self) {
+        self.selected = 0;
+        self.list.top();
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        frame.render_widget(Block::new().style(palette::base()), frame.area());
-        let [header, title, body, footer] = Layout::vertical([
-            Constraint::Length(if self.compact_header { 2 } else { 4 }),
-            Constraint::Length(1),
-            Constraint::Min(0),
-            Constraint::Length(1),
-        ])
-        .areas(frame.area());
-
-        let lines = if self.compact_header {
-            self.compact_header_lines()
-        } else {
-            self.header_lines(header.width)
-        };
-        frame.render_widget(Paragraph::new(lines), header);
-        let count = self.visible().len();
-        let heading = match self.shown_group() {
-            Group::None => format!("{} ({count})", self.view.title()),
-            group => format!(
-                "{} ({count}) · GROUPED BY {}",
-                self.view.title(),
-                group.name().to_uppercase()
-            ),
-        };
-        frame.render_widget(
-            Line::from(heading)
-                .style(palette::strong())
-                .alignment(Alignment::Center),
-            title,
+        let screen = frame.area();
+        let buf = frame.buffer_mut();
+        // Every row counts: the page starts on the first row and the keys
+        // take the last one, with two columns free at each side. The cells
+        // stay unpainted, so the terminal's background, set with OSC 11 in
+        // `run`, shows through.
+        let body = Rect::new(
+            screen.x.saturating_add(2),
+            screen.y,
+            screen.width.saturating_sub(4),
+            screen.height.saturating_sub(1),
         );
-        if self.preview {
-            let lines = self.preview_lines();
-            let height = (lines.len() as u16 + 2).min(body.height / 2);
-            let [table, preview] =
-                Layout::vertical([Constraint::Fill(1), Constraint::Length(height)]).areas(body);
-            self.draw_table(frame, table);
-            self.draw_preview(frame, preview, lines);
-        } else {
-            self.draw_table(frame, body);
+        let foot = Rect::new(body.x, screen.bottom().saturating_sub(1), body.width, 1)
+            .intersection(screen);
+        // The scrollbar takes the second column right of the page.
+        let page = Rect {
+            width: body.width.saturating_sub(2),
+            ..body
+        };
+        match &self.popup {
+            Some(popup) => self.draw_details(buf, page, popup),
+            None => self.draw_list(buf, page),
         }
-        frame.render_widget(footer_line(self.view), footer);
-        if self.popup.is_some() {
-            self.draw_popup(frame);
-            self.draw_function_panel(frame);
-            self.draw_explain_panel(frame);
+        self.draw_hints(buf, foot);
+        if let Some(popup) = &self.popup {
+            self.draw_function_panel(buf, screen, popup);
+            self.draw_explain_panel(buf, screen, popup);
         }
         if self.help {
-            draw_help(frame);
+            draw_help(buf, &self.theme, screen);
         }
     }
 
-    fn preview_lines(&self) -> Vec<String> {
-        let selected = self.table.selected().unwrap_or(0);
-        match self.visible().get(selected) {
-            Some(backend) => query_lines(
-                &backend.raw_query,
-                &backend.query,
-                self.server.query_size_limit,
-            ),
-            None => vec!["No query selected.".to_owned()],
-        }
+    /// A categorical series: active, idle in transaction, waiting.
+    fn series(&self, slot: usize) -> Style {
+        let tokens = self.theme.tokens();
+        self.theme
+            .fg([tokens.chart_1, tokens.chart_2, tokens.chart_3][slot])
     }
 
-    fn draw_preview(&self, frame: &mut Frame, area: Rect, lines: Vec<String>) {
-        let selected = self.table.selected().unwrap_or(0);
-        let title = self
-            .visible()
-            .get(selected)
-            .map(|backend| {
-                format!(
-                    " PID {} · {}@{} · {} ",
-                    backend.pid,
-                    backend.user,
-                    backend.database,
-                    backend.duration_s.map(format_duration).unwrap_or_default()
-                )
-            })
-            .unwrap_or_default();
-        frame.render_widget(
-            Paragraph::new(lines.into_iter().map(Line::from).collect::<Vec<_>>()).block(
-                palette::panel()
-                    .title(Line::from(title).style(palette::strong()))
-                    .title_bottom(Line::from(" Tab hides ").style(palette::muted())),
-            ),
-            area,
-        );
-    }
-
-    fn compact_header_lines(&self) -> Vec<Line<'static>> {
+    /// The brand and the server, then `extra`, with the refresh on the
+    /// right: a spinner that turns on each refresh, or "paused".
+    fn server_row(&self, buf: &mut Buffer, area: Rect, extra: Vec<Span<'static>>, spinner: bool) {
+        let t = &self.theme;
         let server = &self.server;
-        let value = |text: String| Span::styled(text, palette::strong());
-        let bar = || Span::styled(" │ ", palette::subtle());
-        let mut info = vec![
+        let refresh = if self.paused {
+            // The spinner stops on a full braille cell.
+            Line::from(Span::styled(
+                "⠿ paused",
+                t.link().add_modifier(Modifier::BOLD),
+            ))
+        } else if spinner {
+            Line::from(vec![
+                Span::styled(braille(self.tick), t.fg(t.tokens().primary)),
+                Span::styled(format!(" every {} s", self.interval.as_secs()), t.muted()),
+            ])
+        } else {
+            Line::default()
+        };
+        let mut spans = vec![
             Span::styled(
                 concat!(" pg-probe ", env!("CARGO_PKG_VERSION"), " "),
-                palette::brand(),
+                t.brand(),
             ),
-            Span::styled(format!(" PG {} ", server.version), Style::new().bold()),
+            Span::raw(" "),
+            Span::styled(format!("PostgreSQL {}", server.version), t.strong()),
+            Span::styled(" · ", t.subtle()),
             Span::styled(
                 format!("{}@{}/{}", server.user, server.endpoint, server.database),
-                palette::link(),
+                t.link(),
             ),
-            Span::styled(format!(" {}s", self.interval.as_secs()), palette::muted()),
         ];
-        if self.paused {
-            info.push(Span::styled(" PAUSED", palette::link().bold()));
+        spans.extend(extra);
+        let width = usize::from(area.width);
+        let right = refresh.width();
+        let room = if right == 0 {
+            width
+        } else {
+            width.saturating_sub(right + 1)
+        };
+        put(buf, area, 0, Line::from(fit(spans, room)));
+        if right > 0 && right <= width {
+            let x = area.right() - right as u16;
+            put(buf, Rect { x, ..area }, 0, refresh);
         }
-        match self.os.as_ref().map(|os| &os.host) {
-            Some(host) => {
-                if let Some(load) = &host.load {
-                    info.extend([
-                        bar(),
-                        Span::raw("load "),
-                        value(format!("{:.2}", load.load_1m)),
-                    ]);
-                }
-                if let Some(memory) = host.memory {
-                    info.extend([
-                        bar(),
-                        Span::raw("mem "),
-                        value(format_bytes(memory.available as f64)),
-                        Span::raw(format!("/{} avail", format_bytes(memory.total as f64))),
-                        bar(),
-                        Span::raw("swap "),
-                        value(format_bytes(
-                            memory.swap_total.saturating_sub(memory.swap_free) as f64,
-                        )),
-                        Span::raw(" used"),
-                    ]);
-                }
-            }
-            None => info.extend([bar(), Span::styled("OS not on this host", palette::muted())]),
-        }
+    }
 
+    /// The session counts. On a narrow screen the states take the short
+    /// names the help screen spells out.
+    fn sessions_line(&self, width: usize) -> Line<'static> {
+        let t = &self.theme;
+        let counts = SessionCounts::of(&self.backends);
+        let build = |short: bool| {
+            let mut spans = vec![
+                Span::styled("Sessions  ", t.muted()),
+                Span::styled(
+                    format!("{}/{}", counts.total, self.server.max_connections),
+                    t.strong(),
+                ),
+            ];
+            for (mark, style, count, long, brief) in [
+                ("●", self.series(0), counts.active, "active", "act"),
+                ("○", t.subtle(), counts.idle, "idle", "idle"),
+                (
+                    "●",
+                    self.series(1),
+                    counts.idle_in_transaction,
+                    "idle in txn",
+                    "txn",
+                ),
+                (
+                    "●",
+                    t.subtle(),
+                    counts.idle_in_transaction_aborted,
+                    "aborted",
+                    "abrt",
+                ),
+                ("●", self.series(2), counts.waiting, "waiting", "waiting"),
+            ] {
+                spans.extend([
+                    Span::styled(" · ", t.subtle()),
+                    Span::styled(format!("{mark} "), style),
+                    Span::styled(count.to_string(), t.strong()),
+                    Span::styled(format!(" {}", if short { brief } else { long }), t.muted()),
+                ]);
+            }
+            Line::from(spans)
+        };
+        let line = build(false);
+        if line.width() <= width {
+            line
+        } else {
+            build(true)
+        }
+    }
+
+    /// The connection slots as a meter `width` cells wide: waiting, other
+    /// active, idle in a transaction and idle, each in its series, then the
+    /// free slots.
+    fn meter(&self, width: usize) -> Line<'static> {
+        let t = &self.theme;
+        let counts = SessionCounts::of(&self.backends);
+        let max = self.server.max_connections.max(counts.total).max(1);
+        let cells = |count: usize| count * width / max;
+        let parts = [
+            (cells(counts.waiting), self.series(2)),
+            (
+                cells(counts.active.saturating_sub(counts.waiting)),
+                self.series(0),
+            ),
+            (
+                cells(counts.idle_in_transaction + counts.idle_in_transaction_aborted),
+                self.series(1),
+            ),
+            (cells(counts.idle), t.subtle()),
+        ];
+        let mut used = 0;
+        let mut spans = Vec::new();
+        for (count, style) in parts {
+            let count = count.min(width - used);
+            spans.push(Span::styled("━".repeat(count), style));
+            used += count;
+        }
+        spans.push(Span::styled("─".repeat(width - used), t.border()));
+        Line::from(spans)
+    }
+
+    /// The compact header's session counts, with the active and waiting
+    /// counts of the last refreshes.
+    fn history_line(&self) -> Line<'static> {
+        let t = &self.theme;
         let counts = SessionCounts::of(&self.backends);
         let active: Vec<usize> = self.history.iter().map(|(active, _)| *active).collect();
         let waiting: Vec<usize> = self.history.iter().map(|(_, waiting)| *waiting).collect();
-        let sessions = Line::from(vec![
-            Span::raw(" sessions "),
-            value(counts.total.to_string()),
-            Span::raw(format!("/{}", server.max_connections)),
-            bar(),
-            Span::raw("active "),
-            Span::styled(counts.active.to_string(), palette::series(0).bold()),
-            Span::styled(format!(" {}", sparkline(&active)), palette::series(0)),
-            bar(),
-            Span::raw("idle "),
-            value(counts.idle.to_string()),
-            bar(),
-            Span::raw("idle in txn "),
+        let dot = || Span::styled(" · ", t.subtle());
+        let label = |text: &str| Span::styled(text.to_owned(), t.muted());
+        let value = |count: usize| Span::styled(count.to_string(), t.strong());
+        let series = |count: usize, slot: usize| {
             Span::styled(
-                counts.idle_in_transaction.to_string(),
-                palette::series(1).bold(),
-            ),
-            bar(),
-            Span::raw("abrt "),
-            value(counts.idle_in_transaction_aborted.to_string()),
-            bar(),
-            Span::raw("waiting "),
-            Span::styled(counts.waiting.to_string(), palette::series(2).bold()),
-            Span::styled(format!(" {}", sparkline(&waiting)), palette::series(2)),
-        ]);
-        vec![Line::from(info), sessions]
-    }
-
-    fn header_lines(&self, width: u16) -> Vec<Line<'static>> {
-        let server = &self.server;
-        let mut info = vec![
-            Span::styled(
-                concat!(" pg-probe ", env!("CARGO_PKG_VERSION"), " "),
-                palette::brand(),
-            ),
-            Span::raw(" "),
-            Span::styled(
-                format!("PostgreSQL {}", server.version),
-                Style::new().bold(),
-            ),
-            Span::raw(" - "),
-            Span::styled(
-                format!("{}@{}/{}", server.user, server.endpoint, server.database),
-                palette::link(),
-            ),
-            Span::styled(
-                format!(" - Ref.: {}s", self.interval.as_secs()),
-                palette::muted(),
-            ),
-        ];
-        if self.paused {
-            info.push(Span::styled(" - PAUSED", palette::link().bold()));
-        }
-
-        let counts = SessionCounts::of(&self.backends);
-        let number = |value: usize| Span::styled(value.to_string(), palette::strong());
-        let series = |value: usize, slot: usize| {
-            Span::styled(value.to_string(), palette::series(slot).bold())
+                count.to_string(),
+                self.series(slot).add_modifier(Modifier::BOLD),
+            )
         };
-        let dot = || Span::raw(" · ");
-        let sessions = Line::from(vec![
-            Span::raw(" * Sessions: "),
-            number(counts.total),
-            Span::raw(format!("/{} total", server.max_connections)),
+        Line::from(vec![
+            label("Sessions  "),
+            Span::styled(
+                format!("{}/{}", counts.total, self.server.max_connections),
+                t.strong(),
+            ),
             dot(),
+            label("active "),
             series(counts.active, 0),
-            Span::raw(" active"),
+            Span::styled(format!(" {}", sparkline(&active)), self.series(0)),
             dot(),
-            number(counts.idle),
-            Span::raw(" idle"),
+            label("idle "),
+            value(counts.idle),
             dot(),
+            label("idle in txn "),
             series(counts.idle_in_transaction, 1),
-            Span::raw(" idle in txn"),
             dot(),
-            number(counts.idle_in_transaction_aborted),
-            Span::raw(" idle in txn abrt"),
+            label("abrt "),
+            value(counts.idle_in_transaction_aborted),
             dot(),
+            label("waiting "),
             series(counts.waiting, 2),
-            Span::raw(" waiting"),
-        ]);
-
-        vec![
-            Line::from(info),
-            sessions,
-            self.os_line(),
-            session_bar(&counts, server.max_connections, usize::from(width)),
-        ]
+            Span::styled(format!(" {}", sparkline(&waiting)), self.series(2)),
+        ])
     }
 
-    fn os_line(&self) -> Line<'static> {
-        let Some(os) = &self.os else {
-            return Line::from(Span::styled(
-                " * OS: not shown, the server is not on this host",
-                palette::muted(),
-            ));
-        };
-        let value = |text: String| Span::styled(text, palette::strong());
-        let dot = || Span::raw(" · ");
-        let mut spans = vec![Span::raw(" * Load: ")];
+    /// Host load and memory, from the local `/proc`. `short` keeps the
+    /// figures of the compact header.
+    fn host_spans(&self, os: &OsState, short: bool) -> Vec<Span<'static>> {
+        let t = &self.theme;
+        let value = |text: String| Span::styled(text, t.text());
+        let label = |text: &str| Span::styled(text.to_owned(), t.muted());
+        let dot = || Span::styled(" · ", t.subtle());
+        let mut spans = vec![label("load ")];
         match &os.host.load {
+            Some(load) if short => spans.push(value(format!("{:.2}", load.load_1m))),
             Some(load) => spans.push(value(format!(
                 "{:.2} {:.2} {:.2}",
                 load.load_1m, load.load_5m, load.load_15m
             ))),
-            None => spans.push(Span::styled("—", palette::muted())),
+            None => spans.push(label("—")),
         }
         if let Some(memory) = os.host.memory {
-            spans.extend([
-                dot(),
-                Span::raw("Mem: "),
-                value(format_bytes(memory.total as f64)),
-                Span::raw(" total "),
-                value(format_bytes(memory.available as f64)),
-                Span::raw(" avail "),
-                value(format_bytes(memory.buff_cached as f64)),
-                Span::raw(" buff+cached"),
-                dot(),
-                Span::raw("Swap: "),
-                value(format_bytes(memory.swap_total as f64)),
-                Span::raw(" total "),
-                value(format_bytes(
-                    memory.swap_total.saturating_sub(memory.swap_free) as f64,
-                )),
-                Span::raw(" used"),
-            ]);
+            let swap_used = memory.swap_total.saturating_sub(memory.swap_free) as f64;
+            if short {
+                spans.extend([
+                    dot(),
+                    label("mem "),
+                    value(format_bytes(memory.available as f64)),
+                    label(&format!("/{} avail", format_bytes(memory.total as f64))),
+                    dot(),
+                    label("swap "),
+                    value(format_bytes(swap_used)),
+                    label(" used"),
+                ]);
+            } else {
+                spans.extend([
+                    dot(),
+                    label("mem "),
+                    value(format_bytes(memory.total as f64)),
+                    label(" total "),
+                    value(format_bytes(memory.available as f64)),
+                    label(" avail "),
+                    value(format_bytes(memory.buff_cached as f64)),
+                    label(" buff+cached"),
+                    dot(),
+                    label("swap "),
+                    value(format_bytes(memory.swap_total as f64)),
+                    label(" total "),
+                    value(format_bytes(swap_used)),
+                    label(" used"),
+                ]);
+            }
         }
         if os.io_denied() {
             spans.push(Span::styled(
                 " · per-backend I/O needs root or the postgres user",
-                palette::warning(),
+                t.warning(),
             ));
         }
-        Line::from(spans)
+        spans
     }
 
-    fn draw_table(&mut self, frame: &mut Frame, area: Rect) {
-        if self.view == View::Vacuum {
-            self.draw_vacuum_table(frame, area);
-            return;
-        }
-        let tree = self.view == View::Blocking && self.tree;
-        let last_column = if self.view == View::Blocking && !tree {
-            "BLOCKS"
-        } else {
-            "WAITING"
+    /// The host row: its figures in full when they fit, else the short ones.
+    fn host_line(&self, width: usize) -> Line<'static> {
+        let t = &self.theme;
+        let label = Span::styled("Host      ", t.muted());
+        let Some(os) = &self.os else {
+            return Line::from(vec![
+                label,
+                Span::styled("not shown, the server is not on this host", t.muted()),
+            ]);
         };
-        let mut titles = vec!["PID"];
-        let mut widths = vec![Constraint::Length(if tree { 16 } else { 7 })];
-        if self.compact {
-            titles.push("USER@DATABASE");
-            widths.push(Constraint::Length(24));
+        let line = |short: bool| {
+            let mut spans = vec![label.clone()];
+            spans.extend(self.host_spans(os, short));
+            Line::from(spans)
+        };
+        let full = line(false);
+        if full.width() <= width {
+            full
         } else {
-            titles.extend(["DATABASE", "USER"]);
-            widths.extend([Constraint::Length(16), Constraint::Length(12)]);
+            line(true)
+        }
+    }
+
+    /// The views, with the session count of each one this refresh read.
+    /// The blocking and vacuum views send their own query, so they have a
+    /// count only while open.
+    fn tabs_line(&self, width: usize) -> Line<'static> {
+        let labels = View::ALL.map(|view| {
+            let count = if view == self.view {
+                Some(self.visible().len())
+            } else {
+                match view {
+                    View::Running => Some(self.backends.iter().filter(|b| b.is_running()).count()),
+                    View::Waiting => {
+                        Some(self.backends.iter().filter(|b| b.waits_on_lock()).count())
+                    }
+                    View::Blocking | View::Vacuum => None,
+                }
+            };
+            let mut label = view.name().to_owned();
+            if let Some(count) = count {
+                label.push_str(&format!(" {count}"));
+            }
+            if view == self.view && self.shown_group() != Group::None {
+                label.push_str(&format!(" · grouped by {}", self.shown_group().name()));
+            }
+            label
+        });
+        let current = View::ALL
+            .iter()
+            .position(|view| *view == self.view)
+            .unwrap_or(0);
+        Tabs::new(&self.theme, labels, current).line(width)
+    }
+
+    /// The header, the views, the column titles, then the rows, with the
+    /// preview of the selected query under them when it is open.
+    fn draw_list(&self, buf: &mut Buffer, area: Rect) {
+        let t = &self.theme;
+        let width = usize::from(area.width);
+        let mut row = 0;
+        if self.compact_header {
+            let extra = match &self.os {
+                Some(os) => {
+                    let mut spans = vec![Span::styled(" · ", t.subtle())];
+                    spans.extend(self.host_spans(os, true));
+                    spans
+                }
+                None => vec![
+                    Span::styled(" · ", t.subtle()),
+                    Span::styled("OS not on this host", t.muted()),
+                ],
+            };
+            self.server_row(buf, area, extra, true);
+            put(
+                buf,
+                area,
+                1,
+                Line::from(fit(self.history_line().spans, width)),
+            );
+            row = 2;
+        } else if area.height > 0 {
+            self.server_row(buf, area, Vec::new(), true);
+            let sessions = self.sessions_line(width);
+            // The meter takes what the counts leave of the row, if enough.
+            let room = width.saturating_sub(sessions.width() + 3).min(30);
+            put(buf, area, 1, Line::from(fit(sessions.spans, width)));
+            if room >= 10 {
+                let x = area.right() - room as u16;
+                put(buf, Rect { x, ..area }, 1, self.meter(room));
+            }
+            put(
+                buf,
+                area,
+                2,
+                Line::from(fit(self.host_line(width).spans, width)),
+            );
+            row = 3;
+        }
+        put(buf, area, row, self.tabs_line(width));
+        let (head, page) = self.list_page(width);
+        put(buf, area, row + 1, head);
+        let top = area.y.saturating_add(row + 2).min(area.bottom());
+        let mut rows = Rect {
+            y: top,
+            height: area.bottom() - top,
+            ..area
+        };
+        if self.preview {
+            let preview = self.preview_page(width);
+            let height = (preview.len() as u16).min(rows.height / 2);
+            rows.height -= height;
+            let lower = Rect {
+                y: rows.bottom(),
+                height,
+                ..rows
+            };
+            preview
+                .view(t, &Scroll::default())
+                .mark(Mark::Dim)
+                .render(lower, buf);
+        }
+        // The rows on screen change with the preview, the screen size and
+        // the layout, so every draw scrolls the selection back into view.
+        self.list.follow();
+        page.view(t, &self.list)
+            .selected(Some(self.selected))
+            .render(rows, buf);
+    }
+
+    /// The column titles and the sessions of the list, under a section per
+    /// group when the list is grouped.
+    fn list_page(&self, width: usize) -> (Line<'static>, Page) {
+        if self.view == View::Vacuum {
+            return self.vacuum_page(width);
+        }
+        let t = &self.theme;
+        let tree = self.view == View::Blocking && self.tree;
+        let mut spec = vec![if tree {
+            Column::text("PID", 16, 10)
+        } else {
+            Column::text("PID", 7, 7)
+        }];
+        if self.compact {
+            spec.push(Column::text("User@database", 24, 4));
+        } else {
+            spec.extend([Column::text("Database", 16, 4), Column::text("User", 12, 4)]);
         }
         if self.os.is_some() {
-            titles.extend(["CPU%", "READ/s", "WRITE/s", "IOW"]);
-            widths.extend([
-                Constraint::Length(6),
-                Constraint::Length(10),
-                Constraint::Length(10),
-                Constraint::Length(3),
+            spec.extend([
+                Column::number("CPU%", 5, 5),
+                Column::number("Read/s", 10, 9),
+                Column::number("Write/s", 10, 9),
+                Column::text("IOW", 3, 3),
             ]);
         }
-        titles.extend(["STATE", "TIME+", last_column, "QUERY"]);
-        widths.extend([
-            Constraint::Length(if self.compact { 5 } else { 20 }),
-            Constraint::Length(10),
-            Constraint::Length(22),
-            Constraint::Fill(1),
+        spec.extend([
+            Column::text("State", if self.compact { 4 } else { 20 }, 4),
+            Column::number("Time", 10, 8),
+            Column::text(
+                if self.view == View::Blocking && !tree {
+                    "Blocks"
+                } else {
+                    "Waiting"
+                },
+                22,
+                4,
+            )
+            .on_second_row(),
         ]);
-        let header = Row::new(titles.into_iter().map(header_cell)).style(palette::table_header());
+        let layout = Layout::new(width, &spec);
 
         let entries = self.rows();
-        let sessions: Vec<Row> = entries
-            .iter()
-            .map(|(branch, backend)| {
-                let wait = if self.view == View::Blocking && !tree {
-                    Span::styled(
-                        self.blocks
-                            .get(&backend.pid)
-                            .map(|pids| pids.join(","))
-                            .unwrap_or_default(),
-                        Style::new(),
-                    )
-                } else {
-                    Span::raw(backend.wait_label())
-                };
-                let mut cells = vec![Cell::from(Line::from(vec![
-                    Span::styled(branch.clone(), palette::subtle()),
-                    Span::raw(backend.pid.clone()),
-                ]))];
-                let database = Span::styled(backend.database.clone(), palette::muted());
-                if self.compact {
-                    cells.push(Cell::from(Line::from(vec![
-                        Span::raw(format!("{}@", backend.user)),
-                        database,
-                    ])));
-                } else {
-                    cells.extend([Cell::from(database), Cell::from(backend.user.clone())]);
-                }
-                if let Some(os) = &self.os {
-                    let rate = os.rates.get(&backend.pid);
-                    let right =
-                        |text: String| Cell::from(Line::from(text).alignment(Alignment::Right));
-                    let bytes = |value: Option<f64>| {
-                        value.map(format_bytes).unwrap_or_else(|| "—".to_owned())
-                    };
-                    cells.extend([
-                        right(
-                            rate.and_then(|rate| rate.cpu_percent)
-                                .map(|cpu| format!("{cpu:.1}"))
-                                .unwrap_or_else(|| "—".to_owned()),
-                        ),
-                        right(bytes(rate.and_then(|rate| rate.read_per_s))),
-                        right(bytes(rate.and_then(|rate| rate.write_per_s))),
-                        match rate.map(|rate| rate.io_wait) {
-                            Some(true) => Cell::from(" Y"),
-                            Some(false) => Cell::from(" N"),
-                            None => Cell::from(" —"),
-                        },
-                    ]);
-                }
-                cells.extend([
-                    Cell::from(Span::styled(
-                        if self.compact {
-                            short_state(&backend.state).to_owned()
-                        } else {
-                            backend.state.clone()
-                        },
-                        Style::new(),
-                    )),
-                    Cell::from(
-                        Line::from(Span::styled(
-                            backend.duration_s.map(format_duration).unwrap_or_default(),
-                            Style::new(),
-                        ))
-                        .alignment(Alignment::Right),
-                    ),
-                    Cell::from(wait),
-                    Cell::from(backend.query.clone()),
-                ]);
-                Row::new(cells)
-            })
-            .collect();
-
-        // A group title is an empty table row, painted over full width
-        // after the table is drawn, since table cells cannot span columns.
         let group = self.shown_group();
-        let mut rows = Vec::new();
-        let mut titles = Vec::new();
-        let mut positions = Vec::new();
-        for (index, row) in sessions.into_iter().enumerate() {
-            let key = group.key(entries[index].1);
+        let mut page = Page::default();
+        for (index, (branch, backend)) in entries.iter().enumerate() {
+            let key = group.key(backend);
             if key.is_some() && (index == 0 || group.key(entries[index - 1].1) != key) {
                 let count = entries
                     .iter()
-                    .filter(|(_, backend)| group.key(backend) == key)
+                    .filter(|(_, other)| group.key(other) == key)
                     .count();
-                let key = key.unwrap_or_default();
-                titles.push((rows.len(), format!("▾ {} ({count})", or_dash(key))));
-                rows.push(Row::new(Vec::<Cell>::new()));
+                page.section(t, width, or_dash(key.unwrap_or_default()), Some(count));
             }
-            positions.push(rows.len());
-            rows.push(row);
-        }
-
-        let table = Table::new(rows, widths)
-            .header(header)
-            .row_highlight_style(palette::selected());
-        let selected = self
-            .table
-            .selected()
-            .and_then(|index| positions.get(index).copied());
-        let mut state = TableState::default()
-            .with_offset(self.table.offset())
-            .with_selected(selected);
-        frame.render_stateful_widget(table, area, &mut state);
-        *self.table.offset_mut() = state.offset();
-        for (position, title) in titles {
-            let Some(line) = position.checked_sub(state.offset()) else {
-                continue;
+            let mut cells: Vec<Vec<Span<'static>>> = vec![vec![
+                Span::styled(branch.clone(), t.subtle()),
+                Span::styled(backend.pid.clone(), t.info()),
+            ]];
+            if self.compact {
+                cells.push(vec![
+                    Span::styled(format!("{}@", backend.user), t.muted()),
+                    Span::styled(backend.database.clone(), t.text()),
+                ]);
+            } else {
+                cells.push(vec![Span::styled(backend.database.clone(), t.text())]);
+                cells.push(vec![Span::styled(backend.user.clone(), t.muted())]);
+            }
+            let right = |text: String, width: usize| {
+                vec![Span::styled(format!("{text:>width$}"), t.text())]
             };
-            if line + 1 < usize::from(area.height) {
-                let row = Rect::new(area.x, area.y + 1 + line as u16, area.width, 1);
-                frame.render_widget(Line::from(title).style(palette::strong()), row);
+            if let Some(os) = &self.os {
+                let rate = os.rates.get(&backend.pid);
+                let bytes =
+                    |value: Option<f64>| value.map(format_bytes).unwrap_or_else(|| "—".to_owned());
+                let cpu = rate
+                    .and_then(|rate| rate.cpu_percent)
+                    .map(|cpu| format!("{cpu:.1}"))
+                    .unwrap_or_else(|| "—".to_owned());
+                cells.push(right(cpu, layout.width(cells.len())));
+                let read = bytes(rate.and_then(|rate| rate.read_per_s));
+                cells.push(right(read, layout.width(cells.len())));
+                let write = bytes(rate.and_then(|rate| rate.write_per_s));
+                cells.push(right(write, layout.width(cells.len())));
+                cells.push(vec![Span::styled(
+                    match rate.map(|rate| rate.io_wait) {
+                        Some(true) => " Y",
+                        Some(false) => " N",
+                        None => " —",
+                    },
+                    t.text(),
+                )]);
             }
+            let state = if self.compact {
+                short_state(&backend.state).to_owned()
+            } else {
+                backend.state.clone()
+            };
+            cells.push(vec![Span::styled(state, t.text())]);
+            let time = backend.duration_s.map(format_duration).unwrap_or_default();
+            cells.push(right(time, layout.width(cells.len())));
+            let wait = if self.view == View::Blocking && !tree {
+                self.blocks
+                    .get(&backend.pid)
+                    .map(|pids| pids.join(","))
+                    .unwrap_or_default()
+            } else {
+                backend.wait_label()
+            };
+            cells.push(vec![Span::styled(wait, t.text())]);
+            page.item(layout.lines(t, &spec, cells, &backend.query, width));
         }
+        if entries.is_empty() {
+            page.line(Line::styled("  Nothing here right now.", t.muted()));
+        }
+        (layout.head(t, &spec), page)
     }
 
-    fn draw_vacuum_table(&mut self, frame: &mut Frame, area: Rect) {
-        // Before 9.6 there is no phase or progress, so those columns go
-        // and the query gets their room.
+    /// The vacuums in progress. Before 9.6 there is no phase or progress,
+    /// so those columns go and the query gets their room.
+    fn vacuum_page(&self, width: usize) -> (Line<'static>, Page) {
+        let t = &self.theme;
         let progress = has_vacuum_progress(self.server.version_num);
-        let mut titles = vec!["PID"];
-        let mut widths = vec![Constraint::Length(7)];
+        let mut spec = vec![Column::text("PID", 7, 7)];
         if self.compact {
-            titles.extend(["TABLE@DATABASE", "TYPE"]);
-            widths.extend([Constraint::Length(36), Constraint::Length(4)]);
+            spec.extend([
+                Column::text("Table@database", 36, 8),
+                Column::text("Type", 4, 4),
+            ]);
         } else {
-            titles.extend(["DATABASE", "TABLE", "TYPE"]);
-            widths.extend([
-                Constraint::Length(16),
-                Constraint::Length(32),
-                Constraint::Length(10),
+            spec.extend([
+                Column::text("Database", 16, 4),
+                Column::text("Table", 32, 4),
+                Column::text("Type", 10, 4),
             ]);
         }
         if progress {
-            titles.push("PHASE");
-            widths.push(Constraint::Length(24));
+            spec.push(Column::text("Phase", 24, 4).on_second_row());
         }
         if self.os.is_some() {
-            titles.extend(["CPU%", "READ/s", "WRITE/s"]);
-            widths.extend([
-                Constraint::Length(6),
-                Constraint::Length(10),
-                Constraint::Length(10),
+            spec.extend([
+                Column::number("CPU%", 5, 5),
+                Column::number("Read/s", 10, 9),
+                Column::number("Write/s", 10, 9),
             ]);
         }
         if progress {
-            titles.extend(["SCANNED", "IDX"]);
-            widths.extend([Constraint::Length(7), Constraint::Length(3)]);
+            spec.extend([Column::number("Scanned", 7, 6), Column::number("IDX", 3, 3)]);
         }
-        titles.extend(["TIME+", "WAITING", "QUERY"]);
-        widths.extend([
-            Constraint::Length(10),
-            Constraint::Length(22),
-            Constraint::Fill(1),
+        spec.extend([
+            Column::number("Time", 10, 8),
+            Column::text("Waiting", 22, 4).on_second_row(),
         ]);
-        let header = Row::new(titles.into_iter().map(header_cell)).style(palette::table_header());
-        let right = |text: String| Cell::from(Line::from(text).alignment(Alignment::Right));
-        let rows: Vec<Row> = self
-            .vacuums
-            .iter()
-            .map(|vacuum| {
-                let backend = &vacuum.backend;
-                let mut cells = vec![Cell::from(backend.pid.clone())];
-                let database = Span::styled(backend.database.clone(), palette::muted());
-                if self.compact {
-                    cells.extend([
-                        Cell::from(Line::from(vec![
-                            Span::raw(format!("{}@", or_dash(&vacuum.table))),
-                            database,
-                        ])),
-                        Cell::from(short_kind(&vacuum.kind).to_owned()),
-                    ]);
-                } else {
-                    cells.extend([
-                        Cell::from(database),
-                        Cell::from(or_dash(&vacuum.table).to_owned()),
-                        Cell::from(vacuum.kind.clone()),
-                    ]);
-                }
-                if progress {
-                    cells.push(Cell::from(or_dash(&vacuum.phase).to_owned()));
-                }
-                if let Some(os) = &self.os {
-                    let rate = os.rates.get(&backend.pid);
-                    let bytes = |value: Option<f64>| {
-                        value.map(format_bytes).unwrap_or_else(|| "—".to_owned())
-                    };
-                    cells.extend([
-                        right(
-                            rate.and_then(|rate| rate.cpu_percent)
-                                .map(|cpu| format!("{cpu:.1}"))
-                                .unwrap_or_else(|| "—".to_owned()),
-                        ),
-                        right(bytes(rate.and_then(|rate| rate.read_per_s))),
-                        right(bytes(rate.and_then(|rate| rate.write_per_s))),
-                    ]);
-                }
-                if progress {
-                    cells.extend([
-                        right(vacuum.scanned()),
-                        right(or_dash(&vacuum.index_passes).to_owned()),
-                    ]);
-                }
-                cells.extend([
-                    Cell::from(
-                        Line::from(Span::styled(
-                            backend.duration_s.map(format_duration).unwrap_or_default(),
-                            Style::new(),
-                        ))
-                        .alignment(Alignment::Right),
-                    ),
-                    Cell::from(backend.wait_label()),
-                    Cell::from(backend.query.clone()),
+        let layout = Layout::new(width, &spec);
+
+        let mut page = Page::default();
+        for vacuum in &self.vacuums {
+            let backend = &vacuum.backend;
+            let right = |text: String, width: usize| {
+                vec![Span::styled(format!("{text:>width$}"), t.text())]
+            };
+            let mut cells: Vec<Vec<Span<'static>>> =
+                vec![vec![Span::styled(backend.pid.clone(), t.info())]];
+            if self.compact {
+                cells.push(vec![
+                    Span::styled(format!("{}@", or_dash(&vacuum.table)), t.text()),
+                    Span::styled(backend.database.clone(), t.muted()),
                 ]);
-                Row::new(cells)
-            })
-            .collect();
-        let table = Table::new(rows, widths)
-            .header(header)
-            .row_highlight_style(palette::selected());
-        frame.render_stateful_widget(table, area, &mut self.table);
+                cells.push(vec![Span::styled(
+                    short_kind(&vacuum.kind).to_owned(),
+                    t.text(),
+                )]);
+            } else {
+                cells.push(vec![Span::styled(backend.database.clone(), t.text())]);
+                cells.push(vec![Span::styled(
+                    or_dash(&vacuum.table).to_owned(),
+                    t.text(),
+                )]);
+                cells.push(vec![Span::styled(vacuum.kind.clone(), t.text())]);
+            }
+            if progress {
+                cells.push(vec![Span::styled(
+                    or_dash(&vacuum.phase).to_owned(),
+                    t.text(),
+                )]);
+            }
+            if let Some(os) = &self.os {
+                let rate = os.rates.get(&backend.pid);
+                let bytes =
+                    |value: Option<f64>| value.map(format_bytes).unwrap_or_else(|| "—".to_owned());
+                let cpu = rate
+                    .and_then(|rate| rate.cpu_percent)
+                    .map(|cpu| format!("{cpu:.1}"))
+                    .unwrap_or_else(|| "—".to_owned());
+                cells.push(right(cpu, layout.width(cells.len())));
+                let read = bytes(rate.and_then(|rate| rate.read_per_s));
+                cells.push(right(read, layout.width(cells.len())));
+                let write = bytes(rate.and_then(|rate| rate.write_per_s));
+                cells.push(right(write, layout.width(cells.len())));
+            }
+            if progress {
+                cells.push(right(vacuum.scanned(), layout.width(cells.len())));
+                let passes = or_dash(&vacuum.index_passes).to_owned();
+                cells.push(right(passes, layout.width(cells.len())));
+            }
+            let time = backend.duration_s.map(format_duration).unwrap_or_default();
+            cells.push(right(time, layout.width(cells.len())));
+            cells.push(vec![Span::styled(backend.wait_label(), t.text())]);
+            page.item(layout.lines(t, &spec, cells, &backend.query, width));
+        }
+        if self.vacuums.is_empty() {
+            page.line(Line::styled("  Nothing here right now.", t.muted()));
+        }
+        (layout.head(t, &spec), page)
     }
 
-    fn draw_popup(&self, frame: &mut Frame) {
-        let Some(popup) = &self.popup else {
-            return;
+    /// The selected query, formatted, as a section under the list.
+    fn preview_page(&self, width: usize) -> Page {
+        let t = &self.theme;
+        let mut page = Page::default();
+        let Some(backend) = self.visible().get(self.selected).copied() else {
+            page.section(t, width, "Preview", None);
+            page.line(Line::styled("  No query selected.", t.muted()));
+            return page;
         };
+        let title = format!(
+            "PID {} · {}@{} · {}",
+            backend.pid,
+            backend.user,
+            backend.database,
+            backend.duration_s.map(format_duration).unwrap_or_default()
+        );
+        page.section(t, width, &title, None);
+        code_block(
+            t,
+            &mut page,
+            &query_lines(
+                &backend.raw_query,
+                &backend.query,
+                self.server.query_size_limit,
+            ),
+            width,
+        );
+        page
+    }
+
+    /// The details of one backend, as a page in place of the list.
+    fn draw_details(&self, buf: &mut Buffer, area: Rect, popup: &Popup) {
+        let t = &self.theme;
+        let width = usize::from(area.width);
+        if area.height == 0 {
+            return;
+        }
+        // The list's first row, without the spinner: this page is about one
+        // backend, not the refresh.
+        self.server_row(buf, area, Vec::new(), false);
+        put(
+            buf,
+            area,
+            1,
+            Line::from(Title::new(t, format!("PID {}", popup.pid)).spans(width)),
+        );
+        let dot = || Span::styled(" · ", t.subtle());
+        let summary = match self.backend_by_pid(&popup.pid) {
+            Some(backend) => Line::from(vec![
+                Span::styled(backend.database.clone(), t.text()),
+                dot(),
+                Span::styled(backend.user.clone(), t.muted()),
+                dot(),
+                Span::styled(or_dash(&backend.state).to_owned(), t.text()),
+                dot(),
+                Span::styled(
+                    backend
+                        .duration_s
+                        .map(format_duration)
+                        .unwrap_or_else(|| "—".to_owned()),
+                    t.text(),
+                ),
+            ]),
+            None => Line::styled("ended", t.muted()),
+        };
+        put(buf, area, 2, Line::from(fit(summary.spans, width)));
+        let top = area.y.saturating_add(4).min(area.bottom());
+        let view = Rect {
+            y: top,
+            height: area.bottom() - top,
+            ..area
+        };
+        self.details_page(popup, width)
+            .view(t, &popup.scroll)
+            .mark(Mark::Dim)
+            .render(view, buf);
+    }
+
+    fn details_page(&self, popup: &Popup, width: usize) -> Page {
+        let t = &self.theme;
         let backend = self.backend_by_pid(&popup.pid);
         let details = popup.details.clone().unwrap_or_default();
-        let label = |text: &str| Span::styled(format!(" {text:<16}"), palette::muted());
-        let field = |name: &str, value: Vec<Span<'static>>| {
-            let mut spans = vec![label(name)];
-            spans.extend(value);
-            Line::from(spans)
+        let mut page = Page::default();
+        let fact = |page: &mut Page, key: &str, value: Vec<Span<'static>>| {
+            for line in fact_lines(t, width, 2, 17, key, value) {
+                page.line(line);
+            }
         };
-        let plain = |text: String| vec![Span::raw(text)];
+        let plain = |text: String| vec![Span::styled(text, t.text())];
         let age = |seconds: Option<f64>, since: &str| {
             let mut spans = vec![Span::styled(
                 seconds
                     .map(format_duration)
                     .unwrap_or_else(|| "—".to_owned()),
-                palette::strong(),
+                t.strong(),
             )];
             if !since.is_empty() {
-                spans.push(Span::styled(format!("  (since {since})"), palette::muted()));
+                spans.push(Span::styled(format!("  (since {since})"), t.muted()));
             }
             spans
         };
-        // A section title is a full-width bar, like the list's header row.
-        let width = usize::from(frame.area().width);
-        let section =
-            |name: &str| Line::from(format!(" {name:<width$}")).style(palette::table_header());
 
-        let mut lines = Vec::new();
         if popup.ended {
-            lines.push(Line::from(Span::styled(
-                "This backend has ended. Showing its last known details.",
-                palette::warning(),
-            )));
-            lines.push(Line::default());
+            page.line(Line::styled(
+                "  This backend has ended. Showing its last known details.",
+                t.warning(),
+            ));
+            page.blank();
         }
-        let state = backend
-            .map(|backend| backend.state.clone())
-            .unwrap_or_default();
-        lines.extend([
-            section("Session"),
-            field(
-                "Database",
-                plain(backend.map(|b| b.database.clone()).unwrap_or_default()),
-            ),
-            field(
-                "User",
-                plain(backend.map(|b| b.user.clone()).unwrap_or_default()),
-            ),
-            field("Application", plain(details.application.clone())),
-            field(
-                "Client",
-                plain(if details.client.is_empty() {
-                    "local socket".to_owned()
-                } else {
-                    details.client.clone()
-                }),
-            ),
-            field("Backend type", plain(details.backend_type.clone())),
-            field("State", plain(state.clone())),
-            field(
-                "Waiting",
-                plain(backend.map(Backend::wait_label).unwrap_or_default()),
-            ),
-            Line::default(),
-            section("Age"),
-            field(
-                "Connection age",
-                age(details.connection_age_s, &details.backend_start),
-            ),
-            field(
-                "Transaction age",
-                age(details.xact_age_s, &details.xact_start),
-            ),
-            field("Query duration", age(details.query_age_s, "")),
-            field("In this state", age(details.state_age_s, "")),
-        ]);
+        page.section(t, width, "Session", None);
+        let backend_text = |field: fn(&Backend) -> String| backend.map(field).unwrap_or_default();
+        fact(
+            &mut page,
+            "Database",
+            plain(backend_text(|b| b.database.clone())),
+        );
+        fact(&mut page, "User", plain(backend_text(|b| b.user.clone())));
+        fact(&mut page, "Application", plain(details.application.clone()));
+        let client = if details.client.is_empty() {
+            "local socket".to_owned()
+        } else {
+            details.client.clone()
+        };
+        fact(&mut page, "Client", plain(client));
+        fact(
+            &mut page,
+            "Backend type",
+            plain(details.backend_type.clone()),
+        );
+        fact(&mut page, "State", plain(backend_text(|b| b.state.clone())));
+        fact(
+            &mut page,
+            "Waiting",
+            plain(backend_text(Backend::wait_label)),
+        );
+        page.blank();
+
+        page.section(t, width, "Timing", None);
+        fact(
+            &mut page,
+            "Connection age",
+            age(details.connection_age_s, &details.backend_start),
+        );
+        fact(
+            &mut page,
+            "Transaction age",
+            age(details.xact_age_s, &details.xact_start),
+        );
+        fact(&mut page, "Query duration", age(details.query_age_s, ""));
+        fact(&mut page, "In this state", age(details.state_age_s, ""));
         if !details.xid.is_empty() || !details.xmin.is_empty() {
-            lines.push(field(
+            fact(
+                &mut page,
                 "xid / xmin",
                 plain(format!(
                     "{} / {}",
                     or_dash(&details.xid),
                     or_dash(&details.xmin)
                 )),
-            ));
+            );
         }
 
         if let Some(os) = &self.os {
             let rate = os.rates.get(&popup.pid);
             let sample = os.samples.get(&popup.pid).map(|(_, sample)| sample);
-            lines.push(Line::default());
-            lines.push(section("Process"));
-            lines.push(field(
+            let dot = || Span::styled(" · ", t.subtle());
+            page.blank();
+            page.section(t, width, "Resources", None);
+            let cpu = rate
+                .and_then(|rate| rate.cpu_percent)
+                .map(|cpu| format!("{cpu:.1}%"))
+                .unwrap_or_else(|| "—".to_owned());
+            let total = sample
+                .map(|sample| format_duration(sample.cpu_ticks as f64 / os.ticks_per_second))
+                .unwrap_or_else(|| "—".to_owned());
+            fact(
+                &mut page,
                 "CPU",
-                plain(format!(
-                    "{} now · {} total",
-                    rate.and_then(|rate| rate.cpu_percent)
-                        .map(|cpu| format!("{cpu:.1}%"))
-                        .unwrap_or_else(|| "—".to_owned()),
-                    sample
-                        .map(|sample| format_duration(
-                            sample.cpu_ticks as f64 / os.ticks_per_second
-                        ))
-                        .unwrap_or_else(|| "—".to_owned()),
-                )),
-            ));
-            lines.push(field(
-                "Memory",
-                plain(match popup.memory {
-                    Some(memory) => match memory.anonymous {
-                        Some(anonymous) => format!(
-                            "{} private · {} resident (includes shared buffers)",
-                            format_bytes(anonymous as f64),
-                            format_bytes(memory.rss as f64)
-                        ),
-                        None => format!(
-                            "{} resident (includes shared buffers)",
-                            format_bytes(memory.rss as f64)
-                        ),
-                    },
-                    None => "—".to_owned(),
-                }),
-            ));
+                vec![
+                    Span::styled(format!("{cpu} now"), t.text()),
+                    dot(),
+                    Span::styled(format!("{total} total"), t.text()),
+                ],
+            );
+            let resident = |rss: u64| {
+                [
+                    Span::styled(format!("{} resident", format_bytes(rss as f64)), t.text()),
+                    Span::styled(" (includes shared buffers)", t.muted()),
+                ]
+            };
+            let memory = match popup.memory {
+                Some(memory) => {
+                    let mut spans = Vec::new();
+                    if let Some(anonymous) = memory.anonymous {
+                        spans.push(Span::styled(
+                            format!("{} private", format_bytes(anonymous as f64)),
+                            t.text(),
+                        ));
+                        spans.push(dot());
+                    }
+                    spans.extend(resident(memory.rss));
+                    spans
+                }
+                None => plain("—".to_owned()),
+            };
+            fact(&mut page, "Memory", memory);
             let per_second = |value: Option<f64>| {
                 value
                     .map(|value| format!("{}/s", format_bytes(value)))
                     .unwrap_or_else(|| "—".to_owned())
             };
-            lines.push(field(
+            fact(
+                &mut page,
                 "I/O now",
-                plain(format!(
-                    "read {} · write {}",
-                    per_second(rate.and_then(|rate| rate.read_per_s)),
-                    per_second(rate.and_then(|rate| rate.write_per_s)),
-                )),
-            ));
-            lines.push(field(
-                "I/O total",
-                plain(match sample.and_then(|sample| sample.io) {
-                    Some((read, written)) => format!(
-                        "read {} · write {}",
-                        format_bytes(read as f64),
-                        format_bytes(written as f64)
+                vec![
+                    Span::styled(
+                        format!("read {}", per_second(rate.and_then(|rate| rate.read_per_s))),
+                        t.text(),
                     ),
-                    None => "—".to_owned(),
-                }),
-            ));
-            lines.push(field(
-                "I/O wait",
-                match rate.map(|rate| rate.io_wait) {
-                    Some(true) => plain("yes".to_owned()),
-                    Some(false) => plain("no".to_owned()),
-                    None => plain("—".to_owned()),
-                },
-            ));
+                    dot(),
+                    Span::styled(
+                        format!(
+                            "write {}",
+                            per_second(rate.and_then(|rate| rate.write_per_s))
+                        ),
+                        t.text(),
+                    ),
+                ],
+            );
+            let io_total = match sample.and_then(|sample| sample.io) {
+                Some((read, written)) => vec![
+                    Span::styled(format!("read {}", format_bytes(read as f64)), t.text()),
+                    dot(),
+                    Span::styled(format!("write {}", format_bytes(written as f64)), t.text()),
+                ],
+                None => plain("—".to_owned()),
+            };
+            fact(&mut page, "I/O total", io_total);
+            let io_wait = match rate.map(|rate| rate.io_wait) {
+                Some(true) => "yes",
+                Some(false) => "no",
+                None => "—",
+            };
+            fact(&mut page, "I/O wait", plain(io_wait.to_owned()));
         }
 
-        lines.push(Line::default());
-        lines.push(section("Query"));
-        lines.extend(
-            query_lines(
+        page.blank();
+        page.section(t, width, "Query", None);
+        code_block(
+            t,
+            &mut page,
+            &query_lines(
                 &details.raw_query,
                 &details.query,
                 self.server.query_size_limit,
-            )
-            .into_iter()
-            .map(|line| Line::from(format!(" {line}"))),
+            ),
+            width,
         );
+        page
+    }
 
-        // The details fill the screen, so they are a page of the app, with
-        // the list's canvas, header and footer, rather than a popup.
-        let area = frame.area();
-        let [header, body, footer] = Layout::vertical([
-            Constraint::Length(2),
-            Constraint::Fill(1),
-            Constraint::Length(1),
-        ])
-        .areas(area);
-        frame.render_widget(Clear, area);
-        frame.render_widget(Block::new().style(palette::base()), area);
-        frame.render_widget(
-            Line::from(vec![
-                Span::styled(
-                    concat!(" pg-probe ", env!("CARGO_PKG_VERSION"), " "),
-                    palette::brand(),
-                ),
-                Span::styled(" Query details", palette::strong()),
-                Span::styled(format!(" · PID {}", popup.pid), palette::muted()),
-            ]),
-            header,
-        );
-        frame.render_widget(
-            Paragraph::new(lines)
-                .wrap(Wrap { trim: false })
-                .scroll((popup.scroll, 0)),
-            body,
-        );
-        let mut hints = Vec::new();
-        for (key, action) in [
-            ("v q Esc", "Back"),
-            ("f", "Functions"),
-            ("e", "Explain"),
-            ("↑↓", "Scroll"),
-        ] {
-            hints.push(Span::styled(key, palette::link()));
-            hints.push(Span::styled(format!(" {action:<12}"), palette::muted()));
+    fn draw_function_panel(&self, buf: &mut Buffer, screen: Rect, popup: &Popup) {
+        let Some(panel) = &popup.function else {
+            return;
+        };
+        let t = &self.theme;
+        let count = panel.result.as_ref().map_or(0, Vec::len);
+        let position = format!("other matches ({}/{count})", panel.index + 1);
+        let mut hints = vec![("↑↓", "scroll")];
+        if count > 1 {
+            hints.push(("←→", position.as_str()));
         }
-        frame.render_widget(Line::from(hints), footer);
+        hints.push(("esc", "back"));
+        let inner = Modal::new(t, format!("Function in {}", panel.database))
+            .width(screen.width * 9 / 10)
+            .height(screen.height * 8 / 10)
+            .hints(hints)
+            .draw(screen, buf);
+        let width = usize::from(inner.width);
+        let page = match &panel.result {
+            Err(message) => message_page(width, message, t.danger()),
+            Ok(functions) if functions.is_empty() => message_page(
+                width,
+                "No user function call found in this query.",
+                t.text(),
+            ),
+            Ok(functions) => function::page(t, &functions[panel.index], width),
+        };
+        page.view(t, &panel.scroll)
+            .mark(Mark::Dim)
+            .on_border(inner.right().saturating_add(2))
+            .render(inner, buf);
     }
-}
 
-impl App {
-    fn draw_function_panel(&self, frame: &mut Frame) {
-        let Some(panel) = self
-            .popup
-            .as_ref()
-            .and_then(|popup| popup.function.as_ref())
-        else {
+    fn draw_explain_panel(&self, buf: &mut Buffer, screen: Rect, popup: &Popup) {
+        let Some(panel) = &popup.explain else {
             return;
         };
-        let (lines, position) = match &panel.result {
-            Err(message) => (
-                vec![Line::from(Span::styled(message.clone(), palette::danger()))],
-                String::new(),
-            ),
-            Ok(functions) if functions.is_empty() => (
-                vec![Line::from("No user function call found in this query.")],
-                String::new(),
-            ),
-            Ok(functions) => (
-                function::lines(&functions[panel.index]),
-                format!(
-                    " · ←→ other matches ({}/{})",
-                    panel.index + 1,
-                    functions.len()
-                ),
-            ),
-        };
-        let area = centered(frame.area(), 90, 80);
-        frame.render_widget(Clear, area);
-        frame.render_widget(
-            Paragraph::new(lines)
-                .wrap(Wrap { trim: false })
-                .scroll((panel.scroll, 0))
-                .block(
-                    palette::popup()
-                        .title(
-                            Line::from(format!(" function in {} ", panel.database))
-                                .style(palette::strong()),
-                        )
-                        .title_bottom(
-                            Line::from(format!(" f/q/Esc back · ↑↓ scroll{position} "))
-                                .style(palette::muted()),
-                        ),
-                ),
-            area,
-        );
-    }
-}
-
-impl App {
-    fn draw_explain_panel(&self, frame: &mut Frame) {
-        let Some(panel) = self.popup.as_ref().and_then(|popup| popup.explain.as_ref()) else {
-            return;
-        };
-        let lines: Vec<Line> = match &panel.result {
-            Err(message) => vec![Line::from(Span::styled(message.clone(), palette::danger()))],
+        let t = &self.theme;
+        let inner = Modal::new(t, format!("Explain in {}", panel.database))
+            .width(screen.width * 9 / 10)
+            .height(screen.height * 8 / 10)
+            .hints([("↑↓", "scroll"), ("esc", "back")])
+            .draw(screen, buf);
+        let width = usize::from(inner.width);
+        let page = match &panel.result {
+            Err(message) => message_page(width, message, t.danger()),
             Ok(plan) => {
-                let mut lines = vec![
-                    Line::from(Span::styled(
-                        "Estimated plan (EXPLAIN without ANALYZE). The query was not run, \
-                         and the plan may differ from the one the backend is running.",
-                        palette::info(),
-                    )),
-                    Line::default(),
-                ];
-                lines.extend(
-                    plan.iter()
-                        .map(|line| Line::from(single_line_keep_indent(line))),
+                let mut page = message_page(
+                    width,
+                    "Estimated plan (EXPLAIN without ANALYZE). The query was not run, \
+                     and the plan may differ from the one the backend is running.",
+                    t.info(),
                 );
-                lines
+                page.blank();
+                let lines: Vec<String> = plan
+                    .iter()
+                    .map(|line| single_line_keep_indent(line))
+                    .collect();
+                code_block(t, &mut page, &lines, width);
+                page
             }
         };
-        let area = centered(frame.area(), 90, 80);
-        frame.render_widget(Clear, area);
-        frame.render_widget(
-            Paragraph::new(lines)
-                .wrap(Wrap { trim: false })
-                .scroll((panel.scroll, 0))
-                .block(
-                    palette::popup()
-                        .title(
-                            Line::from(format!(" explain in {} ", panel.database))
-                                .style(palette::strong()),
-                        )
-                        .title_bottom(
-                            Line::from(" e/q/Esc back · ↑↓ scroll ").style(palette::muted()),
-                        ),
-                ),
-            area,
-        );
+        page.view(t, &panel.scroll)
+            .mark(Mark::Dim)
+            .on_border(inner.right().saturating_add(2))
+            .render(inner, buf);
     }
+
+    /// The keys of the top layer, in the order the help screen gives them.
+    fn draw_hints(&self, buf: &mut Buffer, area: Rect) {
+        let pause = if self.paused { "resume" } else { "pause" };
+        let overlay = self
+            .popup
+            .as_ref()
+            .is_some_and(|popup| popup.function.is_some() || popup.explain.is_some());
+        let hints = if self.help {
+            vec![("any key", "close")]
+        } else if overlay {
+            vec![("↑↓", "scroll"), ("esc", "back")]
+        } else if self.popup.is_some() {
+            vec![
+                ("↑↓", "scroll"),
+                ("f", "functions"),
+                ("e", "explain"),
+                ("space", pause),
+                ("esc", "back"),
+            ]
+        } else {
+            vec![
+                ("1-4", "view"),
+                ("↑↓", "move"),
+                ("enter", "details"),
+                ("tab", "preview"),
+                ("g", "group"),
+                ("space", pause),
+                ("?", "help"),
+                ("q", "quit"),
+            ]
+        };
+        KeyHints::new(&self.theme, hints).render(area, buf);
+    }
+}
+
+/// A column of a list: its title, its width and the narrowest it may get.
+/// A numeric column aligns right, title included.
+struct Column {
+    title: &'static str,
+    width: usize,
+    narrowest: usize,
+    numeric: bool,
+    /// Goes to the query's row when the query moves under the figures.
+    second_row: bool,
+}
+
+impl Column {
+    const fn text(title: &'static str, width: usize, narrowest: usize) -> Self {
+        Self {
+            title,
+            width,
+            narrowest,
+            numeric: false,
+            second_row: false,
+        }
+    }
+
+    const fn number(title: &'static str, width: usize, narrowest: usize) -> Self {
+        Self {
+            title,
+            width,
+            narrowest,
+            numeric: true,
+            second_row: false,
+        }
+    }
+
+    const fn on_second_row(self) -> Self {
+        Self {
+            second_row: true,
+            ..self
+        }
+    }
+}
+
+/// The fewest cells the query keeps at the end of a row: a fifth of the
+/// row, and at least this.
+const QUERY_MIN: usize = 16;
+/// Cells between two columns.
+const GAP: usize = 1;
+
+/// The widths of a list's columns. The query, last, takes what the others
+/// leave. When that is too little, the widest text columns give up cells,
+/// down to their narrowest. When that is still not enough, as on a narrow
+/// screen with the host's figures, the query moves to a row of its own
+/// under the figures, with the columns marked for it.
+struct Layout {
+    columns: Columns,
+    /// Each column's width, in the order of the spec. A column on the
+    /// second row has none.
+    widths: Vec<usize>,
+    query_row: bool,
+}
+
+impl Layout {
+    fn new(width: usize, spec: &[Column]) -> Self {
+        let query_min = (width / 5).max(QUERY_MIN);
+        // A row is indented two cells, and each column has a gap after it.
+        let used = |widths: &[usize]| 2 + widths.iter().map(|w| w + GAP).sum::<usize>();
+        let shrink = |columns: &[&Column], room: usize| {
+            let mut widths: Vec<usize> = columns.iter().map(|column| column.width).collect();
+            while used(&widths) > room {
+                let widest = (0..widths.len())
+                    .filter(|&i| widths[i] > columns[i].narrowest)
+                    .max_by_key(|&i| widths[i]);
+                let Some(widest) = widest else {
+                    break;
+                };
+                widths[widest] -= 1;
+            }
+            widths
+        };
+        let all: Vec<&Column> = spec.iter().collect();
+        let mut widths = shrink(&all, width.saturating_sub(query_min));
+        if used(&widths) + query_min <= width {
+            let by_column = widths.clone();
+            widths.push(width - used(&widths));
+            return Self {
+                columns: Columns::with_gap(width, &widths, GAP),
+                widths: by_column,
+                query_row: false,
+            };
+        }
+        // Without the query, the last column has no gap after it.
+        let first: Vec<&Column> = spec.iter().filter(|column| !column.second_row).collect();
+        let mut kept = shrink(&first, width + GAP).into_iter();
+        let widths = spec
+            .iter()
+            .map(|column| {
+                if column.second_row {
+                    0
+                } else {
+                    kept.next().unwrap_or(0)
+                }
+            })
+            .collect::<Vec<_>>();
+        let row: Vec<usize> = spec
+            .iter()
+            .zip(&widths)
+            .filter(|(column, _)| !column.second_row)
+            .map(|(_, width)| *width)
+            .collect();
+        Self {
+            columns: Columns::with_gap(width, &row, GAP),
+            widths,
+            query_row: true,
+        }
+    }
+
+    /// The width of the column at `index` in the spec.
+    fn width(&self, index: usize) -> usize {
+        self.widths.get(index).copied().unwrap_or(0)
+    }
+
+    /// The column titles in `subtle-foreground`.
+    fn head(&self, t: &Theme, spec: &[Column]) -> Line<'static> {
+        let mut titles: Vec<Vec<Span<'static>>> = spec
+            .iter()
+            .zip(&self.widths)
+            .filter(|(column, _)| !self.query_row || !column.second_row)
+            .map(|(column, width)| {
+                let title = if column.numeric {
+                    format!("{:>width$}", column.title)
+                } else {
+                    column.title.to_owned()
+                };
+                vec![Span::styled(title, t.subtle())]
+            })
+            .collect();
+        if !self.query_row {
+            titles.push(vec![Span::styled("Query", t.subtle())]);
+        }
+        self.columns.row(titles)
+    }
+
+    /// The rows of one item: the cells and the query, on one row or two.
+    fn lines(
+        &self,
+        t: &Theme,
+        spec: &[Column],
+        cells: Vec<Vec<Span<'static>>>,
+        query: &str,
+        width: usize,
+    ) -> Vec<Line<'static>> {
+        let query = Span::styled(query.to_owned(), t.muted());
+        if !self.query_row {
+            let mut cells = cells;
+            cells.push(vec![query]);
+            return vec![self.columns.row(cells)];
+        }
+        // A cell moved to the query's row keeps its title before it.
+        let mut first = Vec::new();
+        let mut second = Vec::new();
+        for (column, cell) in spec.iter().zip(cells) {
+            if !column.second_row {
+                first.push(cell);
+            } else if cell.iter().any(|span| !span.content.is_empty()) {
+                second.push(Span::styled(format!("{} ", column.title), t.subtle()));
+                second.extend(cell);
+                second.push(Span::styled(" · ", t.subtle()));
+            }
+        }
+        second.push(query);
+        let mut row = vec![Span::raw("    ")];
+        row.extend(fit(second, width.saturating_sub(4)));
+        vec![self.columns.row(first), Line::from(row)]
+    }
+}
+
+/// Draws `line` on row `dy` of `area`, if the row is on screen.
+fn put(buf: &mut Buffer, area: Rect, dy: u16, line: Line<'_>) {
+    let area = area.intersection(buf.area);
+    if dy < area.height {
+        buf.set_line(area.x, area.y + dy, &line, area.width);
+    }
+}
+
+/// A fact of a record: the key in `muted-foreground` in a column
+/// `key_width` cells wide after `indent` cells, then the value. A value too
+/// wide for the page goes on more rows under the first, at whole spans
+/// where it can, and a span wider than a row is split.
+fn fact_lines(
+    t: &Theme,
+    width: usize,
+    indent: usize,
+    key_width: usize,
+    key: &str,
+    value: Vec<Span<'static>>,
+) -> Vec<Line<'static>> {
+    let room = width.saturating_sub(indent + key_width).max(1);
+    let mut rows: Vec<Vec<Span<'static>>> = vec![Vec::new()];
+    let mut used = 0;
+    for span in value {
+        let pieces = if span.width() > room {
+            split_cells(&span.content, room)
+        } else {
+            vec![span.content.to_string()]
+        };
+        for piece in pieces {
+            let mut piece = Span::styled(piece, span.style);
+            if used > 0 && used + piece.width() > room {
+                rows.push(Vec::new());
+                used = 0;
+                piece.content = piece.content.trim_start().to_owned().into();
+            }
+            used += piece.width();
+            if let Some(row) = rows.last_mut() {
+                row.push(piece);
+            }
+        }
+    }
+    rows.into_iter()
+        .enumerate()
+        .map(|(index, value)| {
+            let key = if index == 0 { key } else { "" };
+            let mut spans = vec![Span::styled(
+                format!("{}{key:<key_width$}", " ".repeat(indent)),
+                t.muted(),
+            )];
+            spans.extend(value);
+            Line::from(spans)
+        })
+        .collect()
+}
+
+/// Text of the product, such as a notice or a server error, wrapped to the
+/// page. Server text is flattened first.
+fn message_page(width: usize, message: &str, style: Style) -> Page {
+    let mut page = Page::default();
+    for line in split_cells(&single_line(message), width) {
+        page.line(Line::styled(line, style));
+    }
+    page
+}
+
+/// `lines` as a code block, after a section title or a blank row, which
+/// becomes its half row of fill above, with the blank row of fill below.
+/// A line too wide for the block wraps under its own indent.
+fn code_block(t: &Theme, page: &mut Page, lines: &[String], width: usize) {
+    // The block's text starts four cells in and ends two before the edge.
+    let room = width.saturating_sub(6).max(1);
+    for line in lines {
+        for row in wrap_keep_indent(line, room) {
+            page.code(Line::styled(row, t.text()));
+        }
+    }
+    page.blank();
+}
+
+/// `line` in rows at most `width` cells wide, broken at the last space
+/// that fits, each row keeping the line's indent. The spaces inside a row
+/// stay as they are, and a word wider than a row is split.
+fn wrap_keep_indent(line: &str, width: usize) -> Vec<String> {
+    if Span::raw(line).width() <= width {
+        return vec![line.to_owned()];
+    }
+    let text = line.trim_start();
+    let indent = (line.len() - text.len()).min(width / 2);
+    let pad = " ".repeat(indent);
+    split_cells(text, width.saturating_sub(indent))
+        .into_iter()
+        .map(|row| format!("{pad}{row}"))
+        .collect()
+}
+
+/// `text` in pieces at most `room` terminal cells wide, so a CJK character
+/// or an emoji counts as two. A piece ends at the last space that fits, or
+/// inside a word wider than `room`. Graphemes stay whole, and the spaces at
+/// a break are dropped.
+fn split_cells(text: &str, room: usize) -> Vec<String> {
+    let room = room.max(1);
+    let span = Span::raw(text);
+    let graphemes: Vec<(&str, usize)> = span
+        .styled_graphemes(Style::new())
+        .map(|grapheme| (grapheme.symbol, Span::raw(grapheme.symbol).width()))
+        .collect();
+    let piece = |range: std::ops::Range<usize>| {
+        graphemes[range]
+            .iter()
+            .map(|(symbol, _)| *symbol)
+            .collect::<String>()
+            .trim_end()
+            .to_owned()
+    };
+    let mut pieces = Vec::new();
+    let mut start = 0;
+    while start < graphemes.len() {
+        let (mut end, mut used, mut space) = (start, 0, None);
+        while end < graphemes.len() && used + graphemes[end].1 <= room {
+            if graphemes[end].0 == " " {
+                space = Some(end);
+            }
+            used += graphemes[end].1;
+            end += 1;
+        }
+        if end == graphemes.len() {
+            pieces.push(piece(start..end));
+            break;
+        }
+        // A grapheme wider than the room still takes a piece of its own.
+        let cut = match space {
+            Some(at) if at > start => at,
+            _ => end.max(start + 1),
+        };
+        pieces.push(piece(start..cut));
+        start = cut;
+        while start < graphemes.len() && graphemes[start].0 == " " {
+            start += 1;
+        }
+    }
+    pieces
 }
 
 /// Every key, grouped by where it works. The footer has room for a few.
@@ -1859,36 +2381,84 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
     ),
 ];
 
-/// The help lists the list keys on the left and the rest on the right, so
-/// it fits a 24-line terminal.
-fn draw_help(frame: &mut Frame) {
-    let column =
-        |sections: &'static [(&'static str, &'static [(&'static str, &'static str)])]| {
-            let mut lines = Vec::new();
-            for (section, keys) in sections {
-                if !lines.is_empty() {
-                    lines.push(Line::default());
-                }
-                lines.push(Line::from(Span::styled(*section, palette::strong())));
-                for (key, action) in *keys {
-                    lines.push(Line::from(vec![
-                        Span::styled(format!("  {key:<14}"), palette::link()),
-                        Span::raw(*action),
-                    ]));
-                }
+type HelpSections = [(&'static str, &'static [(&'static str, &'static str)])];
+
+/// The key column's width and the widest action of `sections`.
+fn help_widths(sections: &HelpSections) -> (usize, usize) {
+    let keys = || sections.iter().flat_map(|(_, keys)| keys.iter());
+    let key = keys()
+        .map(|(key, _)| Span::raw(*key).width())
+        .max()
+        .unwrap_or(0)
+        + 2;
+    let action = keys()
+        .map(|(_, action)| Span::raw(*action).width())
+        .max()
+        .unwrap_or(0);
+    (key, action)
+}
+
+/// One column of the help, `width` cells wide: each section a title and a
+/// rule, then its keys. An action too long for the column wraps.
+fn help_column(t: &Theme, sections: &HelpSections, width: usize) -> Vec<Line<'static>> {
+    let (key_width, _) = help_widths(sections);
+    let room = width.saturating_sub(key_width).max(1);
+    let mut lines = Vec::new();
+    for (title, keys) in sections {
+        let mut rule = vec![Span::styled(format!("{title} "), t.muted())];
+        rule.extend(
+            t.look()
+                .rule
+                .spans(t, width.saturating_sub(title.len() + 1)),
+        );
+        lines.push(Line::from(rule));
+        for (key, action) in *keys {
+            for (index, part) in tui_kiso::wrap(action, room).into_iter().enumerate() {
+                let key = if index == 0 { *key } else { "" };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("{key:<key_width$}"), t.text()),
+                    Span::styled(part, t.muted()),
+                ]));
             }
-            Paragraph::new(lines)
-        };
-    let area = centered(frame.area(), 90, 90);
-    let block = palette::popup()
-        .title(Line::from(" Keyboard shortcuts ").style(palette::strong()))
-        .title_bottom(Line::from(" any key closes ").style(palette::muted()));
-    let [left, right] =
-        Layout::horizontal([Constraint::Fill(1), Constraint::Fill(1)]).areas(block.inner(area));
-    frame.render_widget(Clear, area);
-    frame.render_widget(block, area);
-    frame.render_widget(column(&HELP[..1]), left);
-    frame.render_widget(column(&HELP[1..]), right);
+        }
+    }
+    lines
+}
+
+/// The help lists the list keys on the left and the rest on the right, so
+/// it fits a 24-line terminal. On a narrow one the actions wrap.
+fn draw_help(buf: &mut Buffer, t: &Theme, screen: Rect) {
+    let (left, right) = (&HELP[..1], &HELP[1..]);
+    let natural = |sections: &HelpSections| {
+        let (key, action) = help_widths(sections);
+        key + action
+    };
+    // Two columns stay free at each side of the dialog, and its frame and
+    // padding take six more.
+    let inside = usize::from(screen.width).saturating_sub(10);
+    let (left_width, right_width) = if natural(left) + 2 + natural(right) <= inside {
+        (natural(left), natural(right))
+    } else {
+        let half = inside.saturating_sub(2) / 2;
+        (half, half)
+    };
+    let left = help_column(t, left, left_width);
+    let right = help_column(t, right, right_width);
+    let rows: Vec<Line<'static>> = (0..left.len().max(right.len()))
+        .map(|index| {
+            let mut spans = fit(
+                left.get(index).cloned().unwrap_or_default().spans,
+                left_width,
+            );
+            spans.push(Span::raw("  "));
+            spans.extend(right.get(index).cloned().unwrap_or_default().spans);
+            Line::from(spans)
+        })
+        .collect();
+    Modal::new(t, "Help")
+        .body(Text::from(rows))
+        .hints([("any key", "close")])
+        .render(screen, buf);
 }
 
 /// Drops control characters from one plan line but keeps its leading
@@ -1903,23 +2473,6 @@ fn or_dash(value: &str) -> &str {
     } else {
         value
     }
-}
-
-/// A rectangle of the given percentages, centered in `area`.
-fn centered(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
-    let [_, middle, _] = Layout::vertical([
-        Constraint::Percentage((100 - percent_y) / 2),
-        Constraint::Percentage(percent_y),
-        Constraint::Fill(1),
-    ])
-    .areas(area);
-    let [_, center, _] = Layout::horizontal([
-        Constraint::Percentage((100 - percent_x) / 2),
-        Constraint::Percentage(percent_x),
-        Constraint::Fill(1),
-    ])
-    .areas(middle);
-    center
 }
 
 fn is_local(endpoint: &EndpointIdentity) -> bool {
@@ -1973,67 +2526,6 @@ impl SessionCounts {
         }
         counts
     }
-}
-
-/// An htop-style meter of connection slots: waiting backends in red, other
-/// active ones in green, idle in transaction in yellow, idle in gray.
-fn session_bar(counts: &SessionCounts, max_connections: usize, width: usize) -> Line<'static> {
-    let label = " Conn[";
-    let suffix = format!("{}/{}]", counts.total, max_connections);
-    let inner = width.saturating_sub(label.len() + suffix.len() + 1);
-    let max = max_connections.max(counts.total).max(1);
-    let cells = |count: usize| count * inner / max;
-
-    let waiting = cells(counts.waiting);
-    let active = cells(counts.active.saturating_sub(counts.waiting));
-    let in_transaction = cells(counts.idle_in_transaction + counts.idle_in_transaction_aborted);
-    let idle = cells(counts.idle);
-    let used = (waiting + active + in_transaction + idle).min(inner);
-
-    Line::from(vec![
-        Span::styled(label, palette::muted()),
-        Span::styled("|".repeat(waiting), palette::series(2)),
-        Span::styled("|".repeat(active), palette::series(0)),
-        Span::styled("|".repeat(in_transaction), palette::series(1)),
-        Span::styled("|".repeat(idle), palette::subtle()),
-        Span::raw(" ".repeat(inner - used)),
-        Span::styled(suffix, palette::muted()),
-    ])
-}
-
-fn footer_line(view: View) -> Line<'static> {
-    let keys = [
-        ("F1", "Running queries", Some(View::Running)),
-        ("F2", "Waiting queries", Some(View::Waiting)),
-        ("F3", "Blocking queries", Some(View::Blocking)),
-        ("F4", "Vacuum", Some(View::Vacuum)),
-        ("v", "Query details", None),
-        ("Space", "Pause/unpause", None),
-        ("?", "Help", None),
-        ("q", "Quit", None),
-    ];
-    let mut spans = Vec::new();
-    for (key, label, target) in keys {
-        let style = if target == Some(view) {
-            palette::strong()
-        } else {
-            palette::muted()
-        };
-        spans.push(Span::styled(key, palette::link()));
-        spans.push(Span::styled(format!(" {label:<17}"), style));
-    }
-    Line::from(spans)
-}
-
-/// A table header cell. Numeric columns align right, like their values.
-fn header_cell(title: &'static str) -> Cell<'static> {
-    const NUMERIC: [&str; 6] = ["CPU%", "READ/s", "WRITE/s", "TIME+", "SCANNED", "IDX"];
-    let line = Line::from(title);
-    Cell::from(if NUMERIC.contains(&title) {
-        line.alignment(Alignment::Right)
-    } else {
-        line
-    })
 }
 
 /// Refreshes the compact header's sparklines cover.
@@ -2330,6 +2822,173 @@ mod tests {
             .join("\n")
     }
 
+    fn buffer(app: &mut App, width: u16, height: u16) -> Buffer {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn rows(buffer: &Buffer) -> Vec<String> {
+        let area = buffer.area;
+        (0..area.height)
+            .map(|y| (0..area.width).map(|x| buffer[(x, y)].symbol()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn the_terminal_colors_are_set_and_put_back() {
+        let mut out = Vec::new();
+        terminal_colors(&mut out, Some(&kiso_tokens::GOLD_DARK)).unwrap();
+        let [r, g, b] = kiso_tokens::GOLD_DARK.background;
+        let set = String::from_utf8_lossy(&out).into_owned();
+        assert!(
+            set.starts_with(&format!("\x1b]11;#{r:02x}{g:02x}{b:02x}\x1b\\\x1b]10;#")),
+            "{set:?}"
+        );
+        out.clear();
+        terminal_colors(&mut out, None).unwrap();
+        assert_eq!(out, b"\x1b]111\x1b\\\x1b]110\x1b\\");
+    }
+
+    #[test]
+    fn terminal_colors_need_a_terminal_without_no_color() {
+        assert!(takes_terminal_colors(true, false));
+        assert!(!takes_terminal_colors(true, true));
+        assert!(!takes_terminal_colors(false, false));
+    }
+
+    static PANIC_OUT: std::sync::Mutex<Vec<u8>> = std::sync::Mutex::new(Vec::new());
+
+    struct PanicOut;
+
+    impl Write for PanicOut {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            PANIC_OUT.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn chained_panic_hooks_put_the_colors_back_once() {
+        let original = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        // The hooks of top and of the capture progress, chained.
+        restore_terminal_on_panic(|| PanicOut);
+        restore_terminal_on_panic(|| PanicOut);
+        paint_terminal(&mut Vec::new(), &kiso_tokens::GOLD_DARK);
+        let _ = std::panic::catch_unwind(|| panic!("a panic in a view"));
+        std::panic::set_hook(original);
+        assert_eq!(*PANIC_OUT.lock().unwrap(), b"\x1b]111\x1b\\\x1b]110\x1b\\");
+    }
+
+    #[test]
+    fn every_layer_fits_80_by_24_inside_the_side_margins() {
+        let mut list = app(View::Running);
+        list.os = Some(OsState::new());
+        list.backends[0].query = format!("SELECT {} FROM t", "column_name, ".repeat(20));
+        let mut help = app(View::Running);
+        help.help = true;
+        let mut details = app(View::Running);
+        details.popup = Some(Popup {
+            pid: "101".to_owned(),
+            details: Some(Details::default()),
+            memory: None,
+            ended: false,
+            scroll: Scroll::default(),
+            function: None,
+            explain: None,
+        });
+        for (name, app) in [
+            ("list", &mut list),
+            ("help", &mut help),
+            ("details", &mut details),
+        ] {
+            let rows = rows(&buffer(app, 80, 24));
+            for row in &rows {
+                let cells: Vec<char> = row.chars().collect();
+                let margins = [cells[0], cells[1], cells[78], cells[79]];
+                assert!(margins.iter().all(|c| *c == ' '), "{name}: {row:?}");
+            }
+            if name == "help" {
+                let screen = rows.join("\n");
+                assert!(screen.contains("Quit from anywhere"), "{screen}");
+                assert!(screen.contains("Back to the list"), "{screen}");
+                assert!(screen.contains("╰─ any key close"), "{screen}");
+            }
+        }
+        // The query does not fit after the host's figures, so it moves under
+        // them, with the wait and its title.
+        let screen = rows(&buffer(&mut list, 80, 24)).join("\n");
+        assert!(screen.contains("  ▌   SELECT column_name,"), "{screen}");
+        assert!(screen.contains("      Waiting Lock · UPDATE t"), "{screen}");
+    }
+
+    #[test]
+    fn the_selection_stays_on_screen_when_the_preview_opens() {
+        let mut app = app(View::Running);
+        app.backends = (100..130)
+            .map(|pid| backend(&pid.to_string(), "active", "", "SELECT 1"))
+            .collect();
+        app.paused = true;
+        app.selected = 25;
+        assert!(rows(&buffer(&mut app, 160, 24))
+            .iter()
+            .any(|row| row.contains("▌ 125")));
+        app.preview = true;
+        let mut terminal = Terminal::new(TestBackend::new(160, 24)).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let screen = rows(terminal.backend().buffer()).join("\n");
+        assert!(screen.contains("▌ 125"), "{screen}");
+    }
+
+    #[test]
+    fn a_long_fact_wraps_without_losing_text() {
+        let theme = Theme::truecolor(kiso_tokens::GOLD_DARK);
+        let value = format!("{} {}", "a".repeat(50), "b".repeat(10));
+        let lines = fact_lines(&theme, 40, 2, 17, "Application", vec![Span::raw(value)]);
+        assert!(lines.len() > 1);
+        assert!(lines.iter().all(|line| line.width() <= 40), "{lines:?}");
+        let text: String = lines.iter().map(|line| line.to_string()).collect();
+        assert_eq!(text.matches('a').count(), 50 + 1, "{text}");
+        assert_eq!(text.matches('b').count(), 10);
+    }
+
+    #[test]
+    fn wide_characters_wrap_by_terminal_cells() {
+        let line = format!("  SELECT '{}'", "中".repeat(40));
+        let rows = wrap_keep_indent(&line, 68);
+        assert!(rows.len() > 1, "{rows:?}");
+        assert!(
+            rows.iter().all(|row| Span::raw(row.as_str()).width() <= 68),
+            "{rows:?}"
+        );
+        assert!(rows.iter().all(|row| row.starts_with("  ")));
+        let text: String = rows
+            .iter()
+            .map(|row| row.trim_start())
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert_eq!(text.matches('中').count(), 40);
+    }
+
+    #[test]
+    fn the_selected_row_has_the_mark_and_the_selected_fill() {
+        let mut app = app(View::Running);
+        app.theme = Theme::truecolor(kiso_tokens::GOLD_DARK);
+        app.selected = 1;
+        let buffer = buffer(&mut app, 160, 13);
+        let rows = rows(&buffer);
+        let row = |pid: &str| rows.iter().position(|row| row.contains(pid)).unwrap() as u16;
+        let selected = buffer[(2, row("102"))].clone();
+        assert_eq!(selected.symbol(), "▌");
+        assert_eq!(selected.bg, app.theme.selected_color());
+        assert_eq!(buffer[(2, row("101"))].symbol(), " ");
+    }
+
     #[test]
     fn query_text_is_flattened_and_stripped_of_escape_sequences() {
         assert_eq!(
@@ -2375,17 +3034,17 @@ mod tests {
     #[test]
     fn running_view_hides_idle_backends_and_counts_sessions() {
         let screen = screen(&mut app(View::Running));
-        assert!(screen.contains("RUNNING QUERIES (2)"), "{screen}");
+        assert!(screen.contains(" Running 2 "), "{screen}");
         assert!(screen.contains("SELECT pg_sleep(5)"));
         assert!(!screen.contains("103"));
-        assert!(screen.contains("3/100 total"));
+        assert!(screen.contains("Sessions  3/100"));
         assert!(screen.contains(concat!(" pg-probe ", env!("CARGO_PKG_VERSION"))));
     }
 
     #[test]
     fn waiting_view_lists_only_lock_waits() {
         let screen = screen(&mut app(View::Waiting));
-        assert!(screen.contains("WAITING QUERIES (1)"), "{screen}");
+        assert!(screen.contains(" Waiting 1 ━"), "{screen}");
         assert!(screen.contains("UPDATE t SET id = 1"));
         assert!(!screen.contains("pg_sleep"));
     }
@@ -2456,7 +3115,7 @@ mod tests {
             .map(|line| line.iter().map(|cell| cell.symbol()).collect::<String>() + "\n")
             .collect();
         assert!(screen.contains("PID 101 ·"), "{screen}");
-        assert!(screen.contains("│from "), "{screen}");
+        assert!(screen.lines().any(|l| l.trim() == "from"), "{screen}");
     }
 
     #[test]
@@ -2488,7 +3147,7 @@ mod tests {
         app.backends[0].state = "idle in transaction".to_owned();
         app.compact = true;
         let screen = screen(&mut app);
-        assert!(screen.contains("USER@DATABASE"), "{screen}");
+        assert!(screen.contains("User@database"), "{screen}");
         assert!(screen.contains("postgres@bench"), "{screen}");
         assert!(screen.contains(" txn "), "{screen}");
     }
@@ -2500,14 +3159,21 @@ mod tests {
         app.group = Group::Database;
         let pids: Vec<&str> = app.visible().iter().map(|b| b.pid.as_str()).collect();
         assert_eq!(pids, ["102", "101"]);
-        app.table.select(Some(1));
+        app.selected = 1;
         let screen = screen(&mut app);
-        assert!(screen.contains("GROUPED BY DATABASE"), "{screen}");
-        assert!(screen.contains("▾ bench (1)"), "{screen}");
-        assert!(screen.contains("▾ reports (1)"), "{screen}");
+        assert!(
+            screen.contains("Running 2 · grouped by database"),
+            "{screen}"
+        );
         let lines: Vec<&str> = screen.lines().collect();
-        let reports = lines.iter().position(|l| l.contains("▾ reports")).unwrap();
-        assert!(lines[reports + 1].starts_with("101"), "{screen}");
+        let section = |name: &str| {
+            lines.iter().position(|l| {
+                l.starts_with(&format!("  {name} ─")) && l.trim_end().ends_with("─ 1")
+            })
+        };
+        assert!(section("bench").is_some(), "{screen}");
+        let reports = section("reports").expect("a section per group");
+        assert!(lines[reports + 2].starts_with("  ▌ 101"), "{screen}");
     }
 
     #[test]
@@ -2521,7 +3187,7 @@ mod tests {
         let lines: Vec<&str> = screen.lines().collect();
         assert!(lines[1].contains("active 2 ▄█"), "{screen}");
         assert!(lines[1].contains("waiting 1 ▁█"), "{screen}");
-        assert!(lines[2].contains("RUNNING QUERIES"), "{screen}");
+        assert!(lines[2].contains(" Running 2 "), "{screen}");
     }
 
     #[test]
@@ -2562,7 +3228,7 @@ mod tests {
             ..Vacuum::default()
         }];
         let screen = screen(&mut app);
-        assert!(!screen.contains("PHASE"), "{screen}");
+        assert!(!screen.contains("Phase"), "{screen}");
         assert!(screen.contains("public.t "), "{screen}");
     }
 
@@ -2581,7 +3247,7 @@ mod tests {
             ..Vacuum::default()
         }];
         let screen = screen(&mut app);
-        assert!(screen.contains("TABLE@DATABASE"), "{screen}");
+        assert!(screen.contains("Table@database"), "{screen}");
         assert!(screen.contains("public.t@app"), "{screen}");
         assert!(screen.contains(" wrap "), "{screen}");
     }
@@ -2607,7 +3273,7 @@ mod tests {
         assert_eq!(app.visible().len(), 1);
         assert!(app.backend_by_pid("900").is_some());
         let screen = screen(&mut app);
-        assert!(screen.contains("VACUUM (1)"), "{screen}");
+        assert!(screen.contains(" Vacuum 1 "), "{screen}");
         assert!(screen.contains("scanning heap"), "{screen}");
         assert!(screen.contains("25.0%"), "{screen}");
     }
@@ -2644,7 +3310,7 @@ mod tests {
             }),
             memory: None,
             ended: false,
-            scroll: 0,
+            scroll: Scroll::default(),
             function: None,
             explain: None,
         });

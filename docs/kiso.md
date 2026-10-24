@@ -80,18 +80,52 @@ file has a bug.
 | Report (`screens/report.tsx`) | Report: the snapshot header as the cover with a `.report-kicker`, a linked contents page, then the shared section Disclosures, open. `PanelGrid` passes `static` and ignores the saved layout. Each chart or table prints on its own page. "Print report" in the snapshot header is a DropdownMenu of report languages; an item opens the report with `?lang=` and the print dialog |
 | Logs (`screens/not-collected.tsx`) | Empty states, informational |
 | No snapshots, list error (`screens/start.tsx`) | Empty states, first run; Errors |
+| `pg-probe top` (`src/top.rs`) | List-detail: the sessions of a view as a list, and a session's details as a page in place of the list. Help, functions and explain are dialogs |
+| Capture progress (`src/progress.rs`) | Dashboard: progress, collectors, cost and issues as sections of one block |
 
 ## Terminal view
 
-`pg-probe top` is a terminal UI, so it cannot load Kiso's CSS. It takes the
-dark theme values with the gold accent from `tokens/build/tokens.css` and
-keeps them as RGB in `src/top/palette.rs`. Kiso keeps terminals dark in both
-themes, so `top` paints its own `background` and uses the `*-on-dark` status
-values. A terminal that does not set `COLORTERM` to `truecolor` or
-`24bit` gets the nearest of the 256 xterm colors, since an older tmux misreads
-RGB codes. The product rules above apply here too: no health colors, `—` for an
-unknown value, IEC units, and numeric columns aligned right. Change the
-palette with the package version, and record the version in the module doc.
+`pg-probe top` and the capture progress screen are terminal views. They draw
+with `tui-kiso` and take their colors from `kiso-tokens`, both from blueprint
+at the rev pinned in `Cargo.toml` (`49350a4`). Move both revs together. The
+accent is gold: `top::theme()` is `Theme::new(kiso_tokens::GOLD_DARK)`, which
+sends 24-bit color only when `COLORTERM` is `truecolor` or `24bit`, and the
+nearest xterm-256 color otherwise.
+
+Both views leave their cells unpainted. They set the terminal's background
+and text color to `background` and `foreground` with OSC 11 and OSC 10 when
+they start: `top` when it opens, the progress screen when its live block
+starts on a terminal. They put them back with OSC 111 and OSC 110 when they
+end: on quit, when the capture is done or stopped, after an error, and from
+the panic hook. Off a terminal, or with `NO_COLOR`, neither view sends OSC.
+After the capture ends, the block left in the scrollback keeps only its text
+colors, on the terminal's own background.
+
+The product rules above apply here too. There are no health colors: states,
+durations and waits stay plain text. The session counts and the connection
+meter use `chart-1` to `chart-3` as categories. An unknown value is `—`, units
+are IEC, and numeric columns and their titles align right.
+
+On a narrow screen the text columns of a list give up cells first. When the
+query would get less than a fifth of the row, it moves to a row of its own
+under the figures, after the wait, the blocked pids or the vacuum phase,
+each with its column title.
+
+### Exceptions to the terminal contract
+
+- `top` has no command palette (`Ctrl+P` or `:`), no `/` search, no `f`
+  filters and no `a` actions. It has few actions, and each has its own key on
+  the help screen. In a query's details, `f` opens the functions the query
+  calls.
+- `F1` to `F4` choose the views, as in pg_activity, so `F1` does not open
+  help. `?` opens help from the list only, and the footer of the details page
+  does not show it.
+- The spinner turns once per refresh, so `top` does not redraw between
+  refreshes.
+- The blocking and vacuum views show their session count only while open,
+  since each sends its own query to the server.
+- `Ctrl+C` stops a capture without asking first, and keeps what was
+  collected. The footer of the progress screen says so.
 
 ## Exceptions
 

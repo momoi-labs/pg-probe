@@ -3,8 +3,8 @@
 //! `\sf`. It runs one catalog query, only when the operator asks for it.
 
 use ratatui::text::{Line, Span};
+use tui_kiso::{Page, Theme};
 
-use super::palette;
 use crate::postgres::{AdapterError, ConnectedClient};
 
 const SOURCE: &str = "postgres.top.function";
@@ -176,88 +176,94 @@ fn source_text(value: &[u8]) -> String {
         .collect()
 }
 
-/// The lines of the function panel for one definition.
-pub fn lines(function: &FunctionDef) -> Vec<Line<'static>> {
-    let label = |text: &str| Span::styled(format!("{text:<16}"), palette::muted());
-    let field = |name: &str, value: String| Line::from(vec![label(name), Span::raw(value)]);
+/// The function panel's page for one definition, `width` cells wide.
+pub fn page(t: &Theme, function: &FunctionDef, width: usize) -> Page {
+    let mut page = Page::default();
+    let field = |page: &mut Page, key: &str, value: Vec<Span<'static>>| {
+        for line in super::fact_lines(t, width, 0, 16, key, value) {
+            page.line(line);
+        }
+    };
+    let plain = |text: String| vec![Span::styled(text, t.text())];
 
-    let mut lines = vec![
-        Line::from(Span::styled(
-            format!("{}.{}", function.schema, function.name),
-            palette::strong(),
-        )),
-        Line::default(),
-        field("Arguments", or_none(&function.arguments)),
-        field("Returns", function.result.clone()),
-        field("Language", function.language.clone()),
-        field("Volatility", function.volatility.clone()),
-        field(
-            "Security",
-            if function.security_definer {
-                "definer".to_owned()
-            } else {
-                "invoker".to_owned()
-            },
-        ),
-        field("Owner", function.owner.clone()),
-        field(
-            "Cost / rows",
-            format!("{} / {}", function.cost, function.rows),
-        ),
-        Line::default(),
-    ];
+    page.line(Line::styled(
+        format!("{}.{}", function.schema, function.name),
+        t.strong(),
+    ));
+    page.blank();
+    field(&mut page, "Arguments", plain(or_none(&function.arguments)));
+    field(&mut page, "Returns", plain(function.result.clone()));
+    field(&mut page, "Language", plain(function.language.clone()));
+    field(&mut page, "Volatility", plain(function.volatility.clone()));
+    let security = if function.security_definer {
+        "definer"
+    } else {
+        "invoker"
+    };
+    field(&mut page, "Security", plain(security.to_owned()));
+    field(&mut page, "Owner", plain(function.owner.clone()));
+    field(
+        &mut page,
+        "Cost / rows",
+        plain(format!("{} / {}", function.cost, function.rows)),
+    );
+    page.blank();
 
     match (function.calls, function.total_ms, function.self_ms) {
         (Some(calls), Some(total_ms), Some(self_ms)) => {
-            lines.push(field("Calls", group_digits(calls)));
-            lines.push(Line::from(vec![
-                label("Total time"),
-                Span::raw(super::format_duration(total_ms / 1000.0)),
-                Span::styled(
-                    format!(
-                        "   (self {}, the rest in queries it runs)",
-                        super::format_duration(self_ms / 1000.0)
+            field(&mut page, "Calls", plain(group_digits(calls)));
+            field(
+                &mut page,
+                "Total time",
+                vec![
+                    Span::styled(super::format_duration(total_ms / 1000.0), t.text()),
+                    Span::styled(
+                        format!(
+                            "   (self {}, the rest in queries it runs)",
+                            super::format_duration(self_ms / 1000.0)
+                        ),
+                        t.muted(),
                     ),
-                    palette::muted(),
-                ),
-            ]));
+                ],
+            );
             if calls > 0 {
-                lines.push(field(
+                field(
+                    &mut page,
                     "Mean time",
-                    super::format_duration(total_ms / 1000.0 / calls as f64),
-                ));
+                    plain(super::format_duration(total_ms / 1000.0 / calls as f64)),
+                );
             }
         }
-        _ if function.track_functions == "none" => lines.push(Line::from(Span::styled(
+        _ if function.track_functions == "none" => page.line(Line::styled(
             "Function stats off (track_functions = none)",
-            palette::info(),
-        ))),
-        _ => lines.push(Line::from(Span::styled(
+            t.info(),
+        )),
+        _ => page.line(Line::styled(
             "No calls recorded since the last stats reset",
-            palette::muted(),
-        ))),
+            t.muted(),
+        )),
     }
 
-    lines.push(Line::default());
-    lines.push(Line::from(Span::styled("Source", palette::strong())));
-    if matches!(function.language.as_str(), "c" | "internal") {
-        lines.push(Line::from(format!(
+    page.blank();
+    page.section(t, width, "Source", None);
+    let source = if matches!(function.language.as_str(), "c" | "internal") {
+        vec![format!(
             "{} function: symbol {} in {}",
             function.language,
             function.source.trim(),
             or_none(&function.library)
-        )));
+        )]
     } else {
         let source = function.source.trim_matches('\n');
-        let width = source.lines().count().to_string().len();
-        for (number, line) in source.lines().enumerate() {
-            lines.push(Line::from(vec![
-                Span::styled(format!("{:>width$}  ", number + 1), palette::muted()),
-                Span::raw(line.to_owned()),
-            ]));
-        }
-    }
-    lines
+        let digits = source.lines().count().to_string().len();
+        source
+            .lines()
+            .enumerate()
+            .map(|(number, line)| format!("{:>digits$}  {line}", number + 1))
+            .collect()
+    };
+    super::code_block(t, &mut page, &source, width);
+    page
 }
 
 fn or_none(value: &str) -> String {
@@ -283,6 +289,10 @@ fn group_digits(value: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    use ratatui::widgets::Widget;
+    use tui_kiso::Scroll;
 
     #[test]
     fn calls_are_found_outside_string_literals() {
@@ -322,9 +332,13 @@ mod tests {
             track_functions: "none".to_owned(),
             ..FunctionDef::default()
         };
-        let text: String = lines(&function)
-            .iter()
-            .map(|line| line.to_string() + "\n")
+        let theme = Theme::truecolor(kiso_tokens::GOLD_DARK);
+        let page = page(&theme, &function, 60);
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 62, 20));
+        page.view(&theme, &Scroll::default())
+            .render(Rect::new(0, 0, 60, 20), &mut buffer);
+        let text: String = (0..20)
+            .map(|y| (0..62).map(|x| buffer[(x, y)].symbol()).collect::<String>() + "\n")
             .collect();
         assert!(text.contains("track_functions = none"), "{text}");
     }
