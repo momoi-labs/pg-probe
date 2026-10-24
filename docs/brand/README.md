@@ -1,9 +1,8 @@
 # pg-probe brand
 
-The emblem is a solid elephant that sends a probe, three waves, to a
-database. The ear, the eye, and the tusk are cut out, so they show the
-background. The wordmark is "pg-probe" in JetBrains Mono Bold, converted to
-paths.
+The emblem is a solid elephant that sends a probe, three waves. The ear, the
+eye, and the tusk are cut out, so they show the background. The wordmark is
+"pg-probe" in JetBrains Mono Bold, converted to paths.
 
 ## Colors
 
@@ -11,7 +10,6 @@ paths.
 | --- | --- | --- |
 | Elephant and wordmark | `#1b1a1e` | `#eeece9` (Kiso foreground) |
 | Probe waves | `#9d7832` | `#cba65e` |
-| Database | `#4474a6` | `#4474a6` |
 
 ## Files
 
@@ -28,12 +26,10 @@ paths.
 ## In the console
 
 - The shell's brand draws the emblem with `PgProbeMark`, 32 px high. The
-  elephant takes the text color. The waves and the database keep the colors
-  above, in both themes. `docs/kiso.md` records why it replaces Kiso's
-  BrandMark.
-- `web/public/favicon.svg` is the elephant and the waves, without the
-  database, so it reads at 16 px. It switches to the dark colors when the
-  system uses a dark theme.
+  elephant takes the text color. The waves keep the colors above, in both
+  themes. `docs/kiso.md` records why it replaces Kiso's BrandMark.
+- `web/public/favicon.svg` is the emblem in a square viewBox, so it reads at
+  16 px. It switches to the dark colors when the system uses a dark theme.
 
 ## Use
 
@@ -41,7 +37,7 @@ paths.
   scripts, IDs, or fonts.
 - `currentColor` files take the CSS `color` when inlined. Through `<img>`, they
   are black.
-- The emblem is about twice as wide as it is high. Below 32 px high, use the
+- The emblem is about 5:3, wider than it is high. Below 32 px high, use the
   favicon instead.
 - JetBrains Mono is under the SIL Open Font License. Kiso uses it as its code
   font.

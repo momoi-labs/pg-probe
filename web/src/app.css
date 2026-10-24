@@ -141,9 +141,8 @@ p.report-notes {
 }
 
 /* The brand shows the pg-probe emblem where Kiso puts a BrandMark. It has the
-   height of a small control. The elephant takes the text color; the probe and
-   the database keep their brand colors in both themes. See Exceptions in
-   docs/kiso.md. */
+   height of a small control. The elephant takes the text color; the probe
+   keeps its brand colors in both themes. See Exceptions in docs/kiso.md. */
 .brand-emblem {
   flex: none;
   height: var(--size-control-sm);
@@ -152,7 +151,4 @@ p.report-notes {
 }
 .brand-emblem .brand-probe {
   fill: light-dark(#9d7832, #cba65e);
-}
-.brand-emblem .brand-database {
-  fill: #4474a6;
 }
