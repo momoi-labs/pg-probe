@@ -1,5 +1,13 @@
 # pg-probe
 
+## 0.2.1
+
+### Patch Changes
+
+- b973367: Release builds are smoke-tested with `pg-probe capture`. v0.2.0 was tagged
+  but not published, because the release smoke test still called the old
+  command line; this release ships the same changes.
+
 ## 0.2.0
 
 ### Minor Changes
