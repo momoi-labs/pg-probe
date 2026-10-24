@@ -34,11 +34,15 @@ case "$version_out" in
     ;;
 esac
 
-artifact_path="$("$binary" --domain linux --data-directory "$work_dir")"
-if [[ ! -f "$artifact_path" ]]; then
-  echo "snapshot did not produce an artifact at: ${artifact_path}" >&2
+# capture keeps stdout empty and logs the artifact path on stderr, so look
+# for the one artifact it wrote in the work directory.
+"$binary" capture --domain linux --data-directory "$work_dir" >/dev/null
+artifacts=("$work_dir"/*.sqlite.gz)
+if [[ ${#artifacts[@]} -ne 1 || ! -f "${artifacts[0]}" ]]; then
+  echo "snapshot did not produce exactly one artifact in: ${work_dir}" >&2
   exit 1
 fi
+artifact_path="${artifacts[0]}"
 
 case "$artifact_path" in
   *.sqlite.gz) ;;
