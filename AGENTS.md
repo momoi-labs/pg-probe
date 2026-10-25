@@ -16,7 +16,8 @@ one. To reverse a decision, add a new ADR and set `status: superseded` and
 
 A change that users can see, in the binary, the console or the report, ships
 with a changeset in the same pull request. See `docs/releases.md`. Check with
-`scripts/check-changeset.sh origin/main` before opening the pull request.
+`scripts/check-changeset.sh origin/main` before opening the pull request. It
+reads commits only, so commit the changeset first.
 
 ### Issue tracker
 

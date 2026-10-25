@@ -18,11 +18,14 @@ change in English. Commit the generated `.changeset/*.md` with the change.
 Use a patch for fixes and a minor for new behavior. Documentation-only changes
 need no changeset.
 
-The Changeset workflow fails a pull request that changes what ships in the
-binary (`src/`, `schema/`, `web/`, `build.rs`, `Cargo.toml` or `Cargo.lock`)
-without adding or editing a changeset. When users see no difference, such as
-a refactor or a test, add the `no-changeset` label instead. Run the same check
-locally with `scripts/check-changeset.sh origin/main`.
+The Changeset check fails on a pull request that changes what ships in the
+binary (`src/`, `schema/`, `web/`, `build.rs`, `Cargo.toml`, `Cargo.lock` or
+`rust-toolchain.toml`) without adding or editing a changeset. The sample
+artifacts in `web/dev-artifacts/` do not count. When users see no difference,
+such as a refactor or a test, add the `no-changeset` label instead. GitHub
+does not block the merge until the check is required in the branch rules, so
+until then a red check is a warning. Run the same check locally with
+`scripts/check-changeset.sh origin/main` after you commit the changeset.
 
 On `main`, the Version workflow opens or updates `chore: release pg-probe`.
 Review its changelog and version, wait for CI, then merge it. The PR updates

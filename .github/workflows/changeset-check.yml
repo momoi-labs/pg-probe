@@ -9,6 +9,9 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, labeled, unlabeled]
+  # The Version workflow runs this on the version PR, which consumes the
+  # changesets instead of adding one, so the check reports a pass there.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -20,19 +23,17 @@ concurrency:
 jobs:
   changeset:
     name: Changeset
-    # The version PR consumes the changesets instead of adding one.
-    if: >-
-      !startsWith(github.head_ref, 'changeset-release/')
-      && !contains(github.event.pull_request.labels.*.name, 'no-changeset')
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-changeset') }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Check out repository
         # actions/checkout@v4.2.2
         uses: useblacksmith/checkout@v1
         with:
-          fetch-depth: 0
+          fetch-depth: 2
 
       # A pull request checks out its merge commit, whose first parent is the
       # base.
       - name: Require a changeset
+        if: github.event_name == 'pull_request'
         run: scripts/check-changeset.sh HEAD^1 HEAD

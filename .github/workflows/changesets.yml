@@ -49,11 +49,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # Bot-created PRs do not trigger pull_request workflows with this token.
-      - name: Run CI on the version PR
+      - name: Run CI and the Changeset check on the version PR
         if: steps.changesets.outputs.pullRequestNumber != ''
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run ci.yml --ref changeset-release/main
+        run: |
+          gh workflow run ci.yml --ref changeset-release/main
+          gh workflow run changeset-check.yml --ref changeset-release/main
 
       # The action's publish detection expects CLI v2 output. Keep tagging
       # explicit so CLI v3 output and GitHub release creation are independent.
