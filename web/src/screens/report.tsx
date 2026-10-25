@@ -1,9 +1,7 @@
 import { useIsFetching } from '@tanstack/react-query'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { utcMinute } from '../format.tsx'
-import { useLocale, useT } from '../i18n.ts'
-import { useRange } from '../range.tsx'
+import { useLocale } from '../i18n.ts'
 import { Metrics } from './metrics.tsx'
 import { NotCollected } from './not-collected.tsx'
 import { Section } from './panels.tsx'
@@ -60,10 +58,8 @@ function useContents() {
 // so the charts draw at the size they print.
 export function Report() {
   const { print } = useSearch({ from: '/$snapshotId/report' })
-  const { range } = useRange()
   const contents = useContents()
   const locale = useLocale()
-  const t = useT()
   usePrintWhenReady(print)
   // The page language, for hyphenation and screen readers. The console is
   // English again once the report closes.
@@ -74,15 +70,10 @@ export function Report() {
     }
   }, [locale])
   return (
-    <div className="report">
-      <p className="muted">
-        {range
-          ? t('Charts cover {from} to {to}. Overview tiles cover the whole session.', {
-              from: utcMinute(new Date(range.from).toISOString()),
-              to: utcMinute(new Date(range.to).toISOString()),
-            })
-          : t('Charts cover the whole session.')}
-      </p>
+    // Paper takes no texture: in some PDF viewers a patterned fill prints as
+    // a grid. Without a fill, line charts draw only their lines, a stacked
+    // area keeps a flat tint, and a meter track is plain.
+    <div className="report" data-chart-fill="none">
       <Section title="Contents" className="report-contents">
         {contents.map((section) => (
           <section key={section.title}>

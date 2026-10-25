@@ -36,6 +36,9 @@ The light and `-mono` files have it; the `-dark` files do not.
   themes. `docs/kiso.md` records why it replaces Kiso's BrandMark.
 - `web/public/favicon.svg` is the emblem in a square viewBox, so it reads at
   16 px. It switches to the dark colors when the system uses a dark theme.
+- The printed report draws `PgProbeLockup` on its cover, and puts
+  `web/src/assets/lockup.svg`, a copy of `lockup.svg`, in the header of the
+  pages after it. Keep the two the same.
 
 ## Use
 

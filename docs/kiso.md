@@ -28,8 +28,11 @@ file has a bug.
 | `Panel` | A dashboard panel: a `DashboardPanel` with title, optional subtitle and badge. Its id is the title as a slug and must match its `Slot`. An anchor in the body is the target of Overview tile links |
 | `GapPanel` | A panel the artifact cannot draw yet. The badge names the missing work: `needs sampling`, `no collector`, `needs schema change` or `blocked` |
 | `ChartPanel` | A time series panel: a Kiso `Chart` in a pane, on the shared `session` sync id, where a click pins one time on every chart. The pane heading is the chart label, with measure and unit, and the chart hides its own caption. The legend table shows p50, p75, p95, p99, and the last sample instead of max and average. A drag across the plot sets the shared time range |
-| `NotSupportedPanel` | A panel whose metric the observed server or host cannot provide. An informational EmptyState: "Not supported on PostgreSQL 9.3" or "on this host", and why. The printed report leaves it out, since its cover lists the sources that are not available |
+| `NotSupportedPanel` | A panel whose metric the observed server or host cannot provide. An informational EmptyState: "Not supported on PostgreSQL 9.3" or "on this host", and why. The printed report leaves it out, since its Data coverage page lists the sources that are not available |
 | `ReportSheet` | A panel as a page of the printed report: one sentence on what the chart shows, an info Alert "What to look for", then the chart. The texts live in `web/src/explain.ts`, by panel id |
+| `ReportCover` | The first page of the printed report: a dark band with the lockup, the kind of report, the server and the capture period, then three Stat cards (duration, status, sources) and KV lists of the host, PostgreSQL and the capture. It sets the running header of the pages after it |
+| `DataCoverage` | The page after the cover, only when a source did not collect in full: tables of the sources that failed, that came in part, and that the host or server does not have, grouped by reason |
+| `PgProbeLockup` | The emblem and the wordmark, on the report cover |
 | `Note` | Muted text that says why a value is missing. Always visible |
 | `PgProbeMark` | The pg-probe emblem in the shell's brand. The brand kit is in `docs/brand/` |
 
@@ -78,7 +81,7 @@ file has a bug.
 | Snapshot header (`screens/snapshot.tsx`) | Dashboard page framing: PageHeader with the artifact Select, and an Alert for sources that were not collected |
 | Metrics (`screens/metrics.tsx`, `system.tsx`, `postgres.tsx`) | Dashboard, one Disclosure per section. System and PostgreSQL use `PanelGrid`. Overview tiles sit in the product `.tile-grid`: each tile is a whole-card link, and a pane head is a drag handle |
 | Queries (`screens/queries.tsx`) | Dashboard, `PanelGrid` |
-| Report (`screens/report.tsx`) | Report: the snapshot header as the cover with a `.report-kicker`, a linked contents page, then the shared section Disclosures, open. `PanelGrid` passes `static` and ignores the saved layout. Each chart or table prints on its own page. "Print report" in the snapshot header is a DropdownMenu of report languages; an item opens the report with `?lang=` and the print dialog |
+| Report (`screens/report.tsx`, `screens/cover.tsx`) | Report: `ReportCover` as the cover with a `.report-kicker`, `DataCoverage` for the unavailable sources, a linked contents page, then the shared section Disclosures, open. The report sets `data-chart-fill="none"`, so paper has no textured fill: line charts draw only their lines, a stacked area keeps a flat tint, and a meter track is plain. `PanelGrid` passes `static` and ignores the saved layout. Each chart or table prints on its own page. "Print report" in the snapshot header is a DropdownMenu of report languages; an item opens the report with `?lang=` and the print dialog |
 | Logs (`screens/not-collected.tsx`) | Empty states, informational |
 | No snapshots, list error (`screens/start.tsx`) | Empty states, first run; Errors |
 | `pg-probe top` (`src/top.rs`) | List-detail: the sessions of a view as a list, and a session's details as a page in place of the list. Help, functions and explain are dialogs |
@@ -137,6 +140,16 @@ each with its column title.
 - In print, the first block after the anchor in a report pane body has no
   top margin, since the anchor is an empty first child that Kiso's block
   spacing would count.
+- The report cover is a dark band that reaches the edges of the sheet, on a
+  page of its own with no margin, in place of a PageHeader. It carries the
+  lockup, which a client reads as the source of the document.
+- The report pages have 22mm side margins and a running header in their
+  margin boxes: the lockup and the server and period, over a rule. Since the
+  header already separates each page, section headings drop Kiso's primary
+  rule. The footer adds `pg-probe.dev` on the left.
+- The report names the unavailable sources on a Data coverage page after
+  the cover, not on the cover, since a host can lack more than ten.
+  Kiso's report pattern asks to name them on the cover.
 
 ## Verify
 

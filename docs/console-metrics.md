@@ -41,6 +41,25 @@ panel below that has the full chart.
 | WAL generated | As in WAL and buffer writes, last interval |
 | Replica lag | Largest `max_lag_bytes` across standbys |
 
+## Report cover
+
+The first page of the printed report. Its facts come from the first sample,
+except where the table says otherwise.
+
+| Fact | Value |
+| --- | --- |
+| Duration | Time from the start to the end of the capture |
+| Samples, every | Number of samples, and the most common time between two samples, in whole seconds |
+| Status | `complete`, or `partial` when the capture stopped early or a source failed |
+| Sources | Distinct sources in `collector_outcome`. A source failed when any of its outcomes is neither `collected` nor `unsupported`. Of the rest, a source with an `unsupported` outcome is in part when it also collected, and not available when it never did |
+| CPUs | CPUs online |
+| Memory | `MemTotal` |
+| Cluster size | Sum of the size of every database, templates included |
+| Tool | `collector_version` of the outcomes |
+
+The Data coverage page after the cover lists the failed, in part, and not
+available sources. It groups the not available sources by their error code.
+
 ## System
 
 | Panel | Source | How it is derived |

@@ -134,10 +134,160 @@ p.report-notes {
   --report-page: "Página ";
   --report-page-of: " de ";
 }
+/* The report pages carry a running header: the lockup and the server and
+   capture period, which the cover sets in --report-logo and
+   --report-running, over a rule. The footer names the site and the page. The side margins match the
+   cover, so the report is narrower than Kiso's 12mm default. */
+.report {
+  width: calc(210mm - 2 * 22mm);
+}
 @page report {
+  margin: 30mm 22mm 22mm;
+  @top-left {
+    content: var(--report-logo, "");
+    width: 40mm;
+    vertical-align: bottom;
+    padding-bottom: var(--spacing-md);
+    border-bottom: 1px solid var(--color-border);
+  }
+  @top-right {
+    content: var(--report-running, "");
+    width: 126mm;
+    vertical-align: bottom;
+    text-align: right;
+    padding-bottom: var(--spacing-md);
+    border-bottom: 1px solid var(--color-border);
+    font-family: var(--font-body);
+    font-size: var(--type-size-metadata);
+    color: var(--color-muted-foreground);
+  }
+  @bottom-left {
+    content: "pg-probe.dev";
+    vertical-align: top;
+    padding-top: var(--spacing-xl);
+    font-family: var(--font-body);
+    font-size: var(--type-size-metadata);
+    color: var(--color-muted-foreground);
+  }
   @bottom-right {
     content: var(--report-page, "Page ") counter(page) var(--report-page-of, " of ") counter(pages);
+    vertical-align: top;
+    padding-top: var(--spacing-xl);
   }
+}
+/* The running header is the rule above each section, so a section title
+   drops Kiso's primary rule. See Exceptions in docs/kiso.md. */
+.report > section > h2,
+.report > .disclosure > summary {
+  border-top: 0;
+  padding-top: 0;
+}
+
+/* The cover is a page of its own with no margin, so its band reaches the
+   edges of the sheet. On screen it is as wide as the report. */
+.report-cover {
+  width: calc(210mm - 2 * 22mm);
+  max-width: 100%;
+  break-after: page;
+}
+.report-cover-band {
+  display: grid;
+  gap: var(--spacing-md);
+  padding: var(--spacing-4xl) var(--spacing-2xl) var(--spacing-3xl);
+  background: var(--color-dark-900);
+  color: var(--color-dark-100);
+}
+.report-cover-logo {
+  height: var(--spacing-2xl);
+  width: auto;
+  margin-block-end: var(--spacing-4xl);
+}
+.report-cover-logo .brand-elephant {
+  stroke: none;
+}
+.report-cover-logo .brand-probe {
+  fill: #cba65e;
+}
+.report-cover-band .report-kicker {
+  color: var(--color-gold-400);
+}
+.report-cover-band h1 {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--type-size-editorial);
+  line-height: var(--type-line-height-tight);
+  overflow-wrap: anywhere;
+}
+.report-cover-period {
+  margin: 0;
+  font-size: var(--type-size-body-large);
+  color: var(--color-dark-300);
+}
+.report-cover-body {
+  display: grid;
+  gap: var(--spacing-2xl);
+  padding: var(--spacing-2xl);
+}
+.report-cover-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--presentation-grid-gap);
+}
+.report-cover-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-2xl);
+}
+.report-cover-facts h2 {
+  margin: 0 0 var(--spacing-sm);
+}
+@media (max-width: 640px) {
+  .report-cover-tiles,
+  .report-cover-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@page report-cover {
+  size: A4;
+  margin: 0;
+}
+@media print {
+  /* Chrome lays out every page as wide as the report pages, so the cover
+     sets the sheet width itself. */
+  .report-cover {
+    page: report-cover;
+    width: 210mm;
+    max-width: none;
+  }
+  .report-cover-band {
+    padding: 20mm 22mm 16mm;
+  }
+  .report-cover-body {
+    padding: 14mm 22mm;
+  }
+}
+
+/* The page after the cover that lists the sources with gaps. */
+.report-coverage {
+  display: grid;
+  gap: var(--spacing-md);
+  width: calc(210mm - 2 * 22mm);
+  max-width: 100%;
+  margin-block-end: var(--spacing-3xl);
+  break-after: page;
+}
+.report-coverage h2 {
+  margin: 0;
+  font-size: var(--presentation-page-title-size);
+}
+.report-coverage section {
+  display: grid;
+  gap: var(--spacing-sm);
+  margin-block-start: var(--spacing-lg);
+}
+.report-coverage h3,
+.report-coverage p {
+  margin: 0;
 }
 
 /* The brand shows the pg-probe emblem where Kiso puts a BrandMark. It has the

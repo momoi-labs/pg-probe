@@ -36,6 +36,7 @@ import { duration, utcMinute } from '../format.tsx'
 import { RangePicker, RangeProvider, runBounds } from '../range.tsx'
 import { localeNames, locales, useT } from '../i18n.ts'
 import { useInReport } from '../report.ts'
+import { DataCoverage, ReportCover } from './cover.tsx'
 
 function ArtifactPicker({ current }: { current: string }) {
   const navigate = useNavigate()
@@ -193,58 +194,62 @@ export function SnapshotLayout() {
           count: distinct(unsupported),
         })
 
+  // One RangeProvider for the console and the report, so the range a reader
+  // picked holds when the report opens. The printed report opens on its own
+  // cover, and on a page that lists the sources that did not collect in full.
   return (
     <RangeProvider artifact={snapshotId}>
-      <PageHeader
-        actions={
-          <>
-            {bounds && <RangePicker bounds={bounds} />}
-            <StatusBadge tone={snapshot.status === 'complete' ? 'success' : 'neutral'}>
-              {snapshot.status}
-            </StatusBadge>
-            <ArtifactPicker current={snapshotId} />
-            <PrintReport snapshotId={snapshotId} />
-          </>
-        }
-      >
-        {inReport && <p className="report-kicker">{t('PostgreSQL health report')}</p>}
-        <PageHeaderTitle>{snapshot.hostname ?? snapshot.file_name}</PageHeaderTitle>
-        <PageHeaderDescription>
-          <Subtitle id={snapshotId} /> ·{' '}
-          {took
-            ? t('captured {time} in {duration}', { time: utcMinute(snapshot.started_at_utc), duration: took })
-            : t('captured {time}', { time: utcMinute(snapshot.started_at_utc) })}
-          {sampleCount != null &&
-            ` · ${sampleCount === 1 ? t('1 sample') : t('{count} samples', { count: sampleCount })}`}
-        </PageHeaderDescription>
-      </PageHeader>
-      {failed.length > 0 && (
-        <Alert variant="warning">
-          <AlertContent>
-            <AlertTitle>
-              {distinct(failed) === 1
-                ? t('1 source failed')
-                : t('{count} sources failed', { count: distinct(failed) })}
-            </AlertTitle>
-            <AlertDescription>
-              {t(
-                'These sources have no data in this artifact. Panels that read them show an unknown value.',
-              )}
-            </AlertDescription>
-            {sourceList(failed)}
-          </AlertContent>
-        </Alert>
+      {inReport ? (
+        <>
+          <ReportCover snapshot={snapshot} outcomes={outcomes} samples={samples} />
+          <DataCoverage outcomes={outcomes} samples={samples} />
+        </>
+      ) : (
+        <>
+          <PageHeader
+            actions={
+              <>
+                {bounds && <RangePicker bounds={bounds} />}
+                <StatusBadge tone={snapshot.status === 'complete' ? 'success' : 'neutral'}>
+                  {snapshot.status}
+                </StatusBadge>
+                <ArtifactPicker current={snapshotId} />
+                <PrintReport snapshotId={snapshotId} />
+              </>
+            }
+          >
+            <PageHeaderTitle>{snapshot.hostname ?? snapshot.file_name}</PageHeaderTitle>
+            <PageHeaderDescription>
+              <Subtitle id={snapshotId} /> ·{' '}
+              {took
+                ? t('captured {time} in {duration}', { time: utcMinute(snapshot.started_at_utc), duration: took })
+                : t('captured {time}', { time: utcMinute(snapshot.started_at_utc) })}
+              {sampleCount != null &&
+                ` · ${sampleCount === 1 ? t('1 sample') : t('{count} samples', { count: sampleCount })}`}
+            </PageHeaderDescription>
+          </PageHeader>
+          {failed.length > 0 && (
+            <Alert variant="warning">
+              <AlertContent>
+                <AlertTitle>
+                  {distinct(failed) === 1
+                    ? t('1 source failed')
+                    : t('{count} sources failed', { count: distinct(failed) })}
+                </AlertTitle>
+                <AlertDescription>
+                  {t(
+                    'These sources have no data in this artifact. Panels that read them show an unknown value.',
+                  )}
+                </AlertDescription>
+                {sourceList(failed)}
+              </AlertContent>
+            </Alert>
+          )}
+          {unsupported.length > 0 && (
+            <Disclosure summary={unsupportedSummary}>{sourceList(unsupported)}</Disclosure>
+          )}
+        </>
       )}
-      {unsupported.length > 0 &&
-        // The report cover lists them in full, as text and not as a toggle.
-        (inReport ? (
-          <section className="stack-sm">
-            <h2 className="t-label">{unsupportedSummary}</h2>
-            {sourceList(unsupported)}
-          </section>
-        ) : (
-          <Disclosure summary={unsupportedSummary}>{sourceList(unsupported)}</Disclosure>
-        ))}
       <Outlet />
     </RangeProvider>
   )
