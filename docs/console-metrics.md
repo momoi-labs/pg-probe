@@ -80,9 +80,9 @@ available sources. It groups the not available sources by their error code.
 | Packets dropped and errors | `/proc/net/dev` | Change in `rx_dropped`, `tx_dropped`, `rx_errors` and `tx_errors` ÷ seconds, summed over the recorded interfaces |
 | Average read and write latency | `/proc/diskstats` | Change in `read_milliseconds` ÷ change in `reads_completed`, and the same for writes, per whole disk. The five disks with the most completed I/O in the session. An interval without I/O is a gap |
 | Average requests in flight | `/proc/diskstats` | Change in `weighted_io_milliseconds` ÷ milliseconds between samples, per whole disk, the same five disks |
-| Cgroup memory and swap | the probe's cgroup | `memory.current` and `memory.swap.current` (v2), or `memory.usage_in_bytes` and `memory.memsw.usage_in_bytes` less `memory.usage_in_bytes` (v1). v1 has swap only with swap accounting on |
+| Cgroup memory and swap | the probe's cgroup | `memory.current` and `memory.swap.current` (v2), or `memory.usage_in_bytes` and `memory.memsw.usage_in_bytes` less `memory.usage_in_bytes` (v1). v1 has swap only with swap accounting on, and no swap limit of its own |
 | Cgroup I/O | the probe's cgroup | Change in read and write bytes ÷ seconds, summed over devices. From `io.stat` (v2) or `blkio.io_service_bytes_recursive` (v1) |
-| Cgroup limit events | the probe's cgroup | Change per interval in `cpu.nr_throttled`, `memory.high`, `memory.max`, `memory.oom_kill` and `pids.max`, the ones the cgroup has. v1 has none of them, so the panel shows `cpuacct.usage` in microseconds |
+| Cgroup limit events | the probe's cgroup | Change per interval in `cpu.nr_throttled`, `memory.high`, `memory.max`, `memory.oom_kill` and `pids.max`, the ones the cgroup has. On v1 the probe records only `cpuacct.usage`, so the panel shows it in microseconds |
 
 ## PostgreSQL
 

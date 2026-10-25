@@ -337,8 +337,7 @@ fn collect_cgroup_limits(
             let memsw_current = read_cgroup_file_u64(&p.join("memory.memsw.usage_in_bytes"));
             let memsw_max = read_cgroup_file_u64(&p.join("memory.memsw.limit_in_bytes"));
             limits.swap_current_bytes = v1_swap_bytes(memsw_current, limits.memory_current_bytes);
-            (limits.swap_max_bytes, limits.swap_max_unlimited) =
-                v1_swap_limit(memsw_max, limits.memory_max_bytes);
+            limits.swap_max_unlimited = v1_swap_unlimited(memsw_max);
         }
 
         if let Some(p) = resolve_cgroup_v1_path("pids") {
@@ -664,19 +663,13 @@ fn v1_swap_bytes(memsw: Option<u64>, memory: Option<u64>) -> Option<u64> {
     Some(memsw?.saturating_sub(memory?))
 }
 
-/// The swap limit on cgroup v1, from the memory and swap limit less the
-/// memory limit, and whether it is unlimited. Without a memory limit, swap
-/// alone has no limit to report.
-fn v1_swap_limit(memsw_max: Option<u64>, memory_max: Option<u64>) -> (Option<u64>, Option<bool>) {
-    const UNLIMITED: u64 = 0x7FFF_FFFF_FFFF_F000;
-    match (memsw_max, memory_max) {
-        (None, _) => (None, None),
-        (Some(memsw), _) if memsw >= UNLIMITED => (None, Some(true)),
-        (Some(memsw), Some(memory)) if memory < UNLIMITED => {
-            (Some(memsw.saturating_sub(memory)), Some(false))
-        }
-        (Some(_), _) => (None, Some(false)),
-    }
+/// Whether swap is unlimited on cgroup v1. v1 limits memory and swap
+/// together, so it has no swap-only limit to report: when the combined limit
+/// is set, the swap limit stays unknown.
+fn v1_swap_unlimited(memsw_max: Option<u64>) -> Option<bool> {
+    memsw_max
+        .filter(|&v| v >= 0x7FFF_FFFF_FFFF_F000)
+        .map(|_| true)
 }
 
 #[cfg(test)]
@@ -692,21 +685,10 @@ mod tests {
     }
 
     #[test]
-    fn v1_swap_limit_from_memsw_limit() {
-        let unlimited = 0x7FFF_FFFF_FFFF_F000;
-        assert_eq!(
-            v1_swap_limit(Some(3 << 30), Some(2 << 30)),
-            (Some(1 << 30), Some(false))
-        );
-        assert_eq!(
-            v1_swap_limit(Some(unlimited), Some(2 << 30)),
-            (None, Some(true))
-        );
-        assert_eq!(
-            v1_swap_limit(Some(3 << 30), Some(unlimited)),
-            (None, Some(false))
-        );
-        assert_eq!(v1_swap_limit(None, Some(2 << 30)), (None, None));
+    fn v1_swap_has_no_limit_of_its_own() {
+        assert_eq!(v1_swap_unlimited(Some(0x7FFF_FFFF_FFFF_F000)), Some(true));
+        assert_eq!(v1_swap_unlimited(Some(3 << 30)), None);
+        assert_eq!(v1_swap_unlimited(None), None);
     }
 
     #[test]

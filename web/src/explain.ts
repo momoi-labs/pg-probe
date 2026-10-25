@@ -88,7 +88,7 @@ export const explain: Record<string, Explain> = {
   },
   'cgroup-events': {
     shows:
-      'Change per interval of the limit counters of the cgroup of the probe, named controller.counter: cpu.nr_throttled, memory.high, memory.max, memory.oom_kill and pids.max. Cgroup v1 has none of them, so there the chart shows CPU usage, in microseconds of CPU time.',
+      'Change per interval of the limit counters of the cgroup of the probe, named controller.counter: cpu.nr_throttled, memory.high, memory.max, memory.oom_kill and pids.max. On cgroup v1, pg-probe records only CPU usage for now, so there the chart shows it, in microseconds of CPU time.',
     look: 'cpu.nr_throttled above zero means the CPU limit of the cgroup paused its tasks. memory.high counts times the kernel throttled the cgroup and reclaimed memory at its soft limit, which never kills a process. memory.max counts times the cgroup reached its hard limit. The kernel kills a process only when reclaim fails there, and memory.oom_kill counts those kills. When a PostgreSQL backend is killed, the server ends every session and runs crash recovery. pids.max means the cgroup could not start a process, so new connections fail.',
   },
   'connections-by-state': {
