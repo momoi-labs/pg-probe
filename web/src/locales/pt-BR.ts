@@ -42,7 +42,7 @@ const translation: Translation = {
     'Cgroup events': 'Eventos do cgroup',
     'Cgroup limit events per interval': 'Eventos de limite do cgroup por intervalo',
     'Cgroup memory': 'Memória do cgroup',
-    'Charts cover': 'Os gráficos cobrem',
+    'Charts cover': 'Período dos gráficos',
     'Checkpoint writes': 'Gravações do checkpoint',
     'Checksum failures': 'Falhas de checksum',
     'Client connections by state': 'Conexões de clientes por estado',
@@ -84,7 +84,7 @@ const translation: Translation = {
       'Cada valor é a última amostra, ou o último intervalo no caso de taxas. Os picos cobrem toda a coleta.',
     Endpoint: 'Endpoint',
     Error: 'Erro',
-    Extends: 'Extensões',
+    Extends: 'Extends',
     Failed: 'Falhas',
     Fatal: 'Fatal',
     'Filesystem usage': 'Uso do sistema de arquivos',
@@ -94,6 +94,7 @@ const translation: Translation = {
     'I/O by operation': 'I/O por operação',
     'I/O by operation, all backends (MiB/s)': 'I/O por operação, todos os backends (MiB/s)',
     'I/O wait': 'Espera de I/O',
+    Lock: 'Lock',
     'It also needs track_io_timing on the server.': 'Também requer track_io_timing ligado no servidor.',
     Kernel: 'Kernel',
     Killed: 'Terminadas',
@@ -126,7 +127,7 @@ const translation: Translation = {
     Metrics: 'Métricas',
     'Most expensive statements': 'Comandos mais caros',
     'Needs a new postgres.stats.statements collector, after the decision on whether query text may enter the artifact.':
-      'Requer um novo coletor postgres.stats.statements, depois da decisão sobre se o texto das consultas pode entrar no artefato.',
+      'Requer um novo coletor postgres.stats.statements, depois de decidirmos se o texto das consultas pode entrar no artefato.',
     'Network drops and errors': 'Descartes e erros de rede',
     'Network throughput': 'Vazão de rede',
     'Network throughput, all interfaces (MiB/s)': 'Vazão de rede, todas as interfaces (MiB/s)',
@@ -206,7 +207,7 @@ const translation: Translation = {
     'Some databases do not accept connections': 'Alguns bancos de dados não aceitam conexões',
     'Some databases were not visited: {reason}.': 'Alguns bancos de dados não foram visitados: {reason}.',
     'Some of the data came in. The rest is expected to be missing.':
-      'Parte dos dados foi coletada. É esperado que o resto falte.',
+      'Parte dos dados foi coletada. A falta do restante é esperada.',
     Source: 'Fonte',
     Sources: 'Fontes',
     'Standby conflicts': 'Conflitos no standby',
@@ -237,7 +238,7 @@ const translation: Translation = {
       'A captura parou antes do fim, ou uma fonte falhou.',
     'The host has no /etc/os-release': 'O host não tem /etc/os-release',
     'The kernel has no pressure stall information (PSI)':
-      'O kernel não tem pressure stall information (PSI)',
+      'O kernel não oferece pressure stall information (PSI)',
     'The kernel has no transparent huge pages settings':
       'O kernel não tem as configurações de transparent huge pages',
     'The source exists on this host, but pg-probe could not read it. Fix the cause and capture again.':
@@ -340,7 +341,7 @@ const translation: Translation = {
     'cpu-utilization': {
       shows:
         'Parcela do tempo de CPU em cada estado, na média de todas as CPUs. Usuário é o tempo em programas como os backends do PostgreSQL, e Sistema é o tempo no kernel. Espera de I/O é tempo ocioso enquanto havia uma requisição de disco pendente. Steal é o tempo que o hypervisor deu a outras máquinas virtuais.',
-      look: 'Some Usuário e Sistema para obter o tempo ocupado. Quando o tempo ocupado fica acima de 80% por minutos, verifique a Carga média. Uma carga acima do número de CPUs no mesmo período pode indicar que consultas esperaram por um núcleo, mas a carga do Linux também conta tarefas que esperam pelo disco. Um p95 perto de 100% com um p50 baixo na tabela indica picos curtos, não uma falta constante. Espera de I/O acima de 10% indica que as CPUs ficaram ociosas enquanto havia requisições de disco pendentes, então verifique os gráficos de latência. Steal acima de alguns por cento indica que a instância divide suas CPUs com vizinhos ocupados.',
+      look: 'Some Usuário e Sistema para obter o tempo de CPU ocupado. Quando o tempo ocupado fica acima de 80% por minutos, verifique a Carga média. Uma carga acima do número de CPUs no mesmo período pode indicar que consultas esperaram por um núcleo, mas a carga do Linux também conta tarefas que esperam pelo disco. Um p95 perto de 100% com um p50 baixo na tabela indica picos curtos, não uma falta constante de CPU. Espera de I/O acima de 10% indica que as CPUs ficaram ociosas enquanto havia requisições de disco pendentes, então verifique os gráficos de latência. Steal acima de alguns por cento indica que a instância divide suas CPUs com vizinhos ocupados.',
     },
     'load-average': {
       shows:
@@ -350,7 +351,7 @@ const translation: Translation = {
     memory: {
       shows:
         'Como o host usou a RAM. Em uso é a memória ocupada por programas. Memória compartilhada inclui o shared_buffers do PostgreSQL. Cache de páginas são dados de arquivos que o kernel mantém para leituras rápidas, e Buffers são metadados do sistema de arquivos. Livre é a memória que ninguém usa.',
-      look: 'Pouca memória Livre, por si só, é normal, porque o Linux ocupa a memória sobrando com cache de páginas. O sinal de alerta é um cache de páginas que encolhe enquanto Em uso cresce. O PostgreSQL então encontra menos dados na memória e lê mais do disco. Leia este gráfico junto com Taxa de acerto do cache e Swap em uso.',
+      look: 'Pouca memória Livre, por si só, é normal, porque o Linux ocupa a memória que sobra com cache de páginas. O sinal de alerta é um cache de páginas que encolhe enquanto Em uso cresce. O PostgreSQL então encontra menos dados na memória e lê mais do disco. Leia este gráfico junto com Taxa de acerto do cache e Swap em uso.',
     },
     'swap-in-use': {
       shows: 'Espaço de swap em uso no host.',
@@ -363,7 +364,7 @@ const translation: Translation = {
     'disk-utilization': {
       shows:
         'Parcela do tempo em que cada um dos cinco discos mais ocupados teve pelo menos uma requisição em andamento.',
-      look: 'Em um único disco rotativo, valores perto de 100% indicam que o disco está saturado. SSDs, arrays RAID e volumes na nuvem atendem muitas requisições ao mesmo tempo, então podem mostrar 100% e ainda ter folga. Nesses casos, confie mais na latência de leitura e de gravação do que neste gráfico.',
+      look: 'Em um único HDD, valores perto de 100% indicam que o disco está saturado. SSDs, arrays RAID e volumes na nuvem atendem muitas requisições ao mesmo tempo, então podem mostrar 100% e ainda ter folga. Nesses casos, confie mais na latência de leitura e de gravação do que neste gráfico.',
     },
     'pressure-stall': {
       shows:
@@ -372,7 +373,7 @@ const translation: Translation = {
     },
     'filesystem-usage': {
       shows: 'Espaço usado em cada sistema de arquivos local no momento da captura.',
-      look: 'Acima de 85% no sistema de arquivos de dados ou de WAL, sobra pouco espaço para crescimento, arquivos temporários e rajadas de WAL. Se o sistema de arquivos do WAL encher, o PostgreSQL é desligado.',
+      look: 'Acima de 85% no sistema de arquivos de dados ou de WAL, sobra pouco espaço para crescimento, arquivos temporários e rajadas de WAL. Se o sistema de arquivos do WAL encher, o PostgreSQL para.',
     },
     'network-throughput': {
       shows: 'Bytes recebidos e enviados por segundo, somando todas as interfaces.',
@@ -402,7 +403,7 @@ const translation: Translation = {
     },
     'disk-read-latency': {
       shows: 'Tempo médio de uma requisição de leitura em cada um dos cinco discos mais ocupados, em milissegundos.',
-      look: 'SSDs locais costumam responder em menos de 1 ms, volumes na nuvem em 1 a 5 ms e discos rotativos em 5 a 15 ms. Valores na casa das dezenas de ms que persistem indicam que o disco estava sobrecarregado ou limitado. O p95 na tabela mostra o quanto os piores intervalos foram lentos.',
+      look: 'SSDs locais costumam responder em menos de 1 ms, volumes na nuvem em 1 a 5 ms e HDDs em 5 a 15 ms. Valores na casa das dezenas de ms que persistem indicam que o disco estava sobrecarregado ou limitado. O p95 na tabela mostra o quanto os piores intervalos foram lentos.',
     },
     'disk-write-latency': {
       shows: 'Tempo médio de uma requisição de gravação em cada um dos cinco discos mais ocupados, em milissegundos.',
@@ -429,7 +430,7 @@ const translation: Translation = {
     'connections-by-state': {
       shows:
         'Conexões de clientes em cada amostra, por estado. Conexões active executam uma consulta. Conexões idle esperam pelo cliente. Conexões idle in transaction têm uma transação aberta, mas não executam nada.',
-      look: 'Conexões active muito acima do número de CPUs indicam que as consultas disputam núcleos. Conexões idle in transaction que se prolongam seguram locks e impedem o vacuum de remover tuplas mortas. Compare o total com max_connections no indicador Conexões. Muitas conexões idle sugerem um pooler de conexões.',
+      look: 'Conexões active muito acima do número de CPUs indicam que as consultas disputam núcleos. Conexões idle in transaction que se prolongam seguram locks e impedem o vacuum de remover tuplas mortas. Compare o total com max_connections no indicador Conexões. Muitas conexões idle sugerem usar um pooler de conexões.',
     },
     'cache-hit-ratio': {
       shows:
@@ -471,7 +472,7 @@ const translation: Translation = {
     },
     'lock-waits': {
       shows: 'Pedidos de lock em espera em cada amostra, por tipo de lock.',
-      look: 'Esperas curtas vêm e vão em um servidor ocupado. Uma contagem que fica acima de zero indica que sessões bloqueiam umas às outras. Esperas do tipo relation costumam vir de DDL ou LOCK TABLE. Esperas do tipo transactionid indicam linhas com lock de uma transação longa.',
+      look: 'Esperas curtas vêm e vão em um servidor ocupado. Uma contagem que fica acima de zero indica que sessões bloqueiam umas às outras. Esperas do tipo relation costumam vir de DDL ou LOCK TABLE. Esperas do tipo transactionid indicam linhas bloqueadas por uma transação longa.',
     },
     'longest-lock-wait': {
       shows: 'O maior tempo que qualquer pedido esperou por um lock em cada amostra, em segundos.',
@@ -512,7 +513,7 @@ const translation: Translation = {
     },
     'wal-archiving': {
       shows: 'Arquivos WAL arquivados, e falhas de arquivamento, por intervalo, de pg_stat_archiver.',
-      look: 'Qualquer falha indica que o arquivamento está atrasado, e a recuperação point in time não consegue passar do último arquivo arquivado. O PostgreSQL mantém todo arquivo WAL que não conseguiu arquivar, então o pg_wal cresce até o comando de arquivamento voltar a funcionar e pode encher o disco. Os arquivos arquivados devem acompanhar o WAL gerado.',
+      look: 'Qualquer falha indica que o arquivamento está atrasado, e a point-in-time recovery (PITR) não consegue passar do último arquivo arquivado. O PostgreSQL mantém todo arquivo WAL que não conseguiu arquivar, então o pg_wal cresce até o comando de arquivamento voltar a funcionar e pode encher o disco. Os arquivos arquivados devem acompanhar o WAL gerado.',
     },
     'replication-slots': {
       shows:
@@ -522,12 +523,12 @@ const translation: Translation = {
     'slru-reads': {
       shows:
         'Blocos lidos do disco por segundo pelos caches SLRU. Esses caches pequenos guardam o status das transações, subtransações, multixacts e timestamps de commit.',
-      look: 'Valores perto de zero são normais. Leituras constantes de subtransações vêm do uso intenso de savepoints ou de blocos de exceção em PL/pgSQL, e podem deixar o servidor inteiro lento. Leituras de multixact vêm de muitas sessões aplicando lock nas mesmas linhas, por exemplo com SELECT FOR SHARE ou chaves estrangeiras.',
+      look: 'Valores perto de zero são normais. Leituras constantes de subtransações vêm do uso intenso de savepoints ou de blocos de exceção em PL/pgSQL, e podem deixar o servidor inteiro lento. Leituras de multixact vêm de muitas sessões que fazem lock das mesmas linhas, por exemplo com SELECT FOR SHARE ou chaves estrangeiras.',
     },
     'i-o-by-operation': {
       shows:
-        'Dados lidos, gravados e estendidos por segundo por todos os backends, de pg_stat_io. Extensões são blocos novos adicionados ao fim de um arquivo de tabela ou de índice.',
-      look: 'Leituras grandes apontam para varreduras de tabelas que não cabem na memória. As gravações devem acompanhar os checkpoints e o background writer, então compare com Gravações de WAL e checkpoint. Extensões constantes são normais em tabelas que crescem.',
+        'Dados lidos, gravados e estendidos por segundo por todos os backends, de pg_stat_io. Extends são blocos novos adicionados ao fim de um arquivo de tabela ou de índice.',
+      look: 'Leituras grandes apontam para varreduras de tabelas que não cabem na memória. As gravações devem acompanhar os checkpoints e o background writer, então compare com Gravações de WAL e checkpoint. Extends constantes são normais em tabelas que crescem.',
     },
     rows: {
       shows:

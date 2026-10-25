@@ -42,16 +42,16 @@ const translation: Translation = {
     'Cgroup events': 'Eventos del cgroup',
     'Cgroup limit events per interval': 'Eventos de límite del cgroup por intervalo',
     'Cgroup memory': 'Memoria del cgroup',
-    'Charts cover': 'Los gráficos cubren',
+    'Charts cover': 'Periodo de los gráficos',
     'Checkpoint writes': 'Escrituras del checkpoint',
     'Checksum failures': 'Fallos de checksum',
     'Client connections by state': 'Conexiones de clientes por estado',
     'Cluster size': 'Tamaño del clúster',
-    'Collected in full.': 'Recogidas por completo.',
-    'Collected in part': 'Recogidas en parte',
+    'Collected in full.': 'Recopiladas por completo.',
+    'Collected in part': 'Recopiladas en parte',
     'Collected, {count} of them in part. See page 2.':
-      'Recogidas, {count} de ellas en parte. Consulta la página 2.',
-    'Collected. See page 2.': 'Recogidas. Consulta la página 2.',
+      'Recopiladas, {count} de ellas en parte. Consulte la página 2.',
+    'Collected. See page 2.': 'Recopiladas. Consulte la página 2.',
     Commits: 'Commits',
     Complete: 'Completa',
     'Connected as': 'Conectado como',
@@ -84,7 +84,7 @@ const translation: Translation = {
       'Cada valor es la última muestra, o el último intervalo en el caso de las tasas. Los picos cubren toda la captura.',
     Endpoint: 'Endpoint',
     Error: 'Error',
-    Extends: 'Extensiones',
+    Extends: 'Extends',
     Failed: 'Fallos',
     Fatal: 'Fatal',
     'Filesystem usage': 'Uso del sistema de ficheros',
@@ -94,6 +94,7 @@ const translation: Translation = {
     'I/O by operation': 'I/O por operación',
     'I/O by operation, all backends (MiB/s)': 'I/O por operación, todos los backends (MiB/s)',
     'I/O wait': 'Espera de I/O',
+    Lock: 'Bloqueo',
     'It also needs track_io_timing on the server.': 'También necesita track_io_timing activado en el servidor.',
     Kernel: 'Kernel',
     Killed: 'Terminadas',
@@ -206,7 +207,7 @@ const translation: Translation = {
     'Some databases do not accept connections': 'Algunas bases de datos no aceptan conexiones',
     'Some databases were not visited: {reason}.': 'Algunas bases de datos no se visitaron: {reason}.',
     'Some of the data came in. The rest is expected to be missing.':
-      'Parte de los datos se recogió. Es normal que falte el resto.',
+      'Se recopiló parte de los datos. Es normal que falte el resto.',
     Source: 'Fuente',
     Sources: 'Fuentes',
     'Standby conflicts': 'Conflictos en standby',
@@ -229,19 +230,19 @@ const translation: Translation = {
     'Temporary files written': 'Ficheros temporales escritos',
     'Temporary files written (MiB/s)': 'Ficheros temporales escritos (MiB/s)',
     'The PostgreSQL cgroup has no I/O statistics':
-      'El cgroup de PostgreSQL no tiene estadísticas de E/S',
+      'El cgroup de PostgreSQL no tiene estadísticas de I/O',
     'The PostgreSQL cgroup has no events file':
-      'El cgroup de PostgreSQL no tiene el archivo de eventos',
+      'El cgroup de PostgreSQL no tiene el fichero de eventos',
     'The capture ran to the end.': 'La captura llegó hasta el final.',
     'The capture stopped early, or a source failed.':
       'La captura se detuvo antes del final, o una fuente falló.',
     'The host has no /etc/os-release': 'El host no tiene /etc/os-release',
     'The kernel has no pressure stall information (PSI)':
-      'El kernel no tiene pressure stall information (PSI)',
+      'El kernel no ofrece pressure stall information (PSI)',
     'The kernel has no transparent huge pages settings':
       'El kernel no tiene los ajustes de transparent huge pages',
     'The source exists on this host, but pg-probe could not read it. Fix the cause and capture again.':
-      'La fuente existe en este host, pero pg-probe no pudo leerla. Corrige la causa y vuelve a capturar.',
+      'La fuente existe en este host, pero pg-probe no pudo leerla. Corrija la causa y vuelva a capturar.',
     'The whole session': 'Toda la captura',
     'These databases do not accept connections: {names}':
       'Estas bases de datos no aceptan conexiones: {names}',
@@ -300,7 +301,7 @@ const translation: Translation = {
     'percentiles across the window': 'percentiles en la ventana',
     permission_denied: 'permiso denegado',
     'pg-probe read {total} sources. {full} collected in full. Charts show the rest as unknown, never as zero.':
-      'pg-probe leyó {total} fuentes. {full} se recogieron por completo. Los gráficos muestran el resto como desconocido, nunca como cero.',
+      'pg-probe leyó {total} fuentes. {full} se recopilaron por completo. Los gráficos muestran el resto como desconocido, nunca como cero.',
     'pg_stat_statements is installed in {databases}. The artifact does not read it yet.':
       'pg_stat_statements está instalado en {databases}. El artefacto todavía no lee esos datos.',
     'pg_stat_statements is not installed in any database the probe visited.':
@@ -314,7 +315,7 @@ const translation: Translation = {
     'some, 10s window': 'some, ventana de 10s',
     standby: 'standby',
     'stated, never guessed': 'declarado, nunca supuesto',
-    unsupported: 'no soportado',
+    unsupported: 'no admitido',
     'vacuum backlog, top 6': 'vacuum pendiente, top 6',
     '{collected} of {total} sources': '{collected} de {total} fuentes',
     '{count} CPUs online': '{count} CPU en línea',
@@ -328,7 +329,7 @@ const translation: Translation = {
     '{disk}, the busiest disk': '{disk}, el disco más ocupado',
     '{from} to {to} UTC': 'de {from} a {to} UTC',
     '{full} of {total} collected in full. See page 2.':
-      '{full} de {total} recogidas por completo. Consulta la página 2.',
+      '{full} de {total} recopiladas por completo. Consulte la página 2.',
     '{label}: open the {chart} chart': '{label}: abrir el gráfico {chart}',
     '{label}: summary': '{label}: resumen',
     '{used} of {total}': '{used} de {total}',
@@ -363,7 +364,7 @@ const translation: Translation = {
     'disk-utilization': {
       shows:
         'Proporción del tiempo en que cada uno de los cinco discos más ocupados tuvo al menos una petición en curso.',
-      look: 'En un único disco mecánico, valores cerca del 100% indican que el disco está saturado. Los SSD, los arrays RAID y los volúmenes en la nube atienden muchas peticiones a la vez, así que pueden mostrar el 100% y aún tener margen. En esos casos, fíese más de la latencia de lectura y escritura que de este gráfico.',
+      look: 'En un único HDD, valores cerca del 100% indican que el disco está saturado. Los SSD, los arrays RAID y los volúmenes en la nube atienden muchas peticiones a la vez, así que pueden mostrar el 100% y aún tener margen. En esos casos, fíese más de la latencia de lectura y escritura que de este gráfico.',
     },
     'pressure-stall': {
       shows:
@@ -402,7 +403,7 @@ const translation: Translation = {
     },
     'disk-read-latency': {
       shows: 'Tiempo medio de una petición de lectura en cada uno de los cinco discos más ocupados, en milisegundos.',
-      look: 'Los SSD locales suelen responder en menos de 1 ms, los volúmenes en la nube en 1 a 5 ms y los discos mecánicos en 5 a 15 ms. Valores de decenas de ms que se mantienen indican que el disco estaba sobrecargado o limitado. El p95 de la tabla muestra lo lentos que fueron los peores intervalos.',
+      look: 'Los SSD locales suelen responder en menos de 1 ms, los volúmenes en la nube en 1 a 5 ms y los HDD en 5 a 15 ms. Valores de decenas de ms que se mantienen indican que el disco estaba sobrecargado o limitado. El p95 de la tabla muestra lo lentos que fueron los peores intervalos.',
     },
     'disk-write-latency': {
       shows: 'Tiempo medio de una petición de escritura en cada uno de los cinco discos más ocupados, en milisegundos.',
@@ -471,7 +472,7 @@ const translation: Translation = {
     },
     'lock-waits': {
       shows: 'Solicitudes de bloqueo en espera en cada muestra, por tipo de bloqueo.',
-      look: 'Las esperas cortas van y vienen en un servidor ocupado. Una cuenta que se mantiene por encima de cero indica que las sesiones se bloquean entre sí. Las esperas de tipo relation suelen venir de DDL o de LOCK TABLE. Las esperas de tipo transactionid indican filas bloqueadas por una transacción larga.',
+      look: 'Las esperas cortas van y vienen en un servidor ocupado. Un recuento que se mantiene por encima de cero indica que las sesiones se bloquean entre sí. Las esperas de tipo relation suelen venir de DDL o de LOCK TABLE. Las esperas de tipo transactionid indican filas bloqueadas por una transacción larga.',
     },
     'longest-lock-wait': {
       shows: 'El mayor tiempo que cualquier solicitud llevaba esperando un bloqueo en cada muestra, en segundos.',
@@ -479,7 +480,7 @@ const translation: Translation = {
     },
     'locks-held': {
       shows: 'Bloqueos mantenidos en cada muestra, por modo de bloqueo.',
-      look: 'AccessShareLock viene de lecturas simples y es normal. AccessExclusiveLock bloquea toda lectura y escritura en su tabla. Lo toman DDL, VACUUM FULL, TRUNCATE y algunos comandos ALTER TABLE. Una cuenta alta y sostenida de cualquier modo puede indicar transacciones largas.',
+      look: 'AccessShareLock viene de lecturas simples y es normal. AccessExclusiveLock bloquea toda lectura y escritura en su tabla. Lo toman DDL, VACUUM FULL, TRUNCATE y algunos comandos ALTER TABLE. Un recuento alto y sostenido de cualquier modo puede indicar transacciones largas.',
     },
     'longest-time-in-state': {
       shows:
@@ -512,7 +513,7 @@ const translation: Translation = {
     },
     'wal-archiving': {
       shows: 'Ficheros WAL archivados, y fallos de archivado, por intervalo, de pg_stat_archiver.',
-      look: 'Cualquier fallo indica que el archivado se retrasa, y la recuperación a un punto en el tiempo no puede ir más allá del último fichero archivado. PostgreSQL conserva cada fichero WAL que no pudo archivar, así que pg_wal crece hasta que el comando de archivado vuelve a funcionar y puede llenar el disco. Los ficheros archivados deberían seguir el ritmo del WAL generado.',
+      look: 'Cualquier fallo indica que el archivado se retrasa, y la recuperación point-in-time (PITR) no puede ir más allá del último fichero archivado. PostgreSQL conserva cada fichero WAL que no pudo archivar, así que pg_wal crece hasta que el comando de archivado vuelve a funcionar y puede llenar el disco. Los ficheros archivados deberían seguir el ritmo del WAL generado.',
     },
     'replication-slots': {
       shows:
@@ -526,8 +527,8 @@ const translation: Translation = {
     },
     'i-o-by-operation': {
       shows:
-        'Datos leídos, escritos y extendidos por segundo por todos los backends, de pg_stat_io. Las extensiones son bloques nuevos añadidos al final de un fichero de tabla o de índice.',
-      look: 'Las lecturas grandes apuntan a escaneos de tablas que no caben en memoria. Las escrituras deberían seguir a los checkpoints y al background writer, así que compare con Escrituras de WAL y checkpoint. Las extensiones constantes son normales en tablas que crecen.',
+        'Datos leídos, escritos y extendidos por segundo por todos los backends, de pg_stat_io. Los extends son bloques nuevos añadidos al final de un fichero de tabla o de índice.',
+      look: 'Las lecturas grandes apuntan a escaneos de tablas que no caben en memoria. Las escrituras deberían seguir a los checkpoints y al background writer, así que compare con Escrituras de WAL y checkpoint. Los extends constantes son normales en tablas que crecen.',
     },
     rows: {
       shows:
