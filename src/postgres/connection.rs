@@ -459,10 +459,16 @@ fn resolve_config_with(
         }
     }
 
+    // A `hostaddr` in the conninfo string is where the client connects. It
+    // also names the host, since TLS needs a name for the server.
     if config.get_hosts().is_empty() {
         match host {
             Some(host) => {
                 config.host(&host);
+            }
+            None if !config.get_hostaddrs().is_empty() => {
+                let address = config.get_hostaddrs()[0].to_string();
+                config.host(&address);
             }
             None => {
                 let port = config.get_ports().first().copied().unwrap_or(5432);
@@ -824,7 +830,16 @@ impl ServerCertVerifier for AnyName {
     }
 }
 
+/// The address the client connects to. A `hostaddr` wins over the host, as
+/// in the client, and always means TCP.
 fn endpoint_from_config(config: &Config) -> Result<EndpointIdentity, AdapterError> {
+    if let Some(address) = config.get_hostaddrs().first() {
+        return Ok(EndpointIdentity {
+            endpoint_kind: EndpointKind::Tcp,
+            host: address.to_string(),
+            port: Some(config.get_ports().first().copied().unwrap_or(5432)),
+        });
+    }
     let host = config
         .get_hosts()
         .first()
@@ -1199,6 +1214,29 @@ mod tests {
         .unwrap()
         .0;
         assert_eq!(config.get_ports(), [5433]);
+    }
+
+    #[test]
+    fn hostaddr_means_tcp_even_with_a_socket_present() {
+        let with_socket = tempfile::tempdir().unwrap();
+        std::fs::write(with_socket.path().join(".s.PGSQL.5432"), b"").unwrap();
+        for dbname in [
+            "hostaddr=127.0.0.1 sslmode=require",
+            "host=/var/run/postgresql hostaddr=127.0.0.1",
+        ] {
+            let (config, _) = resolve_config_with(
+                &ConnectionParams {
+                    dbname: Some(dbname.to_owned()),
+                    ..ConnectionParams::default()
+                },
+                &[with_socket.path().to_str().unwrap()],
+                &|_| None,
+            )
+            .unwrap();
+            let endpoint = endpoint_from_config(&config).unwrap();
+            assert_eq!(endpoint.endpoint_kind, EndpointKind::Tcp, "{dbname}");
+            assert_eq!(endpoint.host, "127.0.0.1", "{dbname}");
+        }
     }
 
     #[test]
