@@ -13,7 +13,7 @@ const en = {
   nav: {
     how: 'How it works',
     report: 'Report',
-    top: 'Live view',
+    top: 'Live metrics',
   },
   hero: {
     eyebrow: 'For PostgreSQL engineers',

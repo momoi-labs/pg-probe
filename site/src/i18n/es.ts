@@ -13,7 +13,7 @@ const es: Dictionary = {
   nav: {
     how: 'Cómo funciona',
     report: 'Informe',
-    top: 'En directo',
+    top: 'Métricas en vivo',
   },
   hero: {
     eyebrow: 'Para quien trabaja con PostgreSQL',

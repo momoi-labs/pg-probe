@@ -13,7 +13,7 @@ const ptBR: Dictionary = {
   nav: {
     how: 'Como funciona',
     report: 'Relatório',
-    top: 'Ao vivo',
+    top: 'Métricas ao vivo',
   },
   hero: {
     eyebrow: 'Para quem trabalha com PostgreSQL',
