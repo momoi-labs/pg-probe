@@ -397,7 +397,22 @@ jobs:
           r2() {
             aws s3 cp --endpoint-url "$R2_ENDPOINT" --no-progress "$@"
           }
-          if r2 "${prefix}/SHA256SUMS" remote-sums 2>/dev/null; then
+          # Fails only on a 404. Any other error, from a token or the
+          # network, stops the release before it can overwrite something.
+          exists() {
+            local err
+            if err="$(aws s3api head-object --endpoint-url "$R2_ENDPOINT" \
+              --bucket "$R2_BUCKET" --key "$1" 2>&1 >/dev/null)"; then
+              return 0
+            fi
+            if grep -q '(404)' <<<"$err"; then
+              return 1
+            fi
+            echo "$err" >&2
+            exit 1
+          }
+          if exists "v${version}/SHA256SUMS"; then
+            r2 "${prefix}/SHA256SUMS" remote-sums
             if ! cmp -s remote-sums dist/SHA256SUMS; then
               echo "R2 already holds different files for v${version}" >&2
               exit 1
@@ -417,7 +432,8 @@ jobs:
             done
           fi
           current=""
-          if r2 "s3://${R2_BUCKET}/latest.txt" remote-latest 2>/dev/null; then
+          if exists latest.txt; then
+            r2 "s3://${R2_BUCKET}/latest.txt" remote-latest
             current="$(tr -d ' \r\n' <remote-latest)"
           fi
           newest="$(printf '%s\n%s\n' "$current" "$version" | sort -V | tail -n 1)"
