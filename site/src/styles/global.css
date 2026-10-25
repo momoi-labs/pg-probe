@@ -120,13 +120,6 @@ p { margin: 0; }
 .ticks b { color: var(--fg); font-weight: 500; }
 
 /* Printed report sheets */
-.langs { display: flex; gap: 0.5rem; margin-top: 2rem; flex-wrap: wrap; }
-.langs button {
-  font: 400 0.8rem var(--mono); color: var(--muted); background: transparent; cursor: pointer;
-  border: 1px solid var(--border); border-radius: 999px; padding: 0.45rem 0.85rem;
-}
-.langs button[aria-pressed='true'] { color: var(--bg); background: var(--accent); border-color: var(--accent); }
-
 .sheets { position: relative; min-height: 34rem; }
 .sheet {
   /* No background: on a rotated sheet its edge shows through the image's
@@ -179,7 +172,7 @@ p { margin: 0; }
 .foot a:hover { color: var(--fg); }
 
 @media (max-width: 860px) {
-  .nav ul li:not(:last-child) { display: none; }
+  .nav .wrap > ul > li:not(:last-child) { display: none; }
   .split,   .compat { grid-template-columns: 1fr 1fr; }
   .top-grid { grid-template-columns: 1fr; }
   .cost { grid-template-columns: repeat(3, 1fr); }

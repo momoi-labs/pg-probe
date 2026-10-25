@@ -4,15 +4,22 @@
 // from one real capture of db-prod-01.
 import Handoff from './Handoff.astro';
 import TermCapture from './TermCapture.astro';
+import { dictionary, type Language } from '../i18n';
+
+interface Props {
+  lang: Language;
+}
+const { lang } = Astro.props;
+const t = dictionary(lang).flow;
 
 const slug = 'db-prod-01-2026-10-24-19h37m27s';
 const size = '534 KiB';
 ---
 <div class="flow">
-  <div class="flow-steps" role="tablist" aria-label="How pg-probe is used">
-    <button class="flow-step" role="tab" aria-selected="true" data-step="1"><span class="num">1</span><span><b>Capture</b><small>On the client's server</small></span><i class="prog"></i></button>
-    <button class="hand" role="tab" aria-selected="false" data-step="h"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h8l5 5v15H6z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M14 2v5h5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg><span>The file changes hands<small>outside pg-probe</small></span><i class="prog"></i></button>
-    <button class="flow-step" role="tab" aria-selected="false" data-step="2"><span class="num">2</span><span><b>Review</b><small>On your laptop</small></span><i class="prog"></i></button>
+  <div class="flow-steps" role="tablist" aria-label={t.label}>
+    <button class="flow-step" role="tab" aria-selected="true" data-step="1"><span class="num">1</span><span><b>{t.capture}</b><small>{t.captureWhere}</small></span><i class="prog"></i></button>
+    <button class="hand" role="tab" aria-selected="false" data-step="h"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h8l5 5v15H6z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M14 2v5h5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg><span>{t.handoff}<small>{t.handoffWhere}</small></span><i class="prog"></i></button>
+    <button class="flow-step" role="tab" aria-selected="false" data-step="2"><span class="num">2</span><span><b>{t.review}</b><small>{t.reviewWhere}</small></span><i class="prog"></i></button>
   </div>
   <div class="stage" data-at="1">
     <div class="panel" role="tabpanel" data-panel="1">
@@ -20,22 +27,22 @@ const size = '534 KiB';
         <div class="bar"><i></i><i></i><i></i><span>ssh db-prod-01</span></div>
         <TermCapture />
       </div>
-      <p class="cap">The output is one file in the current directory. Nothing leaves the server.</p>
+      <p class="cap">{t.captureNote}</p>
     </div>
     <div class="panel mail" role="tabpanel" data-panel="h" hidden>
-      <Handoff file={`${slug}.sqlite.gz`} size={size} />
+      <Handoff lang={lang} file={`${slug}.sqlite.gz`} size={size} />
     </div>
     <div class="panel review" role="tabpanel" data-panel="2" hidden>
       <div class="win term cmd-win">
-        <div class="bar"><i></i><i></i><i></i><span>Terminal, on your laptop</span></div>
+        <div class="bar"><i></i><i></i><i></i><span>{t.terminal}</span></div>
         <pre><span class="ps">you@laptop:~$</span> pg-probe analyze -d ~/clients/acme
 <span class="out">pg-probe: review console listening on</span> <u>http://127.0.0.1:3080/console/</u></pre>
       </div>
       <div class="win browser">
         <div class="bar"><i></i><i></i><i></i><span>127.0.0.1:3080/console/<mark>{slug}</mark></span></div>
-        <div class="console"><iframe src="/demo/console/" title="The pg-probe review console" tabindex="-1" loading="lazy" width="1200" height="1000"></iframe></div>
+        <div class="console"><iframe src="/demo/console/"  title={t.consoleTitle} tabindex="-1" loading="lazy" width="1200" height="1000"></iframe></div>
       </div>
-      <p class="cap">Open the address in your browser. The console reads the same file, on your machine.</p>
+      <p class="cap">{t.reviewNote}</p>
     </div>
   </div>
 </div>

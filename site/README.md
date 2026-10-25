@@ -11,6 +11,18 @@ pnpm check        # astro check, 0 errors expected
 pnpm preview      # serve dist/
 ```
 
+## Languages
+
+The site is built once per language: English at `/`, Portuguese at `/pt-br/`,
+and Spanish at `/es/`. The text lives in `src/i18n/`; `en.ts` is the source,
+and its type makes the other files carry every key. `src/components/Home.astro`
+is the page, and each route in `src/pages/` renders it in one language.
+
+A visitor's choice in the language menu is saved in `localStorage` and wins
+on later visits. Without one, `/` follows the browser's language, and a link
+to `/pt-br/` or `/es/` opens in that language. The menu works as pg-yard's.
+The report images in the page are printed in the page's language.
+
 ## Screenshots
 
 Every image in `src/assets/shots/` is a real pg-probe screen. `mise run demo`

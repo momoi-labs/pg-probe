@@ -1,0 +1,178 @@
+---
+// The landing page in one language. src/pages has one route per language.
+import { Image } from 'astro:assets';
+import Base from '../layouts/Base.astro';
+import Flow from './Flow.astro';
+import TopDemo from './TopDemo.astro';
+import ConsoleCards from './ConsoleCards.astro';
+import LanguageMenu from './LanguageMenu.astro';
+import { dictionary, paths, type Language } from '../i18n';
+import coverEn from '../assets/shots/report-page-cover-en.png';
+import coverPtBr from '../assets/shots/report-page-cover-pt-br.png';
+import coverEs from '../assets/shots/report-page-cover-es.png';
+import locksEn from '../assets/shots/report-page-locks-en.png';
+import locksPtBr from '../assets/shots/report-page-locks-pt-br.png';
+import locksEs from '../assets/shots/report-page-locks-es.png';
+
+const releases = 'https://github.com/momoi-labs/pg-probe/releases/latest';
+const repo = 'https://github.com/momoi-labs/pg-probe';
+
+interface Props {
+  lang: Language;
+}
+const { lang } = Astro.props;
+const t = dictionary(lang);
+
+// The report pages shown are the ones printed in the page's language.
+const sheets: Record<Language, { cover: ImageMetadata; page: ImageMetadata }> = {
+  en: { cover: coverEn, page: locksEn },
+  'pt-BR': { cover: coverPtBr, page: locksPtBr },
+  es: { cover: coverEs, page: locksEs },
+};
+const sheet = sheets[lang];
+---
+<Base lang={lang} title={t.meta.title} description={t.meta.description}>
+  <nav class="nav">
+    <div class="wrap">
+      <a class="brand" href={paths[lang]}><img src="/lockup.svg" alt="pg-probe" width="152" height="28" /></a>
+      <ul>
+        <li><a href="#how">{t.nav.how}</a></li>
+        <li><a href="#report">{t.nav.report}</a></li>
+        <li><a href="#top">{t.nav.top}</a></li>
+        <li><a href={repo}>GitHub</a></li>
+        <li><LanguageMenu lang={lang} /></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main>
+    <section class="hero">
+      <div class="wrap">
+        <span class="eyebrow">{t.hero.eyebrow}</span>
+        <h1>{t.hero.title}</h1>
+        <p class="lead">{t.hero.lead}</p>
+        <div class="cta">
+          <a class="btn" href="#install">{t.hero.install}</a>
+        </div>
+        <div class="how" id="how">
+          <span class="eyebrow">{t.hero.howEyebrow}</span>
+          <h2>{t.hero.howTitle}</h2>
+        </div>
+        <Flow lang={lang} />
+      </div>
+    </section>
+
+    <section class="sec" id="report">
+      <div class="wrap split">
+        <div>
+          <span class="eyebrow">{t.report.eyebrow}</span>
+          <h2>{t.report.title}</h2>
+          <p>{t.report.lead}</p>
+          <ul class="ticks">
+            {t.report.ticks.map((tick) => <li set:html={tick} />)}
+          </ul>
+          <p class="fine">{t.report.languages}</p>
+        </div>
+        <div class="sheets">
+          <div class="sheet back">
+            <Image src={sheet.cover} alt={t.report.coverAlt} widths={[480, 720]} sizes="(max-width: 860px) 68vw, 420px" />
+          </div>
+          <div class="sheet front">
+            <Image src={sheet.page} alt={t.report.pageAlt} widths={[480, 720]} sizes="(max-width: 860px) 68vw, 420px" />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" style="padding-top: 0">
+      <div class="wrap">
+        <span class="eyebrow">{t.console.eyebrow}</span>
+        <h2>{t.console.title}</h2>
+        <p class="lead">{t.console.lead}</p>
+        <ConsoleCards />
+        <p class="fine">{t.console.fine}</p>
+        <div class="grid3">
+          {t.console.features.map((feature) => <div><h4>{feature.title}</h4><p set:html={feature.text} /></div>)}
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" style="padding-top: 0">
+      <div class="wrap">
+        <span class="eyebrow">{t.security.eyebrow}</span>
+        <h2>{t.security.title}</h2>
+        <p class="lead">{t.security.lead}</p>
+        <div class="grid3">
+          {t.security.features.map((feature) => <div><h4>{feature.title}</h4><p set:html={feature.text} /></div>)}
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" id="top" style="padding-top: 0">
+      <div class="wrap">
+        <div class="top-box">
+          <span class="eyebrow">{t.top.eyebrow}</span>
+          <h2 set:html={t.top.title} />
+          <p class="lead">{t.top.lead}</p>
+          <div class="top-grid">
+            <TopDemo lang={lang} />
+            <aside class="cost">
+              <h3>{t.top.cost}</h3>
+              <div><b>1</b><span>{t.top.connection}</span></div>
+              <div><b>{lang === 'en' ? '0.7 ms' : '0,7 ms'}</b><span>{t.top.refresh}</span></div>
+              <div><b>{lang === 'en' ? '0.15%' : '0,15%'}</b><span>{t.top.core}</span></div>
+              <p class="fine">{t.top.costFine}</p>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" id="install" style="padding-top: 0">
+      <div class="wrap">
+        <span class="eyebrow">{t.install.eyebrow}</span>
+        <h2>{t.install.title}</h2>
+        <div class="compat">
+          <div><b>{t.install.postgres}</b><span>{t.install.postgresText}</span></div>
+          <div><b>{t.install.el}</b><span>{t.install.elText}</span></div>
+          <div><b>{t.install.ubuntu}</b><span>{t.install.ubuntuText}</span></div>
+          <div><b>x86_64 · arm64</b><span>{t.install.archText}</span></div>
+        </div>
+        <!-- TODO: install.sh does not exist yet. Placeholder until it ships on main. -->
+        <div class="install">
+          <code><b>$</b> curl -fsSL https://pg-probe.dev/install.sh | sh</code>
+          <button type="button" data-copy="curl -fsSL https://pg-probe.dev/install.sh | sh" aria-label={t.install.copy}>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5v-1a1.5 1.5 0 00-1.5-1.5H4a1.5 1.5 0 00-1.5 1.5V9A1.5 1.5 0 004 10.5h1"/></svg>
+          </button>
+        </div>
+        <div class="cta">
+          <a class="btn" href={releases}>{t.install.download}</a>
+          <span class="muted">{t.install.downloadText}</span>
+        </div>
+        <p class="fine">{t.install.fine}</p>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="foot">
+    <div class="wrap">
+      <span class="mono">© 2026 <a href="https://momoi-labs.dev">Momoi Labs</a> · {t.footer.license}</span>
+      <ul>
+        <li><a href={repo}>GitHub</a></li>
+        <li><a href={releases}>{t.footer.releases}</a></li>
+        <li><a href="https://momoi-labs.dev">Momoi Labs</a></li>
+      </ul>
+    </div>
+  </footer>
+
+  <script>
+    for (const button of document.querySelectorAll<HTMLButtonElement>('[data-copy]')) {
+      button.addEventListener('click', async () => {
+        await navigator.clipboard.writeText(button.dataset.copy!);
+        button.classList.add('done');
+        setTimeout(() => button.classList.remove('done'), 1500);
+      });
+    }
+  </script>
+</Base>

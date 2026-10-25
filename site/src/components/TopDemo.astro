@@ -4,19 +4,27 @@
 // drawn as HTML. The keys above the screen, the keys of top, and the key
 // hints drawn in the screen switch views.
 import TopScreen from './TopScreen.astro';
+import { dictionary, type Language } from '../i18n';
 
+interface Props {
+  lang: Language;
+}
+const t = dictionary(Astro.props.lang).top;
+
+// The screens stay in English, as top draws them; the labels and notes
+// follow the page.
 const views = [
-  { key: '1', label: 'Running', screen: 'running', note: 'Every active backend, longest first, with its own CPU, I/O, and I/O wait from <code>/proc</code>.' },
-  { key: '2', label: 'Waiting', screen: 'waiting', note: 'Backends waiting on a lock, and the lock each one waits on.' },
-  { key: '3', label: 'Blocking', screen: 'blocking', note: 'Who holds the lock, with the queue behind each holder as a tree.' },
-  { key: '4', label: 'Vacuum', screen: 'vacuum', note: 'Every autovacuum and manual vacuum, with its phase and how much of the table it has scanned.' },
-  { key: 'Enter', label: 'Query', screen: 'query', note: 'One backend: the full query, every age, and its CPU, memory, and I/O.' },
-  { key: 'e', label: 'Plan', screen: 'query-plan', note: 'The estimated plan. <code>EXPLAIN</code> without <code>ANALYZE</code>, so the query never runs again.' },
-  { key: 'f', label: 'Function', screen: 'query-functions', note: 'The plpgsql function it calls: signature, call statistics, and source.' },
+  { key: '1', label: t.running, screen: 'running', note: t.runningNote },
+  { key: '2', label: t.waiting, screen: 'waiting', note: t.waitingNote },
+  { key: '3', label: t.blocking, screen: 'blocking', note: t.blockingNote },
+  { key: '4', label: t.vacuum, screen: 'vacuum', note: t.vacuumNote },
+  { key: 'Enter', label: t.query, screen: 'query', note: t.queryNote },
+  { key: 'e', label: t.plan, screen: 'query-plan', note: t.planNote },
+  { key: 'f', label: t.function, screen: 'query-functions', note: t.functionNote },
 ];
 ---
 <div class="top-demo">
-  <div class="seg" role="tablist" aria-label="pg-probe top views">
+  <div class="seg" role="tablist" aria-label={t.views}>
     {views.map((v, i) => (
       <button type="button" role="tab" aria-selected={i === 0 ? 'true' : 'false'} data-go={v.screen}><kbd>{v.key}</kbd><span>{v.label}</span></button>
     ))}

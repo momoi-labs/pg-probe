@@ -1,0 +1,144 @@
+import type { Dictionary } from './en';
+
+const es: Dictionary = {
+  meta: {
+    title: 'pg-probe: diagnóstico de PostgreSQL en un fichero',
+    description:
+      'Tu cliente ejecuta un comando en su servidor PostgreSQL y te envía un fichero. Analízalo en una consola local e imprime un informe en español, inglés o portugués.',
+  },
+  language: {
+    label: 'Idioma',
+    browser: 'Idioma del navegador',
+  },
+  nav: {
+    how: 'Cómo funciona',
+    report: 'Informe',
+    top: 'En directo',
+  },
+  hero: {
+    eyebrow: 'Para quien trabaja con PostgreSQL',
+    title: 'Tu cliente ejecuta un comando. Tú tienes una visión completa.',
+    lead: 'pg-probe registra las métricas de PostgreSQL y del host Linux en un solo fichero. Ábrelo en una consola local, o imprime un informe que tu cliente pueda leer.',
+    install: 'Instalar pg-probe',
+    howEyebrow: 'Cómo funciona',
+    howTitle: 'Captura allí. Análisis aquí.',
+  },
+  flow: {
+    label: 'Cómo se usa pg-probe',
+    capture: 'Captura',
+    captureWhere: 'En el servidor del cliente',
+    handoff: 'El fichero cambia de manos',
+    handoffWhere: 'fuera de pg-probe',
+    review: 'Análisis',
+    reviewWhere: 'En tu portátil',
+    captureNote: 'El resultado es un fichero en el directorio actual. Nada sale del servidor.',
+    terminal: 'Terminal, en tu portátil',
+    consoleTitle: 'La consola de análisis de pg-probe',
+    reviewNote: 'Abre la dirección en el navegador. La consola lee el mismo fichero, en tu máquina.',
+  },
+  handoff: {
+    from: 'De',
+    to: 'Para',
+    you: 'ti',
+    subject: 'Asunto',
+    subjectText: 'Captura de db-prod-01',
+    body: 'Te envío la captura de la lentitud de esta mañana.',
+    note: 'No es un paso de pg-probe. Tu cliente envía el fichero como envía cualquier fichero: correo, ticket o carpeta compartida. pg-probe no sube nada.',
+  },
+  report: {
+    eyebrow: 'El informe impreso',
+    title: 'Un informe que tu cliente puede leer.',
+    lead: 'Imprime toda la sesión en PDF desde la consola: 39 gráficos del host y de la base de datos, de la CPU y los discos a los bloqueos y el WAL. Cada gráfico tiene su propia página, con lo que mide y cómo leerlo.',
+    ticks: [
+      '<b>Portada e índice</b>, con enlace a cada gráfico',
+      '<b>"Qué observar"</b> en cada página, escrito para quien no conoce la métrica',
+      '<b>Fuentes que no estaban disponibles</b> enumeradas tras la portada, nunca representadas como cero',
+    ],
+    languages: 'En español, inglés o portugués, en el idioma que lea tu cliente.',
+    coverAlt: 'Portada del informe',
+    pageAlt: 'Una página del informe: solicitudes de bloqueo en espera, con el recuadro Qué observar encima del gráfico',
+  },
+  console: {
+    eyebrow: 'La consola',
+    title: 'Hecha para leer una sesión.',
+    lead: 'Haz clic en un gráfico para fijar un momento, o arrastra para seleccionar un intervalo. Todos los gráficos y leyendas lo siguen.',
+    fine: 'En la captura de demostración, en el instante fijado de las 15:04:34 UTC, la tasa de transacciones cayó a 2,6 por segundo, con 32 solicitudes de bloqueo en espera y un uso de CPU del 3,4%.',
+    features: [
+      { title: 'Percentiles, no medias', text: 'Cada leyenda muestra p50, p75, p95, p99 y el valor actual.' },
+      {
+        title: 'Tasas a partir de las muestras',
+        text: '<code>--duration</code> e <code>--interval</code> registran cómo cambian los contadores. Un reinicio de contador es un hueco, nunca un valor.',
+      },
+      {
+        title: 'Tu propio SQL',
+        text: 'El artefacto es una base de datos SQLite. Ábrelo con <code>sqlite3</code> cuando la consola no baste.',
+      },
+    ],
+  },
+  security: {
+    eyebrow: 'Para el equipo de seguridad de tu cliente',
+    title: 'Sin agente. Sin cuenta. Sin subidas.',
+    lead: 'Tu cliente no instala una plataforma de monitorización, y tú no necesitas acceso a su servidor.',
+    features: [
+      {
+        title: 'Sesión de solo lectura',
+        text: 'Una conexión con <code>default_transaction_read_only=on</code> y un statement timeout.',
+      },
+      {
+        title: 'Lista de permitidos estricta',
+        text: 'Ni credenciales, ni variables de entorno, ni líneas de comando, ni identificadores de red en el fichero.',
+      },
+      {
+        title: 'Inspeccionable',
+        text: 'Tu cliente puede abrir el fichero antes de enviarlo. Nada sale del servidor por sí solo.',
+      },
+    ],
+  },
+  top: {
+    eyebrow: 'También en el binario',
+    title: '<code class="cmd-title">pg-probe top</code>, para llamadas en directo.',
+    lead: 'Cuando estás en una llamada con el cliente, ve las consultas que se ejecutan ahora, de la más larga a la más corta. Funciona desde PostgreSQL 9.3.',
+    views: 'Vistas de pg-probe top',
+    running: 'En ejecución',
+    runningNote: 'Todos los backends activos, de mayor a menor tiempo de ejecución, con su CPU, I/O y espera de I/O, leídas de <code>/proc</code>.',
+    waiting: 'En espera',
+    waitingNote: 'Los backends que esperan un bloqueo, y el bloqueo que espera cada uno.',
+    blocking: 'Bloqueando',
+    blockingNote: 'Quién tiene el bloqueo, con la cola detrás de cada uno en forma de árbol.',
+    vacuum: 'Vacuum',
+    vacuumNote: 'Cada autovacuum y vacuum manual, con su fase y cuánto de la tabla ha recorrido.',
+    query: 'Consulta',
+    queryNote: 'Un backend: la consulta completa, todos los tiempos transcurridos y su CPU, memoria e I/O.',
+    plan: 'Plan',
+    planNote: 'El plan estimado. <code>EXPLAIN</code> sin <code>ANALYZE</code>, así que la consulta no vuelve a ejecutarse.',
+    function: 'Función',
+    functionNote: 'La función plpgsql a la que llama: firma, estadísticas de llamadas y código fuente.',
+    cost: 'Lo que cuesta',
+    connection: 'conexión de solo lectura',
+    refresh: 'por refresco',
+    core: 'de un núcleo',
+    costFine:
+      'Medido en un servidor de pruebas con 206 conexiones bajo pgbench. Un SELECT sobre pg_stat_activity por refresco. Las vistas de bloqueos, la página de la consulta y las ventanas emergentes añaden una consulta cada una, solo mientras están abiertas.',
+  },
+  install: {
+    eyebrow: 'Instalación',
+    title: 'Funciona en los servidores que tienen tus clientes.',
+    postgres: '9.3 y posteriores',
+    postgresText: 'Versiones de PostgreSQL',
+    el: 'EL7 y posteriores',
+    elText: 'RHEL, CentOS, Rocky. rpm, probado en Rocky Linux 9',
+    ubuntu: 'Ubuntu 18.04 y posteriores',
+    ubuntuText: 'deb, probado en Ubuntu 24.04',
+    archText: 'binario estático, sin dependencias',
+    copy: 'Copiar el comando de instalación',
+    download: 'Descargar para Linux',
+    downloadText: 'deb, rpm o un binario estático, sin dependencias.',
+    fine: 'Código abierto bajo la PostgreSQL License. La captura, la consola y el informe vienen en el mismo binario.',
+  },
+  footer: {
+    license: 'PostgreSQL License',
+    releases: 'Versiones',
+  },
+};
+
+export default es;

@@ -3,15 +3,18 @@ import '@fontsource-variable/dm-sans';
 import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
 import '../styles/global.css';
+import { languages, paths, storageKey, type Language } from '../i18n';
 
 interface Props {
+  lang: Language;
   title: string;
   description: string;
 }
-const { title, description } = Astro.props;
+const { lang, title, description } = Astro.props;
+const url = (language: Language) => new URL(paths[language], Astro.site).href;
 ---
 <!doctype html>
-<html lang="en">
+<html lang={lang}>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -22,7 +25,23 @@ const { title, description } = Astro.props;
     <meta property="og:type" content="website" />
     <meta name="theme-color" content="#09090b" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="canonical" href={Astro.site} />
+    <link rel="canonical" href={url(lang)} />
+    {languages.map((language) => <link rel="alternate" hreflang={language} href={url(language)} />)}
+    <link rel="alternate" hreflang="x-default" href={url('en')} />
+    <script is:inline define:vars={{ lang, paths, storageKey }}>
+      // The visitor's saved language wins. Without one, the root page follows
+      // the browser, as pg-yard does; a link to another language is kept.
+      let saved = null;
+      try {
+        saved = localStorage.getItem(storageKey);
+      } catch {}
+      let target = saved && paths[saved] ? saved : null;
+      if (!target && lang === 'en') {
+        const primary = (navigator.language || '').toLowerCase().split('-')[0];
+        target = primary === 'pt' ? 'pt-BR' : primary === 'es' ? 'es' : 'en';
+      }
+      if (target && target !== lang) location.replace(paths[target] + location.hash);
+    </script>
   </head>
   <body>
     <slot />

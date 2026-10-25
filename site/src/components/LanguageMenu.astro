@@ -1,0 +1,63 @@
+---
+// The language menu in the nav, as in pg-yard: the browser's language first,
+// then each language. A choice is saved and wins on later visits; the
+// browser item forgets it. Without JavaScript the items are plain links.
+import { dictionary, languages, names, paths, type Language } from '../i18n';
+
+interface Props {
+  lang: Language;
+}
+const { lang } = Astro.props;
+const t = dictionary(lang);
+---
+<details class="lang-menu">
+  <summary aria-label={t.language.label} title={t.language.label}>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 8 6 6M4 14l6-6 2-3M2 5h12M7 2h1M22 22l-5-10-5 10M14 18h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span>{names[lang]}</span>
+  </summary>
+  <ul>
+    <li><a href={paths.en} data-lang="">{t.language.browser}</a></li>
+    {languages.map((language) => (
+      <li>
+        <a href={paths[language]} data-lang={language} lang={language} hreflang={language} aria-current={language === lang ? 'page' : undefined}>
+          {names[language]}
+        </a>
+      </li>
+    ))}
+  </ul>
+</details>
+
+<script>
+  import { storageKey } from '../i18n';
+
+  for (const link of document.querySelectorAll<HTMLAnchorElement>('.lang-menu a')) {
+    link.addEventListener('click', (event) => {
+      const language = link.dataset.lang;
+      try {
+        if (language) localStorage.setItem(storageKey, language);
+        else localStorage.removeItem(storageKey);
+      } catch {}
+      // The browser item goes to the root, which picks the browser's language.
+      if (!language) {
+        event.preventDefault();
+        location.assign('/');
+      }
+    });
+  }
+</script>
+
+<style>
+  .lang-menu { position: relative; }
+  .lang-menu summary { display: flex; align-items: center; gap: 0.4rem; list-style: none; cursor: pointer; padding: 0.3rem 0.55rem; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); font-size: 0.85rem; }
+  .lang-menu summary::-webkit-details-marker { display: none; }
+  .lang-menu summary:hover, .lang-menu[open] summary { color: var(--fg); }
+  .lang-menu summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .lang-menu svg { width: 16px; height: 16px; flex: none; }
+  /* The nav lays its list out in a row; this one is a column. */
+  .lang-menu ul { display: grid; gap: 0; position: absolute; right: 0; top: calc(100% + 0.4rem); z-index: 20; min-width: 12rem; margin: 0; padding: 0.3rem; list-style: none; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); box-shadow: 0 20px 50px -20px rgb(0 0 0 / 0.8); }
+  .lang-menu li a { display: block; white-space: nowrap; padding: 0.45rem 0.7rem; border-radius: 7px; color: var(--muted); font-size: 0.9rem; text-decoration: none; }
+  .lang-menu li a:hover, .lang-menu li a:focus-visible { background: var(--panel-2); color: var(--fg); outline: none; }
+  .lang-menu li a[aria-current='page'] { color: var(--fg); }
+  .lang-menu li a[aria-current='page']::after { content: '✓'; float: right; color: var(--accent); }
+  .lang-menu li:first-child { border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin-bottom: 0.3rem; }
+</style>
