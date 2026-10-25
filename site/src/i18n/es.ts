@@ -96,8 +96,9 @@ const es: Dictionary = {
   },
   top: {
     eyebrow: 'También en el binario',
-    title: '<code class="cmd-title">pg-probe top</code>, para llamadas en directo.',
-    lead: 'Cuando estás en una llamada con el cliente, ve las consultas que se ejecutan ahora, de la más larga a la más corta. Funciona desde PostgreSQL 9.3.',
+    title: '¿Qué está haciendo la base de datos ahora?',
+    copy: 'Copiar el comando',
+    lead: 'Mira las consultas que se ejecutan ahora, de la más larga a la más corta, y qué espera cada una. Funciona desde PostgreSQL 9.3.',
     views: 'Vistas de pg-probe top',
     running: 'En ejecución',
     runningNote: 'Todos los backends activos, de mayor a menor tiempo de ejecución, con su CPU, I/O y espera de I/O, leídas de <code>/proc</code>.',

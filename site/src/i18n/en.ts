@@ -96,8 +96,9 @@ const en = {
   },
   top: {
     eyebrow: 'Also in the binary',
-    title: '<code class="cmd-title">pg-probe top</code>, for live calls.',
-    lead: 'When you are on a call with the client, see the queries running now, longest first. It works from PostgreSQL 9.3 on.',
+    title: 'What is the database doing right now?',
+    copy: 'Copy the command',
+    lead: 'See the queries running now, longest first, and what each one waits on. It works from PostgreSQL 9.3 on.',
     views: 'pg-probe top views',
     running: 'Running',
     runningNote: 'Every active backend, longest first, with its own CPU, I/O, and I/O wait from <code>/proc</code>.',
