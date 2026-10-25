@@ -32,7 +32,7 @@ export const explain: Record<string, Explain> = {
   },
   'pressure-stall': {
     shows:
-      'Share of time at least one task stalled waiting for CPU, memory or I/O, averaged over the last 10 seconds. Linux 4.20 and newer report it in /proc/pressure. RHEL 8 needs the psi=1 boot option.',
+      'Share of time at least one task stalled waiting for CPU, memory or I/O, as a 10 second exponential moving average. Linux 4.20 and newer report it in /proc/pressure. RHEL 8 needs the psi=1 boot option.',
     look: 'Values near zero are healthy. A value that stays above 10% shows which resource held work back. Memory pressure above zero means tasks waited while the kernel freed memory. I/O pressure usually lines up with high disk latency.',
   },
   'filesystem-usage': {
@@ -63,7 +63,7 @@ export const explain: Record<string, Explain> = {
   },
   'network-drops-and-errors': {
     shows: 'Packets dropped and interface errors per second, received and sent, over all interfaces.',
-    look: 'A low, steady rate of received drops can be frames the host does not handle, such as unknown protocols. Drops that rise with traffic mean the interface buffers overflow under load. Errors point to a cable, driver or network card problem. A dropped TCP packet must be sent again, which slows clients and standbys.',
+    look: 'A low, steady rate of received drops can be frames the host does not handle, such as unknown protocols. Drops that rise with traffic can mean the interface buffers overflow under load. Errors point to a cable, driver or network card problem. A dropped TCP packet must be sent again, which slows clients and standbys.',
   },
   'disk-read-latency': {
     shows: 'Average time a read request took on each of the five busiest disks, in milliseconds.',
@@ -153,8 +153,8 @@ export const explain: Record<string, Explain> = {
   },
   'wait-events': {
     shows:
-      'Active backends at each sample, by the type of wait event they reported. No wait event means PostgreSQL reported none. The backend was running on a CPU or waiting for the operating system to schedule it.',
-    look: 'Lock waits mean sessions blocked each other. IO waits are time spent waiting for reads, writes or flushes, so compare them with the disk latency charts. LWLock waits point to contention inside PostgreSQL, for example on WAL or on the buffer mapping. Many backends with no wait event on a busy host can mean they queue for CPU. PostgreSQL 9.6 has no IO wait type, so there time spent on disk shows as no wait event.',
+      'Active backends at each sample, by the type of wait event they reported. No wait event means PostgreSQL reported none. The backend was running on a CPU, waiting for the operating system to schedule it, or in a wait PostgreSQL does not report, such as disk I/O on 9.6, which has no IO wait type.',
+    look: 'Lock waits mean sessions blocked each other. IO waits are time spent waiting for reads, writes or flushes, so compare them with the disk latency charts. LWLock waits point to contention inside PostgreSQL, for example on WAL or on the buffer mapping. Many backends with no wait event on a busy host can mean they queue for CPU.',
   },
   'deadlocks-and-conflicts': {
     shows: 'Deadlocks, recovery conflicts and checksum failures per interval, over all databases.',

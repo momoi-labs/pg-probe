@@ -368,7 +368,7 @@ const translation: Translation = {
     },
     'pressure-stall': {
       shows:
-        'Parcela do tempo em que pelo menos uma tarefa ficou parada esperando por CPU, memória ou I/O, na média dos últimos 10 segundos. O Linux 4.20 e mais novos informam esse valor em /proc/pressure. O RHEL 8 precisa da opção de boot psi=1.',
+        'Parcela do tempo em que pelo menos uma tarefa ficou parada esperando por CPU, memória ou I/O, como média móvel exponencial de 10 segundos. O Linux 4.20 e mais novos informam esse valor em /proc/pressure. O RHEL 8 precisa da opção de boot psi=1.',
       look: 'Valores perto de zero são saudáveis. Um valor que fica acima de 10% mostra qual recurso segurou o trabalho. Pressão de memória acima de zero indica que tarefas esperaram enquanto o kernel liberava memória. Pressão de I/O costuma coincidir com latência de disco alta.',
     },
     'filesystem-usage': {
@@ -399,7 +399,7 @@ const translation: Translation = {
     },
     'network-drops-and-errors': {
       shows: 'Pacotes descartados e erros de interface por segundo, recebidos e enviados, em todas as interfaces.',
-      look: 'Uma taxa baixa e constante de descartes na recepção pode ser de quadros que o host não trata, como protocolos desconhecidos. Descartes que sobem junto com o tráfego indicam que os buffers da interface transbordam sob carga. Erros apontam para um problema de cabo, driver ou placa de rede. Um pacote TCP descartado precisa ser reenviado, o que deixa clientes e standbys mais lentos.',
+      look: 'Uma taxa baixa e constante de descartes na recepção pode ser de quadros que o host não trata, como protocolos desconhecidos. Descartes que sobem junto com o tráfego podem indicar que os buffers da interface transbordam sob carga. Erros apontam para um problema de cabo, driver ou placa de rede. Um pacote TCP descartado precisa ser reenviado, o que deixa clientes e standbys mais lentos.',
     },
     'disk-read-latency': {
       shows: 'Tempo médio de uma requisição de leitura em cada um dos cinco discos mais ocupados, em milissegundos.',
@@ -489,8 +489,8 @@ const translation: Translation = {
     },
     'wait-events': {
       shows:
-        'Backends ativos em cada amostra, pelo tipo de evento de espera que informaram. Sem evento de espera significa que o PostgreSQL não informou nenhum. O backend estava executando em uma CPU ou esperando o sistema operacional escaloná-lo.',
-      look: 'Esperas Lock indicam que sessões bloquearam umas às outras. Esperas IO são tempo esperando por leituras, gravações ou flushes, então compare com os gráficos de latência de disco. Esperas LWLock apontam para disputa dentro do PostgreSQL, por exemplo no WAL ou no mapeamento de buffers. Muitos backends sem evento de espera em um host ocupado podem indicar fila pela CPU. O PostgreSQL 9.6 não tem o tipo de espera IO, então nele o tempo esperando pelo disco aparece como sem evento de espera.',
+        'Backends ativos em cada amostra, pelo tipo de evento de espera que informaram. Sem evento de espera significa que o PostgreSQL não informou nenhum. O backend estava executando em uma CPU, esperando o sistema operacional escaloná-lo, ou em uma espera que o PostgreSQL não informa, como I/O de disco no 9.6, que não tem o tipo de espera IO.',
+      look: 'Esperas Lock indicam que sessões bloquearam umas às outras. Esperas IO são tempo esperando por leituras, gravações ou flushes, então compare com os gráficos de latência de disco. Esperas LWLock apontam para disputa dentro do PostgreSQL, por exemplo no WAL ou no mapeamento de buffers. Muitos backends sem evento de espera em um host ocupado podem indicar fila pela CPU.',
     },
     'deadlocks-and-conflicts': {
       shows: 'Deadlocks, conflitos de recuperação e falhas de checksum por intervalo, em todos os bancos de dados.',
