@@ -1,5 +1,33 @@
 # pg-probe
 
+## 0.3.0
+
+### Minor Changes
+
+- da4821c: The printed report opens on a cover: the server, the capture period, how
+  long it ran, how many sources came in, and the facts of the host,
+  PostgreSQL and the capture. When a source did not collect in full, a Data
+  coverage page follows, with failed sources first and the ones the host or
+  server does not have grouped by reason. Every page after the cover has a
+  header with the server and period, and a footer with the page number.
+
+### Patch Changes
+
+- da4821c: On cgroup v1 hosts, such as CentOS 7, the capture now records the swap the
+  cgroup uses, and records CPU usage in microseconds instead of nanoseconds.
+  The Page reclaim chart shows direct reclaim on kernel 4.8 and newer, and
+  the Cgroup events chart shows the limit counters its explanation describes.
+- 65f1422: The review console shows the pg-probe emblem in its header and as the browser
+  tab's icon.
+- f726a7d: The pg-probe emblem in the review console's header no longer shows a database.
+  It is now the elephant and the probe waves, as in the browser tab's icon.
+- da4821c: The printed report no longer leaves a section title alone on a page in
+  Portuguese or Spanish, and no longer prints a blank page after a full
+  section. Charts and gauges print without the dot texture that some PDF
+  viewers drew as a grid. The Portuguese and Spanish translations were
+  reviewed, and the "What to look for" texts now say which PostgreSQL
+  version or kernel a setting or view needs.
+
 ## 0.2.2
 
 ### Patch Changes
