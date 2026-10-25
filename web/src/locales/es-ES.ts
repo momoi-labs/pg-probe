@@ -94,7 +94,7 @@ const translation: Translation = {
     'I/O by operation': 'I/O por operación',
     'I/O by operation, all backends (MiB/s)': 'I/O por operación, todos los backends (MiB/s)',
     'I/O wait': 'Espera de I/O',
-    Lock: 'Bloqueo',
+    Lock: 'Lock',
     'It also needs track_io_timing on the server.': 'También necesita track_io_timing activado en el servidor.',
     Kernel: 'Kernel',
     Killed: 'Terminadas',

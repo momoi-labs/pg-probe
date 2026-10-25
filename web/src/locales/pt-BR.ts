@@ -475,7 +475,7 @@ const translation: Translation = {
       look: 'Esperas curtas vêm e vão em um servidor ocupado. Uma contagem que fica acima de zero indica que sessões bloqueiam umas às outras. Esperas do tipo relation costumam vir de DDL ou LOCK TABLE. Esperas do tipo transactionid indicam linhas bloqueadas por uma transação longa.',
     },
     'longest-lock-wait': {
-      shows: 'O maior tempo que qualquer pedido esperou por um lock em cada amostra, em segundos.',
+      shows: 'O maior tempo que qualquer pedido estava esperando por um lock em cada amostra, em segundos.',
       look: 'Esperas de mais de alguns segundos bloqueiam usuários. Uma única espera longa pode formar uma fila, porque os pedidos seguintes esperam atrás dela. pg_blocking_pids() encontra a sessão que detém o lock.',
     },
     'locks-held': {
@@ -484,12 +484,12 @@ const translation: Translation = {
     },
     'longest-time-in-state': {
       shows:
-        'Para cada estado de conexão, o maior tempo que qualquer sessão de cliente ficou nele desde a última mudança de estado, em minutos.',
+        'Para cada estado de conexão, o maior tempo que qualquer sessão de cliente estava nele desde a última mudança de estado, em minutos.',
       look: 'Um tempo longo em active é uma consulta lenta. Um tempo longo em idle in transaction segura locks e bloqueia o vacuum, e idle_in_transaction_session_timeout pode encerrar essas sessões. Tempos longos em idle não causam dano por si só.',
     },
     'wait-events': {
       shows:
-        'Backends ativos em cada amostra, pelo tipo de evento de espera que informaram. Sem evento de espera significa que o PostgreSQL não informou nenhum. O backend estava executando em uma CPU ou esperando o sistema operacional agendá-lo.',
+        'Backends ativos em cada amostra, pelo tipo de evento de espera que informaram. Sem evento de espera significa que o PostgreSQL não informou nenhum. O backend estava executando em uma CPU ou esperando o sistema operacional escaloná-lo.',
       look: 'Esperas Lock indicam que sessões bloquearam umas às outras. Esperas IO são tempo esperando por leituras, gravações ou flushes, então compare com os gráficos de latência de disco. Esperas LWLock apontam para disputa dentro do PostgreSQL, por exemplo no WAL ou no mapeamento de buffers. Muitos backends sem evento de espera em um host ocupado podem indicar fila pela CPU.',
     },
     'deadlocks-and-conflicts': {
