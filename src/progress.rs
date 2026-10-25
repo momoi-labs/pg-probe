@@ -183,8 +183,15 @@ struct ProgressSubscriber {
 }
 
 impl Subscriber for ProgressSubscriber {
+    /// The steps of a connection are for `--verbose`; the summary shows
+    /// only their warnings, such as a TLS retry.
     fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        *metadata.level() <= Level::DEBUG && metadata.target().starts_with("pg_probe")
+        let level = *metadata.level();
+        let target = metadata.target();
+        if target == "pg_probe::postgres::connection" {
+            return level <= Level::WARN;
+        }
+        level <= Level::DEBUG && target.starts_with("pg_probe")
     }
 
     fn max_level_hint(&self) -> Option<LevelFilter> {

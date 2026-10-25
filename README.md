@@ -112,7 +112,9 @@ or `/tmp`, whichever holds the server's socket, as psql does, and through
 file itself, such as `/var/run/postgresql/.s.PGSQL.5432`.
 
 TLS over TCP follows libpq's `sslmode`, set with `PGSSLMODE` or in the
-conninfo string, as in `-d "sslmode=require"`:
+conninfo string, as in `-d "host=db sslmode=require"`. The conninfo string
+takes `disable`, `prefer`, and `require`; the verify modes are set with
+`PGSSLMODE` only.
 
 | `sslmode` | TLS |
 |---|---|

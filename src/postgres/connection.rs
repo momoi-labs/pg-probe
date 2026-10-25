@@ -6,18 +6,19 @@
 //! variables. It does not resolve service files, passfiles, or multi-host
 //! configurations.
 //!
-//! TLS follows libpq's `sslmode`, read from the conninfo string or
-//! `PGSSLMODE`. The default, `prefer`, encrypts without checking the
-//! server's certificate and retries without TLS when the handshake fails.
+//! TLS follows libpq's `sslmode`. The conninfo string takes `disable`,
+//! `prefer` and `require`, which the client parses; `PGSSLMODE` also takes
+//! `verify-ca` and `verify-full`. The default, `prefer`, encrypts without
+//! checking the server's certificate and retries without TLS when the
+//! handshake fails.
 
 use std::env;
 use std::fmt;
-use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use postgres::config::{Host, SslMode};
@@ -98,7 +99,8 @@ impl EndpointKind {
 }
 
 /// How a TCP connection uses TLS, following libpq's `sslmode`. A unix socket
-/// never uses TLS. `allow` is not supported.
+/// never uses TLS. `allow` is not supported, and the verify modes come only
+/// from `PGSSLMODE`, since the client's conninfo parser rejects them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TlsMode {
     /// No TLS.
@@ -225,10 +227,6 @@ impl ConnectedClient {
         let client = match connect(&mut config, endpoint.endpoint_kind, &mut tls) {
             Ok(client) => client,
             Err(error) => {
-                tracing::info!(
-                    "connection failed: {}",
-                    safe_error_detail(&error).unwrap_or_else(|| "no reason given".to_owned())
-                );
                 record_connection_failure(outcomes, source, &error);
                 return Err(AdapterError::ConnectionFailed);
             }
@@ -400,12 +398,14 @@ impl ConnectedClient {
 /// Without a host, it uses the first socket directory in `SOCKET_DIRECTORIES`
 /// that holds the server's socket, as psql does, and `localhost` otherwise.
 fn resolve_config(params: &ConnectionParams) -> Result<(Config, TlsMode), AdapterError> {
-    resolve_config_with(params, &SOCKET_DIRECTORIES)
+    resolve_config_with(params, &SOCKET_DIRECTORIES, &|name| env::var(name).ok())
 }
 
+/// `var` reads an environment variable, so tests can pass their own.
 fn resolve_config_with(
     params: &ConnectionParams,
     socket_directories: &[&str],
+    var: &dyn Fn(&str) -> Option<String>,
 ) -> Result<(Config, TlsMode), AdapterError> {
     if let Some(dbname) = params.dbname.as_deref() {
         if dbname.is_empty() || dbname.contains('\0') {
@@ -413,27 +413,21 @@ fn resolve_config_with(
         }
     }
 
-    // The client parses only disable, prefer and require, so a verify mode
-    // reaches it as require, and the connector does the checking.
-    let mut conninfo_tls = None;
     let mut config = match params.dbname.as_deref() {
         Some(dbname) if is_conninfo(dbname) => {
-            let mut conninfo = dbname.to_owned();
-            if let Some((span, value)) = find_sslmode(dbname) {
-                let mode = TlsMode::parse(&value).ok_or(AdapterError::InvalidParameter)?;
-                conninfo.replace_range(span, "require");
-                conninfo_tls = Some(mode);
-            }
-            Config::from_str(&conninfo).map_err(|_| AdapterError::InvalidParameter)?
+            Config::from_str(dbname).map_err(|_| AdapterError::InvalidParameter)?
         }
         _ => Config::new(),
     };
 
-    let tls = match conninfo_tls {
-        Some(mode) => mode,
-        None => match env::var("PGSSLMODE") {
-            Ok(value) => TlsMode::parse(&value).ok_or(AdapterError::InvalidParameter)?,
-            Err(_) => TlsMode::Prefer,
+    // The client cannot tell an explicit `prefer` from its default, so
+    // `PGSSLMODE` applies whenever the conninfo string leaves `prefer`.
+    let tls = match config.get_ssl_mode() {
+        SslMode::Disable => TlsMode::Disable,
+        SslMode::Require => TlsMode::Require,
+        _ => match var("PGSSLMODE") {
+            Some(value) => TlsMode::parse(&value).ok_or(AdapterError::InvalidParameter)?,
+            None => TlsMode::Prefer,
         },
     };
 
@@ -444,7 +438,7 @@ fn resolve_config_with(
             .host
             .clone()
             .filter(|host| !host.is_empty())
-            .or_else(|| env::var("PGHOST").ok().filter(|host| !host.is_empty()));
+            .or_else(|| var("PGHOST").filter(|host| !host.is_empty()));
         host.map(|host| match split_socket_file(&host) {
             Some((directory, port)) => {
                 socket_port = Some(port);
@@ -456,12 +450,11 @@ fn resolve_config_with(
         None
     };
 
+    // The socket file names one cluster, so its port beats `PGPORT`.
     if config.get_ports().is_empty() {
-        if let Some(port) = params.port {
+        if let Some(port) = params.port.or(socket_port) {
             config.port(port);
-        } else if let Some(port) = env::var("PGPORT").ok().and_then(|value| parse_port(&value)) {
-            config.port(port);
-        } else if let Some(port) = socket_port {
+        } else if let Some(port) = var("PGPORT").and_then(|value| parse_port(&value)) {
             config.port(port);
         }
     }
@@ -496,7 +489,7 @@ fn resolve_config_with(
     if config.get_user().is_none() {
         if let Some(user) = params.username.as_deref().filter(|user| !user.is_empty()) {
             config.user(user);
-        } else if let Ok(user) = env::var("PGUSER") {
+        } else if let Some(user) = var("PGUSER") {
             config.user(&user);
         }
     }
@@ -507,7 +500,7 @@ fn resolve_config_with(
                 config.dbname(dbname);
             }
             _ => {
-                if let Ok(dbname) = env::var("PGDATABASE") {
+                if let Some(dbname) = var("PGDATABASE") {
                     config.dbname(&dbname);
                 }
             }
@@ -515,26 +508,25 @@ fn resolve_config_with(
     }
 
     if config.get_password().is_none() {
-        if let Ok(password) = env::var("PGPASSWORD") {
+        if let Some(password) = var("PGPASSWORD") {
             config.password(password);
         }
     }
 
     if config.get_options().is_none() {
-        if let Ok(options) = env::var("PGOPTIONS") {
+        if let Some(options) = var("PGOPTIONS") {
             config.options(&options);
         }
     }
 
     if config.get_application_name().is_none() {
-        if let Ok(application_name) = env::var("PGAPPNAME") {
+        if let Some(application_name) = var("PGAPPNAME") {
             config.application_name(&application_name);
         }
     }
 
     if config.get_connect_timeout().is_none() {
-        if let Some(seconds) = env::var("PGCONNECT_TIMEOUT")
-            .ok()
+        if let Some(seconds) = var("PGCONNECT_TIMEOUT")
             .and_then(|value| value.parse::<u64>().ok())
             .filter(|seconds| *seconds > 0)
         {
@@ -566,72 +558,6 @@ fn find_socket_directory(directories: &[&str], port: u16) -> Option<PathBuf> {
         .iter()
         .map(PathBuf::from)
         .find(|directory| directory.join(format!(".s.PGSQL.{port}")).exists())
-}
-
-/// Finds the `sslmode` value in a conninfo string: its byte range in the
-/// string and its text. A URI carries it in the query, a keyword string as
-/// a `key=value` pair, maybe quoted.
-fn find_sslmode(conninfo: &str) -> Option<(Range<usize>, String)> {
-    if conninfo.starts_with("postgresql://") || conninfo.starts_with("postgres://") {
-        let query = conninfo.find('?')? + 1;
-        let mut start = query;
-        for pair in conninfo[query..].split('&') {
-            if let Some(value) = pair.strip_prefix("sslmode=") {
-                let value_start = start + "sslmode=".len();
-                return Some((value_start..value_start + value.len(), value.to_owned()));
-            }
-            start += pair.len() + 1;
-        }
-        return None;
-    }
-
-    let bytes = conninfo.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        let key_start = i;
-        while i < bytes.len() && bytes[i] != b'=' && !bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        let key = &conninfo[key_start..i];
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        if i >= bytes.len() || bytes[i] != b'=' {
-            return None;
-        }
-        i += 1;
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
-            i += 1;
-        }
-        let value_start = i;
-        let mut value = String::new();
-        if i < bytes.len() && bytes[i] == b'\'' {
-            i += 1;
-            while i < bytes.len() && bytes[i] != b'\'' {
-                if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                    i += 1;
-                }
-                value.push(bytes[i] as char);
-                i += 1;
-            }
-            i += 1;
-        } else {
-            while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
-                if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                    i += 1;
-                }
-                value.push(bytes[i] as char);
-                i += 1;
-            }
-        }
-        if key == "sslmode" {
-            return Some((value_start..i.min(bytes.len()), value));
-        }
-    }
-    None
 }
 
 fn log_target(config: &Config, endpoint: &EndpointIdentity, tls: TlsMode) {
@@ -669,18 +595,35 @@ fn connect(
         }
         TlsMode::Prefer => {
             config.ssl_mode(SslMode::Prefer);
-            match config.connect(tls_connector(Check::Nothing)) {
-                Err(error) if is_tls_failure(&error) => {
-                    tracing::warn!(
-                        "TLS failed ({}); retrying without TLS",
-                        safe_error_detail(&error).unwrap_or_else(|| "no reason given".to_owned())
-                    );
-                    config.ssl_mode(SslMode::Disable);
-                    *tls = TlsMode::Disable;
-                    config.connect(NoTls)
+            let started = Instant::now();
+            let error = match config.connect(tls_connector(Check::Nothing)) {
+                Err(error) if is_tls_failure(&error) => error,
+                other => return other,
+            };
+            // The retry gets what is left of the connect timeout, so the
+            // two attempts together stay within it.
+            let timeout = config.get_connect_timeout().copied();
+            if let Some(timeout) = timeout {
+                match timeout.checked_sub(started.elapsed()) {
+                    Some(left) if !left.is_zero() => {
+                        config.connect_timeout(left);
+                    }
+                    _ => return Err(error),
                 }
-                other => other,
             }
+            tracing::warn!(
+                "TLS failed ({}); retrying without TLS",
+                safe_error_detail(&error).unwrap_or_else(|| "no reason given".to_owned())
+            );
+            config.ssl_mode(SslMode::Disable);
+            let connected = config.connect(NoTls);
+            if let Some(timeout) = timeout {
+                config.connect_timeout(timeout);
+            }
+            if connected.is_ok() {
+                *tls = TlsMode::Disable;
+            }
+            connected
         }
         TlsMode::Require => {
             config.ssl_mode(SslMode::Require);
@@ -697,7 +640,25 @@ fn connect(
     }
 }
 
+/// A rustls error anywhere in the chain means the handshake failed. The
+/// driver's own TLS message covers failures rustls does not raise, such as
+/// the server closing the connection mid-handshake.
 fn is_tls_failure(error: &postgres::error::Error) -> bool {
+    let mut source = std::error::Error::source(error);
+    while let Some(current) = source {
+        if current.is::<rustls::Error>() {
+            return true;
+        }
+        if let Some(io) = current.downcast_ref::<std::io::Error>() {
+            if io
+                .get_ref()
+                .is_some_and(|inner| inner.is::<rustls::Error>())
+            {
+                return true;
+            }
+        }
+        source = current.source();
+    }
     error
         .to_string()
         .starts_with("error performing TLS handshake")
@@ -721,25 +682,36 @@ fn is_conninfo(value: &str) -> bool {
 /// What the TLS connector checks in the server's certificate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Check {
-    Nothing,
-    Authority,
-    AuthorityAndName,
+    Nothing = 0,
+    Authority = 1,
+    AuthorityAndName = 2,
 }
 
+/// The connector for `check`, built once per process.
 fn tls_connector(check: Check) -> MakeTlsConnector {
+    static CONNECTORS: [OnceLock<MakeTlsConnector>; 3] =
+        [OnceLock::new(), OnceLock::new(), OnceLock::new()];
+    CONNECTORS[check as usize]
+        .get_or_init(|| build_tls_connector(check))
+        .clone()
+}
+
+fn build_tls_connector(check: Check) -> MakeTlsConnector {
     let provider = Arc::new(rustls::crypto::aws_lc_rs::default_provider());
-    let roots = Arc::new(RootCertStore::from_iter(
-        webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
-    ));
     let builder = ClientConfig::builder_with_provider(provider.clone())
         .with_safe_default_protocol_versions()
         .expect("the default provider supports the default TLS versions");
+    let roots = || {
+        Arc::new(RootCertStore::from_iter(
+            webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
+        ))
+    };
     let config = match check {
-        Check::AuthorityAndName => builder.with_root_certificates(roots),
+        Check::AuthorityAndName => builder.with_root_certificates(roots()),
         Check::Authority => builder
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(AnyName(
-                WebPkiServerVerifier::builder_with_provider(roots, provider)
+                WebPkiServerVerifier::builder_with_provider(roots(), provider)
                     .build()
                     .expect("the bundled roots are valid"),
             ))),
@@ -1028,6 +1000,11 @@ mod tests {
     use super::*;
     use postgres::config::Host;
 
+    /// Resolves without the process environment or any socket directory.
+    fn resolve(params: &ConnectionParams) -> Result<(Config, TlsMode), AdapterError> {
+        resolve_config_with(params, &[], &|_| None)
+    }
+
     #[test]
     fn read_only_guard_is_appended_after_existing_options() {
         assert_eq!(
@@ -1043,7 +1020,7 @@ mod tests {
 
     #[test]
     fn explicit_postgresql_url_builds_a_client_config() {
-        let config = resolve_config(&ConnectionParams {
+        let config = resolve(&ConnectionParams {
             dbname: Some("postgresql://probe:secret@localhost:6543/probe_main".to_owned()),
             ..ConnectionParams::default()
         })
@@ -1056,7 +1033,7 @@ mod tests {
 
     #[test]
     fn keyword_string_overrides_individual_options() {
-        let config = resolve_config(&ConnectionParams {
+        let config = resolve(&ConnectionParams {
             host: Some("cli-host".to_owned()),
             port: Some(1111),
             username: Some("cli-user".to_owned()),
@@ -1075,7 +1052,7 @@ mod tests {
 
     #[test]
     fn individual_options_resolve_without_environment() {
-        let config = resolve_config(&ConnectionParams {
+        let config = resolve(&ConnectionParams {
             host: Some("db.example".to_owned()),
             port: Some(6543),
             username: Some("probe".to_owned()),
@@ -1094,13 +1071,10 @@ mod tests {
 
     #[test]
     fn plain_dbname_defaults_host_to_localhost_without_a_socket() {
-        let config = resolve_config_with(
-            &ConnectionParams {
-                dbname: Some("app".to_owned()),
-                ..ConnectionParams::default()
-            },
-            &[],
-        )
+        let config = resolve(&ConnectionParams {
+            dbname: Some("app".to_owned()),
+            ..ConnectionParams::default()
+        })
         .unwrap()
         .0;
         assert_eq!(config.get_dbname(), Some("app"));
@@ -1125,6 +1099,7 @@ mod tests {
                 ..ConnectionParams::default()
             },
             &directories,
+            &|_| None,
         )
         .unwrap()
         .0;
@@ -1136,7 +1111,7 @@ mod tests {
 
     #[test]
     fn socket_file_host_means_its_directory_and_port() {
-        let config = resolve_config(&ConnectionParams {
+        let config = resolve(&ConnectionParams {
             host: Some("/var/run/postgresql/.s.PGSQL.5433".to_owned()),
             ..ConnectionParams::default()
         })
@@ -1153,7 +1128,7 @@ mod tests {
 
     #[test]
     fn sslmode_defaults_to_prefer() {
-        let (_, tls) = resolve_config(&ConnectionParams {
+        let (_, tls) = resolve(&ConnectionParams {
             host: Some("db.example".to_owned()),
             ..ConnectionParams::default()
         })
@@ -1162,42 +1137,53 @@ mod tests {
     }
 
     #[test]
-    fn sslmode_is_read_from_a_keyword_string_or_a_url() {
+    fn sslmode_comes_from_the_conninfo_string_then_pgsslmode() {
+        let env = |name: &str| (name == "PGSSLMODE").then(|| "verify-full".to_owned());
         for (dbname, expected) in [
             ("host=db sslmode=disable", TlsMode::Disable),
-            (
-                "host=db sslmode = 'verify-full' dbname=app",
-                TlsMode::VerifyFull,
-            ),
-            ("postgresql://db/app?sslmode=verify-ca", TlsMode::VerifyCa),
-            (
-                "postgresql://db/app?application_name=x&sslmode=require",
-                TlsMode::Require,
-            ),
+            ("host=db sslmode=disable sslmode=require", TlsMode::Require),
+            ("postgresql://db/app?sslmode=require", TlsMode::Require),
+            ("host=db", TlsMode::VerifyFull),
         ] {
-            let (config, tls) = resolve_config(&ConnectionParams {
-                dbname: Some(dbname.to_owned()),
-                ..ConnectionParams::default()
-            })
+            let (_, tls) = resolve_config_with(
+                &ConnectionParams {
+                    dbname: Some(dbname.to_owned()),
+                    ..ConnectionParams::default()
+                },
+                &[],
+                &env,
+            )
             .unwrap();
             assert_eq!(tls, expected, "{dbname}");
-            assert!(!config.get_hosts().is_empty(), "{dbname}");
         }
     }
 
     #[test]
     fn unknown_sslmode_is_rejected() {
-        for dbname in ["host=db sslmode=allow", "postgresql://db/app?sslmode=on"] {
-            let result = resolve_config(&ConnectionParams {
-                dbname: Some(dbname.to_owned()),
+        let result = resolve(&ConnectionParams {
+            dbname: Some("host=db sslmode=allow".to_owned()),
+            ..ConnectionParams::default()
+        });
+        assert_eq!(result.err(), Some(AdapterError::InvalidParameter));
+        let result = resolve_config_with(&ConnectionParams::default(), &[], &|name| {
+            (name == "PGSSLMODE").then(|| "allow".to_owned())
+        });
+        assert_eq!(result.err(), Some(AdapterError::InvalidParameter));
+    }
+
+    #[test]
+    fn socket_file_port_beats_pgport() {
+        let config = resolve_config_with(
+            &ConnectionParams {
+                host: Some("/var/run/postgresql/.s.PGSQL.5433".to_owned()),
                 ..ConnectionParams::default()
-            });
-            assert_eq!(
-                result.err(),
-                Some(AdapterError::InvalidParameter),
-                "{dbname}"
-            );
-        }
+            },
+            &[],
+            &|name| (name == "PGPORT").then(|| "5432".to_owned()),
+        )
+        .unwrap()
+        .0;
+        assert_eq!(config.get_ports(), [5433]);
     }
 
     #[test]

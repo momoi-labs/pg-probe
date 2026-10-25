@@ -20,7 +20,10 @@ reason given.
 
 TLS follows libpq's `sslmode`, read from the conninfo string or `PGSSLMODE`.
 ADR 0003 limits pg-probe to psql's options; `sslmode` is one of them, so no
-new flag is needed.
+new flag is needed. The client parses the conninfo string and knows only
+`disable`, `prefer`, and `require`, so `verify-ca` and `verify-full` come from
+`PGSSLMODE` alone. Parsing the conninfo string a second time to find them
+would mean keeping a second parser in step with the client's.
 
 - `prefer` is the default, as in libpq. It encrypts without checking the
   certificate. When the handshake fails, pg-probe warns and connects once more
@@ -28,6 +31,9 @@ new flag is needed.
 - `require` encrypts without checking the certificate.
 - `verify-ca` and `verify-full` check against the public certificate
   authorities built into the binary. `verify-full` also checks the name.
+- The client cannot tell an explicit `prefer` in the conninfo string from its
+  default, so `PGSSLMODE` applies unless the string says `disable` or
+  `require`.
 - `allow` and `sslrootcert` are not supported.
 
 Without a host, pg-probe uses the socket in `/var/run/postgresql` or `/tmp`
@@ -47,6 +53,7 @@ when the server's socket is there, and `localhost` otherwise.
 - Under `prefer` and `require`, a man in the middle can read the session, as
   with psql's defaults. Operators who need more set `verify-full`.
 - The retry under `prefer` opens a second connection only after the first one
-  failed, so pg-probe still holds at most one connection at a time.
+  failed, so pg-probe still holds at most one connection at a time. The retry
+  gets only what is left of `connect_timeout`.
 - A failed connection shows the server's or the operating system's message.
   Other driver text stays hidden, since it may echo connection input.
