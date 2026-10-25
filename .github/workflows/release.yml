@@ -377,9 +377,9 @@ jobs:
 
       # install.sh downloads from this bucket, which stays public while the
       # repository is private. Versioned files are cached as immutable, so a
-      # retry never replaces them: SHA256SUMS goes up last, and once it is
-      # there the upload only checks that it matches. latest.txt only moves
-      # forward, so an older release that finishes late does not take it back.
+      # retry never replaces one; SHA256SUMS goes up last. latest.txt only
+      # moves forward, so an older release that finishes late does not take
+      # it back.
       - name: Upload assets to R2
         if: ${{ vars.R2_BUCKET != '' }}
         env:
@@ -411,26 +411,28 @@ jobs:
             echo "$err" >&2
             exit 1
           }
-          if exists "v${version}/SHA256SUMS"; then
-            r2 "${prefix}/SHA256SUMS" remote-sums
-            if ! cmp -s remote-sums dist/SHA256SUMS; then
-              echo "R2 already holds different files for v${version}" >&2
-              exit 1
-            fi
-            echo "R2 already holds v${version}"
-          else
-            for file in \
-              "pg-probe-v${version}-x86_64-unknown-linux-musl.tar.gz" \
-              "pg-probe-v${version}-aarch64-unknown-linux-musl.tar.gz" \
-              "pg-probe_${version}_amd64.deb" \
-              "pg-probe_${version}_arm64.deb" \
-              "pg-probe-${version}-1.x86_64.rpm" \
-              "pg-probe-${version}-1.aarch64.rpm" \
-              SHA256SUMS; do
+          # An object already there is never replaced: identical bytes are
+          # skipped, and different bytes stop the release.
+          for file in \
+            "pg-probe-v${version}-x86_64-unknown-linux-musl.tar.gz" \
+            "pg-probe-v${version}-aarch64-unknown-linux-musl.tar.gz" \
+            "pg-probe_${version}_amd64.deb" \
+            "pg-probe_${version}_arm64.deb" \
+            "pg-probe-${version}-1.x86_64.rpm" \
+            "pg-probe-${version}-1.aarch64.rpm" \
+            SHA256SUMS; do
+            if exists "v${version}/${file}"; then
+              r2 "${prefix}/${file}" remote-file
+              if ! cmp -s remote-file "dist/${file}"; then
+                echo "R2 already holds a different ${file} for v${version}" >&2
+                exit 1
+              fi
+              echo "R2 already holds ${file}"
+            else
               r2 --cache-control "public, max-age=31536000, immutable" \
                 "dist/${file}" "${prefix}/${file}"
-            done
-          fi
+            fi
+          done
           current=""
           if exists latest.txt; then
             r2 "s3://${R2_BUCKET}/latest.txt" remote-latest
