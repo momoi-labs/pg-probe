@@ -184,6 +184,10 @@ struct TopArgs {
     #[arg(short, long, value_name = "SECONDS", default_value_t = 2)]
     interval: u64,
 
+    /// Print the steps of the connection on stderr before the view starts.
+    #[arg(short, long)]
+    verbose: bool,
+
     /// Print help.
     #[arg(short = '?', long = "help", action = clap::ArgAction::Help)]
     help: Option<bool>,
@@ -212,7 +216,11 @@ fn top(args: TopArgs) -> ExitCode {
         username: args.username,
         dbname: args.dbname,
     };
-    match pg_probe::top::run(&params, std::time::Duration::from_secs(args.interval)) {
+    match pg_probe::top::run(
+        &params,
+        std::time::Duration::from_secs(args.interval),
+        args.verbose,
+    ) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("pg-probe: {error}");

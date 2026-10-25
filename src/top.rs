@@ -201,6 +201,8 @@ ORDER BY query_start ASC NULLS LAST"
 pub enum TopError {
     #[error(transparent)]
     Postgres(#[from] AdapterError),
+    #[error("the PostgreSQL connection failed: {0}")]
+    Connection(String),
     #[error("terminal error: {0}")]
     Terminal(#[from] std::io::Error),
 }
@@ -499,9 +501,19 @@ impl OsState {
 
 /// Opens a read-only session and runs the interactive view until the
 /// operator quits or the server stops answering.
-pub fn run(params: &ConnectionParams, interval: Duration) -> Result<(), TopError> {
-    let client =
-        ConnectedClient::open_read_only(params, STATEMENT_TIMEOUT_MS, SOURCE, &mut Vec::new())?;
+/// Runs the view. With `verbose`, the steps of the connection go to stderr,
+/// before the view takes the screen.
+pub fn run(params: &ConnectionParams, interval: Duration, verbose: bool) -> Result<(), TopError> {
+    let client = if verbose {
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_target(false)
+            .with_writer(io::stderr)
+            .finish();
+        tracing::subscriber::with_default(subscriber, || connect(params))?
+    } else {
+        connect(params)?
+    };
     let server = read_server(&client)?;
     let sql = backends_sql(server.version_num);
     let local = is_local(client.endpoint());
@@ -531,6 +543,18 @@ pub fn run(params: &ConnectionParams, interval: Duration) -> Result<(), TopError
     restore_terminal(&mut io::stdout());
     ratatui::restore();
     result
+}
+
+/// Opens the session, and on failure says why when the reason is safe to
+/// show: the server's message or the operating system's.
+fn connect(params: &ConnectionParams) -> Result<ConnectedClient, TopError> {
+    let mut outcomes = Vec::new();
+    ConnectedClient::open_read_only(params, STATEMENT_TIMEOUT_MS, SOURCE, &mut outcomes).map_err(
+        |error| match (&error, outcomes.pop().and_then(|outcome| outcome.detail)) {
+            (AdapterError::ConnectionFailed, Some(detail)) => TopError::Connection(detail),
+            _ => TopError::Postgres(error),
+        },
+    )
 }
 
 /// The Kiso theme of the terminal views: the dark theme with the gold

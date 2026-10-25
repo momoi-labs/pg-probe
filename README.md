@@ -188,6 +188,9 @@ pg-probe top -h db.example.com -U monitor -d app -i 5
 ```
 
 `-i`/`--interval` sets the refresh interval in seconds (default 2).
+`-v`/`--verbose` prints the steps of the connection on stderr before the view
+starts: the socket or host, the user, the database, the `sslmode`, and why a
+TLS handshake or the connection failed.
 
 | Key | Action |
 |---|---|
