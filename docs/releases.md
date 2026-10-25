@@ -70,8 +70,10 @@ latest.txt                  the current version, for example 0.3.0
 v<version>/<asset>          the archives, packages and SHA256SUMS
 ```
 
-The versioned files never change, so they are cached for a year. `latest.txt`
-is cached for five minutes and is written last.
+The versioned files never change, so they are cached for a year. A retry
+does not upload them again: when `SHA256SUMS` for the version is already in
+the bucket, the release only checks that it matches. `latest.txt` is cached
+for five minutes, is written last, and only moves to a newer version.
 
 The upload runs only when the `R2_BUCKET` variable is set. It needs these
 settings in the `release` environment:
