@@ -179,6 +179,7 @@ p { margin: 0; }
   .nav .wrap > ul > li:not(:last-child) { display: none; }
   .split,   .compat { grid-template-columns: 1fr 1fr; }
   .top-grid { grid-template-columns: 1fr; }
+  .grid3 { grid-template-columns: 1fr; }
   .cost { grid-template-columns: repeat(3, 1fr); }
   .cost h3, .cost .fine { grid-column: 1 / -1; }
   .sheets { min-height: 26rem; }

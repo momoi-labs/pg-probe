@@ -9,7 +9,9 @@
 /*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
-  X-Frame-Options: DENY
+  # The hero frames the site's own copy of the console, so only this origin
+  # may frame a page.
+  X-Frame-Options: SAMEORIGIN
 
 # Hashed, content-addressed build output (_astro/*.HASH.ext) never changes
 # under the same URL, so it's safe to cache forever.
