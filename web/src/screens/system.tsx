@@ -734,7 +734,16 @@ function CgroupEvents() {
       </NotSupportedPanel>
     )
   }
-  const keyOf = (row: Row) => `${row.controller}.${row.event_name}`
+  // Older captures recorded cgroup v1 CPU usage as
+  // cpu.usage_us, in nanoseconds. It is the same counter as cpu.usage_usec.
+  const keyOf = (row: Row) =>
+    row.controller === 'cpu' && row.event_name === 'usage_us'
+      ? 'cpu.usage_usec'
+      : `${row.controller}.${row.event_name}`
+  const valueOf = (row: Row | undefined) => {
+    const value = num(row, 'cumulative_value')
+    return value != null && row?.event_name === 'usage_us' ? value / 1000 : value
+  }
   // The counters the report explains, when the cgroup has them. Cgroup v1
   // records only CPU usage, so it shows that.
   const present = [...new Set((data ?? []).map(keyOf))]
@@ -747,10 +756,7 @@ function CgroupEvents() {
       Object.fromEntries(
         keys.map((key) => [
           key,
-          num(
-            rows.find((row) => keyOf(row) === key),
-            'cumulative_value',
-          ),
+          valueOf(rows.find((row) => keyOf(row) === key)),
         ]),
       ),
     (delta) => delta,
