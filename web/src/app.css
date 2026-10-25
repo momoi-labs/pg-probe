@@ -113,6 +113,34 @@ p.report-notes {
   .tile-grid > * {
     break-inside: avoid;
   }
+  /* A section title stays with the text of its first pane. When that pane
+     does not fit under the title, as with a long translation or a legend of
+     unknown values, it breaks between its notes and its chart instead of
+     leaving the title alone on a page. Each block stays whole. Chrome does
+     not fragment a grid row well, so the sheet is a block on paper. */
+  .report > .disclosure .pane-grid-body > .grid-pane:first-child {
+    break-inside: auto;
+  }
+  .report .report-sheet {
+    display: block;
+  }
+  .report .report-sheet > * {
+    break-inside: avoid;
+  }
+  .report .report-sheet > * + * {
+    margin-block-start: var(--spacing-sm);
+  }
+  /* The padding at the end of a section would spill onto a blank page of its
+     own when the section fills its last page, since the next section starts
+     a page. */
+  .report > .disclosure > .disclosure-content {
+    padding-block-end: 0;
+  }
+  /* A section starts a page, so the margin that separates it from the one
+     before has nothing to separate. Chrome keeps it after a forced break. */
+  .report > :is(section, .disclosure) {
+    margin-block-start: 0;
+  }
   .report a {
     color: inherit;
   }
@@ -136,13 +164,16 @@ p.report-notes {
 }
 /* The report pages carry a running header: the lockup and the server and
    capture period, which the cover sets in --report-logo and
-   --report-running, over a rule. The footer names the site and the page. The side margins match the
-   cover, so the report is narrower than Kiso's 12mm default. */
+   --report-running, over a rule. The right box takes the rest of the line,
+   so the two borders meet without a gap. The footer names the site and the
+   page. The side margins match the cover, so the report is narrower than
+   Kiso's 12mm default. The top and bottom margins leave 257mm for content,
+   which fits a section title and its first pane in every report language. */
 .report {
   width: calc(210mm - 2 * 22mm);
 }
 @page report {
-  margin: 30mm 22mm 22mm;
+  margin: 24mm 22mm 16mm;
   @top-left {
     content: var(--report-logo, "");
     width: 40mm;
@@ -152,7 +183,7 @@ p.report-notes {
   }
   @top-right {
     content: var(--report-running, "");
-    width: 126mm;
+    width: auto;
     vertical-align: bottom;
     text-align: right;
     padding-bottom: var(--spacing-md);
@@ -164,7 +195,7 @@ p.report-notes {
   @bottom-left {
     content: "pg-probe.dev";
     vertical-align: top;
-    padding-top: var(--spacing-xl);
+    padding-top: var(--spacing-lg);
     font-family: var(--font-body);
     font-size: var(--type-size-metadata);
     color: var(--color-muted-foreground);
@@ -172,7 +203,7 @@ p.report-notes {
   @bottom-right {
     content: var(--report-page, "Page ") counter(page) var(--report-page-of, " of ") counter(pages);
     vertical-align: top;
-    padding-top: var(--spacing-xl);
+    padding-top: var(--spacing-lg);
   }
 }
 /* The running header is the rule above each section, so a section title

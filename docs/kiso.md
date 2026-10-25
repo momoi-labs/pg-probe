@@ -147,6 +147,11 @@ each with its column title.
   margin boxes: the lockup and the server and period, over a rule. Since the
   header already separates each page, section headings drop Kiso's primary
   rule. The footer adds `pg-probe.dev` on the left.
+- In print, the first pane of a report section may break between its notes
+  and its chart, so a section title is never alone on a page. Kiso keeps a
+  pane whole. The margins leave room for a title and its first pane in every
+  report language, so the break happens only when a pane is longer than
+  usual, as with a legend of unknown values.
 - The report names the unavailable sources on a Data coverage page after
   the cover, not on the cover, since a host can lack more than ten.
   Kiso's report pattern asks to name them on the cover.
