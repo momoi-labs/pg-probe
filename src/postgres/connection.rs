@@ -460,7 +460,8 @@ fn resolve_config_with(
     }
 
     // A `hostaddr` in the conninfo string is where the client connects. It
-    // also names the host, since TLS needs a name for the server.
+    // also names the host, since the client does TLS only with a name. With
+    // a socket directory as the host there is no name, so TLS fails there.
     if config.get_hosts().is_empty() {
         match host {
             Some(host) => {
@@ -1236,6 +1237,19 @@ mod tests {
             let endpoint = endpoint_from_config(&config).unwrap();
             assert_eq!(endpoint.endpoint_kind, EndpointKind::Tcp, "{dbname}");
             assert_eq!(endpoint.host, "127.0.0.1", "{dbname}");
+        }
+    }
+
+    #[test]
+    fn hostaddr_alone_names_the_host_for_tls() {
+        let (config, _) = resolve(&ConnectionParams {
+            dbname: Some("hostaddr=127.0.0.1 sslmode=require".to_owned()),
+            ..ConnectionParams::default()
+        })
+        .unwrap();
+        match config.get_hosts() {
+            [Host::Tcp(host)] => assert_eq!(host, "127.0.0.1"),
+            other => panic!("expected the hostaddr as the host, got {other:?}"),
         }
     }
 

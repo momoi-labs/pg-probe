@@ -55,5 +55,8 @@ when the server's socket is there, and `localhost` otherwise.
 - The retry under `prefer` opens a second connection only after the first one
   failed, so pg-probe still holds at most one connection at a time. The retry
   gets only what is left of `connect_timeout`.
+- The client does TLS only when it has a host name. A `hostaddr` alone also
+  serves as the name. A socket directory as the host with a `hostaddr` leaves
+  no name, so `require` fails there and `prefer` falls back to no TLS.
 - A failed connection shows the server's or the operating system's message.
   Other driver text stays hidden, since it may echo connection input.
