@@ -251,3 +251,42 @@ fn install_script_rejects_a_checksum_mismatch() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("checksum mismatch"));
     assert!(!bin.join("pg-probe").exists());
 }
+
+#[test]
+fn install_script_installs_for_the_user_when_sudo_refuses() {
+    // As root the script would install a system package on this host.
+    let uid = Command::new("id").arg("-u").output().unwrap();
+    if String::from_utf8_lossy(&uid.stdout).trim() == "0" {
+        return;
+    }
+    let dir = tempdir().unwrap();
+    let bucket = fake_bucket(dir.path());
+    let fake_bin = dir.path().join("fake-bin");
+    fs::create_dir_all(&fake_bin).unwrap();
+    let sudo = fake_bin.join("sudo");
+    fs::write(&sudo, "#!/bin/sh\nexit 1\n").unwrap();
+    fs::set_permissions(&sudo, fs::Permissions::from_mode(0o755)).unwrap();
+    let home = dir.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    let output = Command::new("sh")
+        .arg(repo_root().join("site/public/install.sh"))
+        .env(
+            "PG_PROBE_DOWNLOAD_URL",
+            format!("file://{}", bucket.display()),
+        )
+        .env(
+            "PATH",
+            format!("{}:{}", fake_bin.display(), std::env::var("PATH").unwrap()),
+        )
+        .env("HOME", &home)
+        .env_remove("PG_PROBE_INSTALL_DIR")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(home.join(".local/bin/pg-probe").is_file());
+}

@@ -46,28 +46,36 @@ sha256() {
   fi
 }
 
-# Picks how to run commands as root: directly, through sudo or doas, or not
-# at all. An empty $sudo with $can_root=yes means we are root.
-detect_root() {
-  sudo=""
-  can_root=no
-  if [ "$(id -u)" -eq 0 ]; then
-    can_root=yes
-  elif command -v sudo >/dev/null 2>&1; then
-    sudo=sudo
-    can_root=yes
-  elif command -v doas >/dev/null 2>&1; then
-    sudo=doas
-    can_root=yes
+# Succeeds when commands can run as root: directly, or through sudo or doas
+# once they grant it. A user who is refused, or who has no terminal to type
+# a password in, gets no root. The answer is kept for later calls.
+can_root() {
+  if [ -z "${root:-}" ]; then
+    root=no
+    sudo=""
+    if [ "$(id -u)" -eq 0 ]; then
+      root=yes
+    else
+      for tool in sudo doas; do
+        command -v "$tool" >/dev/null 2>&1 || continue
+        if "$tool" -n true 2>/dev/null; then
+          sudo="$tool"
+        elif (: </dev/tty) 2>/dev/null; then
+          say "$tool may ask for your password"
+          if "$tool" true </dev/tty; then
+            sudo="$tool"
+          fi
+        fi
+        break
+      done
+      [ -z "$sudo" ] || root=yes
+    fi
   fi
+  [ "$root" = yes ]
 }
 
 as_root() {
   if [ -n "$sudo" ]; then
-    if [ -z "${asked:-}" ]; then
-      say "$sudo may ask for your password"
-      asked=yes
-    fi
     "$sudo" "$@"
   else
     "$@"
@@ -96,7 +104,7 @@ install_binary() {
 
   if mkdir -p "$dir" 2>/dev/null && [ -w "$dir" ]; then
     install -m 0755 "$binary" "$dir/pg-probe"
-  elif [ "$can_root" = yes ]; then
+  elif can_root; then
     as_root mkdir -p "$dir"
     as_root install -m 0755 "$binary" "$dir/pg-probe"
   else
@@ -144,13 +152,12 @@ main() {
   esac
   base="$download_url/v$version"
 
-  detect_root
-
   # A package needs root, so without it the binary goes in ~/.local/bin.
   method=binary
   dir="${PG_PROBE_INSTALL_DIR:-}"
   if [ -z "$dir" ]; then
-    if [ "$can_root" = no ]; then
+    if ! can_root; then
+      say "no root access; installing for this user only"
       dir="${HOME:?}/.local/bin"
     elif command -v dpkg >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
       method=deb
