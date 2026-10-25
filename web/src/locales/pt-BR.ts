@@ -350,7 +350,7 @@ const translation: Translation = {
     },
     memory: {
       shows:
-        'Como o host usou a RAM. Em uso é a memória ocupada por programas. Memória compartilhada inclui o shared_buffers do PostgreSQL. Cache de páginas são dados de arquivos que o kernel mantém para leituras rápidas, e Buffers são metadados do sistema de arquivos. Livre é a memória que ninguém usa.',
+        'Como o host usou a RAM. Em uso é a memória ocupada por programas. Memória compartilhada inclui o shared_buffers do PostgreSQL. Cache de páginas são dados de arquivos que o kernel mantém para leituras rápidas, e Buffers são metadados do sistema de arquivos. Livre é a memória que ninguém usa. Com huge pages, o shared_buffers conta como Em uso.',
       look: 'Pouca memória Livre, por si só, é normal, porque o Linux ocupa a memória que sobra com cache de páginas. O sinal de alerta é um cache de páginas que encolhe enquanto Em uso cresce. O PostgreSQL então encontra menos dados na memória e lê mais do disco. Leia este gráfico junto com Taxa de acerto do cache e Swap em uso.',
     },
     'swap-in-use': {
@@ -368,7 +368,7 @@ const translation: Translation = {
     },
     'pressure-stall': {
       shows:
-        'Parcela do tempo em que pelo menos uma tarefa ficou parada esperando por CPU, memória ou I/O, em janelas de 10 segundos. O kernel informa esse valor em /proc/pressure.',
+        'Parcela do tempo em que pelo menos uma tarefa ficou parada esperando por CPU, memória ou I/O, na média dos últimos 10 segundos. O Linux 4.20 e mais novos informam esse valor em /proc/pressure. O RHEL 8 precisa da opção de boot psi=1.',
       look: 'Valores perto de zero são saudáveis. Um valor que fica acima de 10% mostra qual recurso segurou o trabalho. Pressão de memória acima de zero indica que tarefas esperaram enquanto o kernel liberava memória. Pressão de I/O costuma coincidir com latência de disco alta.',
     },
     'filesystem-usage': {
@@ -399,7 +399,7 @@ const translation: Translation = {
     },
     'network-drops-and-errors': {
       shows: 'Pacotes descartados e erros de interface por segundo, recebidos e enviados, em todas as interfaces.',
-      look: 'Um host saudável mostra zero. Descartes constantes na recepção costumam indicar que os buffers da interface transbordam sob carga. Erros apontam para um problema de cabo, driver ou placa de rede. Cada descarte faz o TCP reenviar os dados, o que deixa clientes e standbys mais lentos.',
+      look: 'Uma taxa baixa e constante de descartes na recepção pode ser de quadros que o host não trata, como protocolos desconhecidos. Descartes que sobem junto com o tráfego indicam que os buffers da interface transbordam sob carga. Erros apontam para um problema de cabo, driver ou placa de rede. Um pacote TCP descartado precisa ser reenviado, o que deixa clientes e standbys mais lentos.',
     },
     'disk-read-latency': {
       shows: 'Tempo médio de uma requisição de leitura em cada um dos cinco discos mais ocupados, em milissegundos.',
@@ -416,21 +416,21 @@ const translation: Translation = {
     'cgroup-memory': {
       shows:
         'Memória e swap atribuídos ao cgroup do pg-probe. Quando o pg-probe roda no contêiner ou na unidade systemd do PostgreSQL, esta é a memória desse contêiner.',
-      look: 'Perto do limite, o kernel recupera memória dentro do cgroup. No limite, ele mata um processo. O cache de páginas também conta para o limite, então um cgroup pode parecer cheio quando a maior parte é cache.',
+      look: 'Perto do limite, o kernel recupera memória dentro do cgroup. No limite, ele recupera com mais força e só mata um processo se a recuperação não liberar o suficiente. O cache de páginas também conta para o limite, então um cgroup pode parecer cheio quando a maior parte é cache.',
     },
     'cgroup-i-o': {
       shows: 'Bytes lidos e gravados por segundo pelo cgroup do pg-probe, em todos os dispositivos.',
-      look: 'Um teto plano pode ser um limite de I/O definido no contêiner. Se a Vazão de disco do host inteiro tem folga enquanto esta linha está plana, o limite está no contêiner, não no disco.',
+      look: 'Um teto plano pode ser um limite de I/O definido no contêiner. Se a Vazão de disco do host inteiro tem folga enquanto esta linha está plana, o limite está no contêiner, não no disco. No cgroup v1, o kernel não atribui ao contêiner as gravações com buffer, então esta linha deixa de fora a maior parte das gravações.',
     },
     'cgroup-events': {
       shows:
         'Variação por intervalo de até cinco contadores do cgroup do pg-probe, com nome no formato controlador.contador, de cpu.stat, memory.events e pids.events. Contadores de CPU terminados em usec são microssegundos de tempo de CPU. Os outros contadores contam eventos.',
-      look: 'cpu.nr_throttled acima de zero indica que o limite de CPU do cgroup pausou suas tarefas. memory.high conta as vezes em que o kernel limitou o cgroup e recuperou memória no seu limite flexível, o que nunca mata um processo. memory.max conta as vezes em que o cgroup atingiu seu limite rígido. O kernel só mata um processo quando a recuperação falha nesse ponto, e memory.oom_kill conta essas mortes. A morte de qualquer processo do PostgreSQL reinicia o servidor. pids.max indica que o cgroup não conseguiu iniciar um processo, então novas conexões falham.',
+      look: 'cpu.nr_throttled acima de zero indica que o limite de CPU do cgroup pausou suas tarefas. memory.high conta as vezes em que o kernel limitou o cgroup e recuperou memória no seu limite flexível, o que nunca mata um processo. memory.max conta as vezes em que o cgroup atingiu seu limite rígido. O kernel só mata um processo quando a recuperação falha nesse ponto, e memory.oom_kill conta essas mortes. Quando um backend do PostgreSQL é morto, o servidor encerra todas as sessões e executa a recuperação de falha. pids.max indica que o cgroup não conseguiu iniciar um processo, então novas conexões falham.',
     },
     'connections-by-state': {
       shows:
         'Conexões de clientes em cada amostra, por estado. Conexões active executam uma consulta. Conexões idle esperam pelo cliente. Conexões idle in transaction têm uma transação aberta, mas não executam nada.',
-      look: 'Conexões active muito acima do número de CPUs indicam que as consultas disputam núcleos. Conexões idle in transaction que se prolongam seguram locks e impedem o vacuum de remover tuplas mortas. Compare o total com max_connections no indicador Conexões. Muitas conexões idle sugerem usar um pooler de conexões.',
+      look: 'Conexões active muito acima do número de CPUs indicam que as consultas disputam núcleos. Conexões idle in transaction que se prolongam seguram locks e podem impedir o vacuum de remover tuplas mortas. Compare o total com max_connections no indicador Conexões. Muitas conexões idle sugerem usar um pooler de conexões.',
     },
     'cache-hit-ratio': {
       shows:
@@ -449,12 +449,12 @@ const translation: Translation = {
     'wal-and-checkpoint-writes': {
       shows:
         'WAL gerado por segundo, e páginas de dados gravadas pelo checkpointer, pelo background writer e pelos próprios backends.',
-      look: 'A maior parte das gravações de páginas deve vir do checkpointer. Gravações dos backends indicam que uma consulta precisou gravar uma página suja antes de reutilizar o buffer, e esperou por essa gravação. Muitas gravações dos backends apontam para um shared_buffers pequeno ou um background writer que fica para trás. Picos grandes de checkpoint podem saturar o disco, então compare com a latência de disco.',
+      look: 'A maior parte das gravações de páginas deve vir do checkpointer. Gravações dos backends indicam que uma consulta precisou gravar uma página suja antes de reutilizar o buffer, e esperou por essa gravação. Até o PostgreSQL 16, gravações dos backends que persistem fora de cargas em massa e do VACUUM apontam para um shared_buffers pequeno ou um background writer que fica para trás. Picos grandes de checkpoint podem saturar o disco, então compare com a latência de disco.',
     },
     'replication-lag': {
       shows:
         'Standbys na última amostra, de pg_stat_replication, agrupados por estado e estado de sincronização, com o número de standbys e o maior lag de cada grupo.',
-      look: 'Este é um único momento, então compare com capturas anteriores para ver se o lag cresce. Lag crescente indica que um standby, seu disco ou a rede não acompanha. Com lag grande, leituras no standby retornam dados antigos. Com replicação assíncrona, um failover então perde as transações mais recentes.',
+      look: 'Este é um único momento, então compare com capturas anteriores para ver se o lag cresce. Lag crescente indica que um standby, seu disco ou a rede não acompanha. Com lag grande, leituras no standby retornam dados antigos. Com replicação assíncrona, um failover pode perder as transações que o standby ainda não tinha recebido.',
     },
     'database-size': {
       shows: 'Tamanho em disco de cada banco de dados no momento da captura.',
@@ -484,22 +484,22 @@ const translation: Translation = {
     },
     'longest-time-in-state': {
       shows:
-        'Para cada estado de conexão, o maior tempo que qualquer sessão de cliente estava nele desde a última mudança de estado, em minutos.',
-      look: 'Um tempo longo em active é uma consulta lenta. Um tempo longo em idle in transaction segura locks e bloqueia o vacuum, e idle_in_transaction_session_timeout pode encerrar essas sessões. Tempos longos em idle não causam dano por si só.',
+        'Para sessões active e idle in transaction, o maior tempo que qualquer sessão de cliente estava nesse estado desde a última mudança de estado, em minutos.',
+      look: 'Um tempo longo em active é uma consulta lenta. Um tempo longo em idle in transaction segura locks e pode bloquear o vacuum. A partir do PostgreSQL 9.6, idle_in_transaction_session_timeout pode encerrar essas sessões.',
     },
     'wait-events': {
       shows:
         'Backends ativos em cada amostra, pelo tipo de evento de espera que informaram. Sem evento de espera significa que o PostgreSQL não informou nenhum. O backend estava executando em uma CPU ou esperando o sistema operacional escaloná-lo.',
-      look: 'Esperas Lock indicam que sessões bloquearam umas às outras. Esperas IO são tempo esperando por leituras, gravações ou flushes, então compare com os gráficos de latência de disco. Esperas LWLock apontam para disputa dentro do PostgreSQL, por exemplo no WAL ou no mapeamento de buffers. Muitos backends sem evento de espera em um host ocupado podem indicar fila pela CPU.',
+      look: 'Esperas Lock indicam que sessões bloquearam umas às outras. Esperas IO são tempo esperando por leituras, gravações ou flushes, então compare com os gráficos de latência de disco. Esperas LWLock apontam para disputa dentro do PostgreSQL, por exemplo no WAL ou no mapeamento de buffers. Muitos backends sem evento de espera em um host ocupado podem indicar fila pela CPU. O PostgreSQL 9.6 não tem o tipo de espera IO, então nele o tempo esperando pelo disco aparece como sem evento de espera.',
     },
     'deadlocks-and-conflicts': {
       shows: 'Deadlocks, conflitos de recuperação e falhas de checksum por intervalo, em todos os bancos de dados.',
-      look: 'Cada deadlock aborta uma transação. A correção fica na aplicação, normalmente obtendo os locks na mesma ordem em todo lugar. Conflitos de recuperação acontecem em standbys. Qualquer falha de checksum indica que há dados corrompidos no disco. Verifique o log do servidor e o armazenamento no mesmo dia.',
+      look: 'Cada deadlock aborta uma transação. A correção fica na aplicação, normalmente obtendo os locks na mesma ordem em todo lugar. Conflitos de recuperação acontecem em standbys. A partir do PostgreSQL 12, com data checksums ligados, qualquer falha de checksum indica que há dados corrompidos no disco. Verifique o log do servidor e o armazenamento no mesmo dia.',
     },
     'sessions-ended-abnormally': {
       shows:
-        'Sessões por intervalo que terminaram sem uma desconexão limpa. Abandonadas significa que o cliente sumiu. Fatal significa que um erro encerrou a sessão, incluindo timeouts como idle_in_transaction_session_timeout. Terminadas significa que um operador encerrou a sessão, por exemplo com pg_terminate_backend.',
-      look: 'Sessões abandonadas apontam para problemas de rede, falhas do cliente ou um pooler que derruba conexões. Sessões Fatal vêm de erros e timeouts, e o log do servidor tem a causa de cada uma. Sessões terminadas correspondem a chamadas de pg_terminate_backend feitas por um operador ou uma ferramenta.',
+        'Sessões por intervalo que terminaram sem uma desconexão limpa. Abandonadas significa que o cliente sumiu. Fatal significa que um erro encerrou a sessão, incluindo timeouts como idle_in_transaction_session_timeout. Terminadas significa que um SIGTERM encerrou a sessão, vindo de pg_terminate_backend ou de um desligamento do servidor.',
+      look: 'Sessões abandonadas apontam para problemas de rede, falhas do cliente ou um pooler que derruba conexões. Sessões Fatal vêm de erros e timeouts, e o log do servidor tem a causa de cada uma. Sessões terminadas correspondem a chamadas de pg_terminate_backend feitas por um operador ou uma ferramenta, ou a um desligamento do servidor.',
     },
     'block-i-o-time': {
       shows:
@@ -513,16 +513,16 @@ const translation: Translation = {
     },
     'wal-archiving': {
       shows: 'Arquivos WAL arquivados, e falhas de arquivamento, por intervalo, de pg_stat_archiver.',
-      look: 'Qualquer falha indica que o arquivamento está atrasado, e a point-in-time recovery (PITR) não consegue passar do último arquivo arquivado. O PostgreSQL mantém todo arquivo WAL que não conseguiu arquivar, então o pg_wal cresce até o comando de arquivamento voltar a funcionar e pode encher o disco. Os arquivos arquivados devem acompanhar o WAL gerado.',
+      look: 'Qualquer falha indica que o arquivamento está atrasado, e a point-in-time recovery (PITR) não consegue passar do último arquivo arquivado. O PostgreSQL mantém todo arquivo WAL que não conseguiu arquivar, então o pg_wal (pg_xlog antes do PostgreSQL 10) cresce até o comando de arquivamento voltar a funcionar e pode encher o disco. Os arquivos arquivados devem acompanhar o WAL gerado.',
     },
     'replication-slots': {
       shows:
         'WAL que o PostgreSQL mantém em disco para slots de replicação, como a maior quantidade retida por qualquer slot de cada tipo, físico ou lógico.',
-      look: 'Um slot mantém o WAL até seu consumidor confirmá-lo. Uma linha que só cresce indica que um consumidor está lento, parado ou não existe mais. Sem max_slot_wal_keep_size, esse WAL pode encher o disco e parar o servidor. Remova os slots que ninguém usa.',
+      look: 'Um slot mantém o WAL até seu consumidor confirmá-lo. Uma linha que só cresce indica que um consumidor está lento, parado ou não existe mais. Esse WAL pode encher o disco e parar o servidor. A partir do PostgreSQL 13, max_slot_wal_keep_size pode limitá-lo. Remova os slots que ninguém usa.',
     },
     'slru-reads': {
       shows:
-        'Blocos lidos do disco por segundo pelos caches SLRU. Esses caches pequenos guardam o status das transações, subtransações, multixacts e timestamps de commit.',
+        'Blocos lidos do disco por segundo pelos caches SLRU. Esses caches pequenos guardam o status das transações, subtransações, multixacts, timestamps de commit, LISTEN/NOTIFY e transações serializáveis.',
       look: 'Valores perto de zero são normais. Leituras constantes de subtransações vêm do uso intenso de savepoints ou de blocos de exceção em PL/pgSQL, e podem deixar o servidor inteiro lento. Leituras de multixact vêm de muitas sessões que fazem lock das mesmas linhas, por exemplo com SELECT FOR SHARE ou chaves estrangeiras.',
     },
     'i-o-by-operation': {

@@ -15,7 +15,7 @@ export const explain: Record<string, Explain> = {
   },
   memory: {
     shows:
-      'How the host used its RAM. Used is memory held by programs. Shared memory includes the PostgreSQL shared_buffers. Page cache is file data the kernel keeps for fast reads, and Buffers is filesystem metadata. Free is memory nobody uses.',
+      'How the host used its RAM. Used is memory held by programs. Shared memory includes the PostgreSQL shared_buffers. Page cache is file data the kernel keeps for fast reads, and Buffers is filesystem metadata. Free is memory nobody uses. With huge pages, shared_buffers counts as Used instead.',
     look: 'Low Free alone is normal, because Linux fills spare memory with page cache. The warning sign is a page cache that shrinks while Used grows. PostgreSQL then finds less of its data in memory and reads more from disk. Read this chart with Cache hit ratio and Swap used.',
   },
   'swap-in-use': {
@@ -32,7 +32,7 @@ export const explain: Record<string, Explain> = {
   },
   'pressure-stall': {
     shows:
-      'Share of time at least one task stalled waiting for CPU, memory or I/O, over 10 second windows. The kernel reports it in /proc/pressure.',
+      'Share of time at least one task stalled waiting for CPU, memory or I/O, averaged over the last 10 seconds. Linux 4.20 and newer report it in /proc/pressure. RHEL 8 needs the psi=1 boot option.',
     look: 'Values near zero are healthy. A value that stays above 10% shows which resource held work back. Memory pressure above zero means tasks waited while the kernel freed memory. I/O pressure usually lines up with high disk latency.',
   },
   'filesystem-usage': {
@@ -63,7 +63,7 @@ export const explain: Record<string, Explain> = {
   },
   'network-drops-and-errors': {
     shows: 'Packets dropped and interface errors per second, received and sent, over all interfaces.',
-    look: 'A healthy host shows zero. Steady received drops often mean the interface buffers overflow under load. Errors point to a cable, driver or network card problem. Each drop makes TCP send the data again, which slows clients and standbys.',
+    look: 'A low, steady rate of received drops can be frames the host does not handle, such as unknown protocols. Drops that rise with traffic mean the interface buffers overflow under load. Errors point to a cable, driver or network card problem. A dropped TCP packet must be sent again, which slows clients and standbys.',
   },
   'disk-read-latency': {
     shows: 'Average time a read request took on each of the five busiest disks, in milliseconds.',
@@ -80,21 +80,21 @@ export const explain: Record<string, Explain> = {
   'cgroup-memory': {
     shows:
       'Memory and swap charged to the cgroup of the probe. When the probe runs in the PostgreSQL container or systemd unit, this is the memory of that container.',
-    look: 'Near the limit, the kernel reclaims memory inside the cgroup. At the limit it kills a process. Page cache counts against the limit too, so a cgroup can look full while most of it is cache.',
+    look: 'Near the limit, the kernel reclaims memory inside the cgroup. At the limit it reclaims harder, and it kills a process only if reclaim cannot free enough. Page cache counts against the limit too, so a cgroup can look full while most of it is cache.',
   },
   'cgroup-i-o': {
     shows: 'Bytes read and written per second by the cgroup of the probe, all devices.',
-    look: 'A flat top can be an I/O limit set on the container. If Disk throughput for the whole host has room while this line is flat, the limit is on the container, not on the disk.',
+    look: 'A flat top can be an I/O limit set on the container. If Disk throughput for the whole host has room while this line is flat, the limit is on the container, not on the disk. On cgroup v1, the kernel does not charge buffered writes to the container, so this line misses most writes.',
   },
   'cgroup-events': {
     shows:
       'Change per interval of up to five counters of the cgroup of the probe, named controller.counter, from cpu.stat, memory.events and pids.events. CPU counters ending in usec are microseconds of CPU time. The other counters count events.',
-    look: 'cpu.nr_throttled above zero means the CPU limit of the cgroup paused its tasks. memory.high counts times the kernel throttled the cgroup and reclaimed memory at its soft limit, which never kills a process. memory.max counts times the cgroup reached its hard limit. The kernel kills a process only when reclaim fails there, and memory.oom_kill counts those kills. A kill of any PostgreSQL process restarts the server. pids.max means the cgroup could not start a process, so new connections fail.',
+    look: 'cpu.nr_throttled above zero means the CPU limit of the cgroup paused its tasks. memory.high counts times the kernel throttled the cgroup and reclaimed memory at its soft limit, which never kills a process. memory.max counts times the cgroup reached its hard limit. The kernel kills a process only when reclaim fails there, and memory.oom_kill counts those kills. When a PostgreSQL backend is killed, the server ends every session and runs crash recovery. pids.max means the cgroup could not start a process, so new connections fail.',
   },
   'connections-by-state': {
     shows:
       'Client connections at each sample, by state. Active connections run a query. Idle connections wait for the client. Idle in transaction connections have an open transaction but run nothing.',
-    look: 'Active connections well above the CPU count mean queries compete for cores. Idle in transaction connections that last hold locks and keep vacuum from removing dead rows. Compare the total with max_connections on the Connections tile. Many idle connections suggest a connection pooler.',
+    look: 'Active connections well above the CPU count mean queries compete for cores. Idle in transaction connections that last hold locks and can keep vacuum from removing dead rows. Compare the total with max_connections on the Connections tile. Many idle connections suggest a connection pooler.',
   },
   'cache-hit-ratio': {
     shows:
@@ -113,12 +113,12 @@ export const explain: Record<string, Explain> = {
   'wal-and-checkpoint-writes': {
     shows:
       'WAL generated per second, and data pages written by the checkpointer, the background writer and the backends themselves.',
-    look: 'Most page writes should come from the checkpointer. Backend writes mean a query had to write a dirty page before it could reuse the buffer, and it waited for that write. High backend writes point to a small shared_buffers or a background writer that falls behind. Large checkpoint spikes can saturate the disk, so compare with disk latency.',
+    look: 'Most page writes should come from the checkpointer. Backend writes mean a query had to write a dirty page before it could reuse the buffer, and it waited for that write. Up to PostgreSQL 16, backend writes that persist outside bulk loads and VACUUM point to a small shared_buffers or a background writer that falls behind. Large checkpoint spikes can saturate the disk, so compare with disk latency.',
   },
   'replication-lag': {
     shows:
       'Standbys at the last sample, from pg_stat_replication, grouped by state and sync state, with the number of standbys and the largest lag in each group.',
-    look: 'This is one moment, so compare with earlier captures to see whether lag grows. Lag that grows means a standby, its disk or the network cannot keep up. With large lag, reads on the standby return old data. With asynchronous replication, a failover then loses the most recent transactions.',
+    look: 'This is one moment, so compare with earlier captures to see whether lag grows. Lag that grows means a standby, its disk or the network cannot keep up. With large lag, reads on the standby return old data. With asynchronous replication, a failover can lose the transactions the standby had not received yet.',
   },
   'database-size': {
     shows: 'Size on disk of each database at capture time.',
@@ -148,22 +148,22 @@ export const explain: Record<string, Explain> = {
   },
   'longest-time-in-state': {
     shows:
-      'For each connection state, the longest time any client session had stayed in it since its last state change, in minutes.',
-    look: 'A long active time is a slow query. A long idle in transaction time holds locks and blocks vacuum, and idle_in_transaction_session_timeout can end those sessions. Long idle times do no harm on their own.',
+      'For active and idle in transaction sessions, the longest time any client session had stayed in that state since its last state change, in minutes.',
+    look: 'A long active time is a slow query. A long idle in transaction time holds locks and can block vacuum. From PostgreSQL 9.6, idle_in_transaction_session_timeout can end those sessions.',
   },
   'wait-events': {
     shows:
       'Active backends at each sample, by the type of wait event they reported. No wait event means PostgreSQL reported none. The backend was running on a CPU or waiting for the operating system to schedule it.',
-    look: 'Lock waits mean sessions blocked each other. IO waits are time spent waiting for reads, writes or flushes, so compare them with the disk latency charts. LWLock waits point to contention inside PostgreSQL, for example on WAL or on the buffer mapping. Many backends with no wait event on a busy host can mean they queue for CPU.',
+    look: 'Lock waits mean sessions blocked each other. IO waits are time spent waiting for reads, writes or flushes, so compare them with the disk latency charts. LWLock waits point to contention inside PostgreSQL, for example on WAL or on the buffer mapping. Many backends with no wait event on a busy host can mean they queue for CPU. PostgreSQL 9.6 has no IO wait type, so there time spent on disk shows as no wait event.',
   },
   'deadlocks-and-conflicts': {
     shows: 'Deadlocks, recovery conflicts and checksum failures per interval, over all databases.',
-    look: 'Each deadlock aborts a transaction. The fix is in the application, usually by taking locks in the same order everywhere. Recovery conflicts happen on standbys. Any checksum failure means data on disk is corrupt. Check the server log and the storage the same day.',
+    look: 'Each deadlock aborts a transaction. The fix is in the application, usually by taking locks in the same order everywhere. Recovery conflicts happen on standbys. From PostgreSQL 12, with data checksums on, any checksum failure means data on disk is corrupt. Check the server log and the storage the same day.',
   },
   'sessions-ended-abnormally': {
     shows:
-      'Sessions per interval that ended without a clean disconnect. Abandoned means the client went away. Fatal means an error ended the session, timeouts such as idle_in_transaction_session_timeout included. Killed means an operator ended it, for example with pg_terminate_backend.',
-    look: 'Abandoned sessions point to network problems, client crashes or a pooler that drops connections. Fatal sessions come from errors and timeouts, and the server log has the cause of each. Killed sessions match pg_terminate_backend calls by an operator or a tool.',
+      'Sessions per interval that ended without a clean disconnect. Abandoned means the client went away. Fatal means an error ended the session, timeouts such as idle_in_transaction_session_timeout included. Killed means a SIGTERM ended it, from pg_terminate_backend or a server shutdown.',
+    look: 'Abandoned sessions point to network problems, client crashes or a pooler that drops connections. Fatal sessions come from errors and timeouts, and the server log has the cause of each. Killed sessions match pg_terminate_backend calls by an operator or a tool, or a server shutdown.',
   },
   'block-i-o-time': {
     shows:
@@ -177,16 +177,16 @@ export const explain: Record<string, Explain> = {
   },
   'wal-archiving': {
     shows: 'WAL files archived, and archive failures, per interval, from pg_stat_archiver.',
-    look: 'Any failure means the archive falls behind, and point in time recovery cannot go past the last archived file. PostgreSQL keeps every WAL file it could not archive, so pg_wal grows until the archive command works again and can fill the disk. Archived files should keep pace with the WAL generated.',
+    look: 'Any failure means the archive falls behind, and point-in-time recovery cannot go past the last archived file. PostgreSQL keeps every WAL file it could not archive, so pg_wal (pg_xlog before PostgreSQL 10) grows until the archive command works again and can fill the disk. Archived files should keep pace with the WAL generated.',
   },
   'replication-slots': {
     shows:
       'WAL that PostgreSQL keeps on disk for replication slots, as the largest amount retained by any slot of each type, physical or logical.',
-    look: 'A slot keeps WAL until its consumer confirms it. A line that only grows means a consumer is slow, down or gone. Without max_slot_wal_keep_size, that WAL can fill the disk and stop the server. Drop slots nobody uses.',
+    look: 'A slot keeps WAL until its consumer confirms it. A line that only grows means a consumer is slow, down or gone. That WAL can fill the disk and stop the server. From PostgreSQL 13, max_slot_wal_keep_size can cap it. Drop slots nobody uses.',
   },
   'slru-reads': {
     shows:
-      'Blocks read from disk per second by the SLRU caches. These small caches hold transaction status, subtransactions, multixacts and commit timestamps.',
+      'Blocks read from disk per second by the SLRU caches. These small caches hold transaction status, subtransactions, multixacts, commit timestamps, LISTEN/NOTIFY and serializable transactions.',
     look: 'Values near zero are normal. Steady subtransaction reads come from heavy use of savepoints or of exception blocks in PL/pgSQL, and they can slow the whole server. Multixact reads come from many sessions locking the same rows, for example through SELECT FOR SHARE or foreign keys.',
   },
   'i-o-by-operation': {
