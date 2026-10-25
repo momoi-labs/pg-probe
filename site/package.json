@@ -1,6 +1,7 @@
 {
   "name": "pg-probe-site",
   "type": "module",
+  "packageManager": "pnpm@12.15.0",
   "private": true,
   "scripts": {
     "dev": "astro dev",
