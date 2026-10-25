@@ -584,8 +584,10 @@ fn connect(
     kind: EndpointKind,
     tls: &mut TlsMode,
 ) -> Result<PostgresClient, postgres::Error> {
-    // PostgreSQL never offers TLS on a unix socket.
+    // PostgreSQL never offers TLS on a unix socket, so a `require` from the
+    // conninfo string must not make the client ask for it.
     if kind == EndpointKind::UnixSocket {
+        config.ssl_mode(SslMode::Disable);
         return config.connect(NoTls);
     }
     match *tls {
@@ -888,10 +890,23 @@ fn safe_error_detail(error: &postgres::error::Error) -> Option<String> {
     if let Some(db) = error.as_db_error() {
         return Some(db.message().to_string());
     }
-    std::error::Error::source(error)
-        .and_then(|source| source.downcast_ref::<std::io::Error>())
-        .map(|io| io.to_string())
+    let source = std::error::Error::source(error)?;
+    if let Some(io) = source.downcast_ref::<std::io::Error>() {
+        return Some(io.to_string());
+    }
+    // The driver's fixed TLS messages carry no connection input.
+    let text = source.to_string();
+    SAFE_DRIVER_MESSAGES
+        .contains(&text.as_str())
+        .then_some(text)
 }
+
+/// Driver messages that are safe to show as they are.
+const SAFE_DRIVER_MESSAGES: [&str; 3] = [
+    "server does not support TLS",
+    "no hostname provided for TLS handshake",
+    "weak sslmode \"prefer\" may not be used with sslnegotiation=direct (use \"require\")",
+];
 
 /// Maps a connection error to a stable code plus the OS error number, so an
 /// operator can tell an authentication failure from a network failure without
