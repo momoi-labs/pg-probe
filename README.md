@@ -102,9 +102,28 @@ defaults.
 
 Without any connection options, pg-probe reads the ordinary connection
 environment variables: `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`,
-`PGPASSWORD`, `PGOPTIONS`, `PGAPPNAME`, and `PGCONNECT_TIMEOUT`. Service files
-(`pg_service.conf`), passfiles (`.pgpass`), and multi-host connection strings
-are intentionally unsupported.
+`PGPASSWORD`, `PGOPTIONS`, `PGAPPNAME`, `PGCONNECT_TIMEOUT`, and `PGSSLMODE`.
+Service files (`pg_service.conf`), passfiles (`.pgpass`), and multi-host
+connection strings are intentionally unsupported.
+
+Without a host, pg-probe connects through the socket in `/var/run/postgresql`
+or `/tmp`, whichever holds the server's socket, as psql does, and through
+`localhost` when neither does. `-h` takes the socket directory or the socket
+file itself, such as `/var/run/postgresql/.s.PGSQL.5432`.
+
+TLS over TCP follows libpq's `sslmode`, set with `PGSSLMODE` or in the
+conninfo string, as in `-d "sslmode=require"`:
+
+| `sslmode` | TLS |
+|---|---|
+| `disable` | never |
+| `prefer` (default) | when the server offers it, without checking its certificate; without TLS when the handshake fails |
+| `require` | always, without checking the certificate |
+| `verify-ca` | always, with a certificate signed by a public certificate authority |
+| `verify-full` | as `verify-ca`, and the certificate must name the host |
+
+The verify modes check against the public certificate authorities built into
+pg-probe; `sslrootcert` is not supported. A unix socket never uses TLS.
 
 ### Sampling over time
 
