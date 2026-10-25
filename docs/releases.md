@@ -59,6 +59,44 @@ static musl, so the packages declare no dependencies, not even libc. The
 release fails if either package declares one, and it installs each package
 and runs the smoke test against `/usr/bin/pg-probe`.
 
+## Downloads on R2
+
+The repository is private, so visitors cannot download GitHub release assets.
+The release workflow also copies every asset to a public Cloudflare R2 bucket,
+for downloads that do not need a GitHub account:
+
+```text
+latest.txt                  the current version, for example 0.3.0
+v<version>/<asset>          the archives, packages and SHA256SUMS
+```
+
+The versioned files never change, so they are cached for a year. `latest.txt`
+is cached for five minutes and is written last.
+
+The upload runs only when the `R2_BUCKET` variable is set. It needs these
+settings in the `release` environment:
+
+| Name                   | Kind     | Value                                  |
+|------------------------|----------|----------------------------------------|
+| `R2_BUCKET`            | variable | the bucket name                        |
+| `R2_ACCOUNT_ID`        | variable | the Cloudflare account ID              |
+| `R2_ACCESS_KEY_ID`     | secret   | an R2 API token with write access      |
+| `R2_SECRET_ACCESS_KEY` | secret   | the secret of that token               |
+
+The bucket is public on `https://dl.pg-probe.dev`. To upload a release that
+ran before the bucket existed, log in with `npx wrangler login` and run:
+
+```sh
+gh release download v<version> -D /tmp/release
+for f in /tmp/release/*; do
+  npx wrangler r2 object put "<bucket>/v<version>/$(basename "$f")" \
+    --file "$f" --remote
+done
+echo <version> >/tmp/latest.txt
+npx wrangler r2 object put <bucket>/latest.txt --file /tmp/latest.txt \
+  --content-type text/plain --remote
+```
+
 ## Retry a release
 
 In **Actions > Release > Run workflow**, enter an existing tag to retry a

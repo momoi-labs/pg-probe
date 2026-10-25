@@ -2,7 +2,8 @@ name: Release
 
 # Protected SemVer tags (vMAJOR.MINOR.PATCH) trigger this workflow.
 # Builds use GoReleaser's Rust builder (cargo-zigbuild). No pull_request /
-# pull_request_target triggers. No repository secrets are required.
+# pull_request_target triggers. The R2 upload reads secrets from the release
+# environment and is skipped when vars.R2_BUCKET is unset.
 
 on:
   push:
@@ -373,6 +374,40 @@ jobs:
             exit 1
           fi
           (cd dist && sha256sum -c SHA256SUMS)
+
+      # install.sh downloads from this bucket, which stays public while the
+      # repository is private. latest.txt goes last, so it never names a
+      # version whose files are missing. A retry overwrites the same keys.
+      - name: Upload assets to R2
+        if: ${{ vars.R2_BUCKET != '' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_ENDPOINT: https://${{ vars.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          version="${{ needs.validate.outputs.version }}"
+          put() {
+            aws s3 cp --endpoint-url "$R2_ENDPOINT" --no-progress "$@"
+          }
+          for file in \
+            "pg-probe-v${version}-x86_64-unknown-linux-musl.tar.gz" \
+            "pg-probe-v${version}-aarch64-unknown-linux-musl.tar.gz" \
+            "pg-probe_${version}_amd64.deb" \
+            "pg-probe_${version}_arm64.deb" \
+            "pg-probe-${version}-1.x86_64.rpm" \
+            "pg-probe-${version}-1.aarch64.rpm" \
+            SHA256SUMS; do
+            put --cache-control "public, max-age=31536000, immutable" \
+              "dist/${file}" "s3://${R2_BUCKET}/v${version}/${file}"
+          done
+          printf '%s\n' "$version" >latest.txt
+          put --cache-control "public, max-age=300" --content-type text/plain \
+            latest.txt "s3://${R2_BUCKET}/latest.txt"
 
       - name: Attest release assets
         # GitHub stores artifact attestations only for public repositories on
