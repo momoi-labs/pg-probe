@@ -74,10 +74,13 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   # Tags pushed with GITHUB_TOKEN do not trigger the tag-push workflow.
+  # A called workflow sees only the secrets its caller passes, and the R2
+  # upload needs the release environment's.
   release:
     needs: version
     if: needs.version.outputs.tag != ''
     uses: ./.github/workflows/release.yml
+    secrets: inherit
     with:
       tag: ${{ needs.version.outputs.tag }}
     permissions:
