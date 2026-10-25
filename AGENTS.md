@@ -12,6 +12,12 @@ chosen on purpose. ADRs are append-only: never rewrite the body of an existing
 one. To reverse a decision, add a new ADR and set `status: superseded` and
 `superseded_by` in the frontmatter of the old one.
 
+### Release notes
+
+A change that users can see, in the binary, the console or the report, ships
+with a changeset in the same pull request. See `docs/releases.md`. Check with
+`scripts/check-changeset.sh origin/main` before opening the pull request.
+
 ### Issue tracker
 
 Issues and PRDs for this repository live in GitHub Issues. See

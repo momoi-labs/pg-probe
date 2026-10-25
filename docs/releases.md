@@ -18,6 +18,12 @@ change in English. Commit the generated `.changeset/*.md` with the change.
 Use a patch for fixes and a minor for new behavior. Documentation-only changes
 need no changeset.
 
+The Changeset workflow fails a pull request that changes what ships in the
+binary (`src/`, `schema/`, `web/`, `build.rs`, `Cargo.toml` or `Cargo.lock`)
+without adding or editing a changeset. When users see no difference, such as
+a refactor or a test, add the `no-changeset` label instead. Run the same check
+locally with `scripts/check-changeset.sh origin/main`.
+
 On `main`, the Version workflow opens or updates `chore: release pg-probe`.
 Review its changelog and version, wait for CI, then merge it. The PR updates
 `CHANGELOG.md`, `package.json`, `package-lock.json`, `Cargo.toml` and

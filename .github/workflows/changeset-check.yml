@@ -1,0 +1,38 @@
+name: Changeset
+
+# A pull request that changes what ships in the pg-probe binary must add or
+# edit a changeset, so the release notes cannot miss it. The no-changeset
+# label skips the check for changes users do not see. This lives apart from
+# CI so that adding or removing the label reruns only this check.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: changeset-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changeset:
+    name: Changeset
+    # The version PR consumes the changesets instead of adding one.
+    if: >-
+      !startsWith(github.head_ref, 'changeset-release/')
+      && !contains(github.event.pull_request.labels.*.name, 'no-changeset')
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Check out repository
+        # actions/checkout@v4.2.2
+        uses: useblacksmith/checkout@v1
+        with:
+          fetch-depth: 0
+
+      # A pull request checks out its merge commit, whose first parent is the
+      # base.
+      - name: Require a changeset
+        run: scripts/check-changeset.sh HEAD^1 HEAD
