@@ -424,7 +424,7 @@ const translation: Translation = {
     },
     'cgroup-events': {
       shows:
-        'Variação por intervalo de até cinco contadores do cgroup do pg-probe, com nome no formato controlador.contador, de cpu.stat, memory.events e pids.events. Contadores de CPU terminados em usec são microssegundos de tempo de CPU. Os outros contadores contam eventos.',
+        'Variação por intervalo dos contadores de limite do cgroup do pg-probe, com nome no formato controlador.contador: cpu.nr_throttled, memory.high, memory.max, memory.oom_kill e pids.max. O cgroup v1 não tem nenhum deles, então nele o gráfico mostra o uso de CPU, em microssegundos de tempo de CPU.',
       look: 'cpu.nr_throttled acima de zero indica que o limite de CPU do cgroup pausou suas tarefas. memory.high conta as vezes em que o kernel limitou o cgroup e recuperou memória no seu limite flexível, o que nunca mata um processo. memory.max conta as vezes em que o cgroup atingiu seu limite rígido. O kernel só mata um processo quando a recuperação falha nesse ponto, e memory.oom_kill conta essas mortes. Quando um backend do PostgreSQL é morto, o servidor encerra todas as sessões e executa a recuperação de falha. pids.max indica que o cgroup não conseguiu iniciar um processo, então novas conexões falham.',
     },
     'connections-by-state': {

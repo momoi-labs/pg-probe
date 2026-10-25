@@ -495,7 +495,13 @@ function PageReclaim() {
   const { data, isPending } = useTable('linux_vm_event')
   const chart = rates(samples.data ?? [], data ?? [], (rows) => ({
     kswapd: vmEvents(rows, 'pgscan_kswapd'),
-    direct: vmEvents(rows, 'pgscan_direct_'),
+    // Kernel 4.8 and newer have one pgscan_direct counter; older kernels have
+    // one per zone, such as pgscan_direct_normal. pgscan_direct_throttle
+    // counts throttled processes, not pages.
+    direct: vmEvents(
+      rows.filter((row) => row.key !== 'pgscan_direct_throttle'),
+      'pgscan_direct',
+    ),
   }))
   return (
     <ChartPanel
@@ -714,6 +720,8 @@ function CgroupIo() {
   )
 }
 
+const LIMIT_EVENTS = ['cpu.nr_throttled', 'memory.high', 'memory.max', 'memory.oom_kill', 'pids.max']
+
 function CgroupEvents() {
   const samples = useSamples()
   const { data, isPending } = useTable('linux_cgroup_event')
@@ -727,7 +735,11 @@ function CgroupEvents() {
     )
   }
   const keyOf = (row: Row) => `${row.controller}.${row.event_name}`
-  const keys = [...new Set((data ?? []).map(keyOf))].slice(0, 5)
+  // The counters the report explains, when the cgroup has them. Cgroup v1
+  // records only CPU usage, so it shows that.
+  const present = [...new Set((data ?? []).map(keyOf))]
+  const explained = LIMIT_EVENTS.filter((key) => present.includes(key))
+  const keys = (explained.length ? explained : present).slice(0, 5)
   const chart = deltas(
     samples.data ?? [],
     data ?? [],

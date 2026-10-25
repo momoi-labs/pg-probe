@@ -331,12 +331,14 @@ fn collect_cgroup_limits(
             limits.memory_max_bytes = read_cgroup_file_u64(&p.join("memory.limit_in_bytes"));
             limits.memory_max_unlimited =
                 limits.memory_max_bytes.map(|v| v >= 0x7FFF_FFFF_FFFF_F000);
-            if let Some(p2) = resolve_cgroup_v1_path("memory") {
-                limits.swap_current_bytes = read_cgroup_file_u64(&p2.join("memsw.usage_in_bytes"));
-                limits.swap_max_bytes = read_cgroup_file_u64(&p2.join("memsw.limit_in_bytes"));
-                limits.swap_max_unlimited =
-                    limits.swap_max_bytes.map(|v| v >= 0x7FFF_FFFF_FFFF_F000);
-            }
+            // v1 counts memory and swap together in memory.memsw.*, which
+            // exists only with swap accounting on. Swap alone is the
+            // difference, as memory.swap.* reports it on v2.
+            let memsw_current = read_cgroup_file_u64(&p.join("memory.memsw.usage_in_bytes"));
+            let memsw_max = read_cgroup_file_u64(&p.join("memory.memsw.limit_in_bytes"));
+            limits.swap_current_bytes = v1_swap_bytes(memsw_current, limits.memory_current_bytes);
+            (limits.swap_max_bytes, limits.swap_max_unlimited) =
+                v1_swap_limit(memsw_max, limits.memory_max_bytes);
         }
 
         if let Some(p) = resolve_cgroup_v1_path("pids") {
@@ -433,12 +435,14 @@ fn collect_cgroup_events(
         }
     } else {
         if let Some(p) = resolve_cgroup_v1_path("cpu") {
+            // cpuacct.usage is in nanoseconds. Recorded in microseconds, it
+            // matches cpu.stat usage_usec on v2.
             if let Ok(content) = read_bounded(&p.join("cpuacct.usage")) {
                 if let Ok(value) = content.trim().parse::<u64>() {
                     events.push(CgroupEventEntry {
                         controller: CgroupEventController::Cpu,
-                        event_name: "usage_us".to_string(),
-                        cumulative_value: value,
+                        event_name: "usage_usec".to_string(),
+                        cumulative_value: value / 1000,
                         unit: CgroupEventUnit::Microseconds,
                     });
                 }
@@ -654,9 +658,56 @@ fn read_cgroup_file_string(path: &Path) -> Option<String> {
     read_bounded(path).ok().map(|s| s.trim().to_string())
 }
 
+/// Swap in use on cgroup v1: memory and swap, from memory.memsw.usage_in_bytes,
+/// less memory alone.
+fn v1_swap_bytes(memsw: Option<u64>, memory: Option<u64>) -> Option<u64> {
+    Some(memsw?.saturating_sub(memory?))
+}
+
+/// The swap limit on cgroup v1, from the memory and swap limit less the
+/// memory limit, and whether it is unlimited. Without a memory limit, swap
+/// alone has no limit to report.
+fn v1_swap_limit(memsw_max: Option<u64>, memory_max: Option<u64>) -> (Option<u64>, Option<bool>) {
+    const UNLIMITED: u64 = 0x7FFF_FFFF_FFFF_F000;
+    match (memsw_max, memory_max) {
+        (None, _) => (None, None),
+        (Some(memsw), _) if memsw >= UNLIMITED => (None, Some(true)),
+        (Some(memsw), Some(memory)) if memory < UNLIMITED => {
+            (Some(memsw.saturating_sub(memory)), Some(false))
+        }
+        (Some(_), _) => (None, Some(false)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn v1_swap_is_memsw_less_memory() {
+        assert_eq!(v1_swap_bytes(Some(300), Some(200)), Some(100));
+        assert_eq!(v1_swap_bytes(Some(200), Some(300)), Some(0));
+        assert_eq!(v1_swap_bytes(None, Some(200)), None);
+        assert_eq!(v1_swap_bytes(Some(300), None), None);
+    }
+
+    #[test]
+    fn v1_swap_limit_from_memsw_limit() {
+        let unlimited = 0x7FFF_FFFF_FFFF_F000;
+        assert_eq!(
+            v1_swap_limit(Some(3 << 30), Some(2 << 30)),
+            (Some(1 << 30), Some(false))
+        );
+        assert_eq!(
+            v1_swap_limit(Some(unlimited), Some(2 << 30)),
+            (None, Some(true))
+        );
+        assert_eq!(
+            v1_swap_limit(Some(3 << 30), Some(unlimited)),
+            (None, Some(false))
+        );
+        assert_eq!(v1_swap_limit(None, Some(2 << 30)), (None, None));
+    }
 
     #[test]
     fn parse_cgroup_v2_io_valid() {

@@ -76,13 +76,13 @@ available sources. It groups the not available sources by their error code.
 | Processes running and blocked | `/proc/stat` | `procs_running` and `procs_blocked` |
 | Swapped in and out | `/proc/vmstat` | Change in `pswpin` and `pswpout` × 4 KiB page ÷ seconds |
 | Major page faults | `/proc/vmstat` | Change in `pgmajfault` ÷ seconds |
-| Pages scanned for reclaim | `/proc/vmstat` | Change in the sum of `pgscan_kswapd_*` and of `pgscan_direct_*` over zones ÷ seconds. Direct reclaim stalls the process that asks for memory |
+| Pages scanned for reclaim | `/proc/vmstat` | Change in `pgscan_kswapd` and `pgscan_direct` ÷ seconds, or in their sum over zones on kernels before 4.8, without `pgscan_direct_throttle`. Direct reclaim stalls the process that asks for memory |
 | Packets dropped and errors | `/proc/net/dev` | Change in `rx_dropped`, `tx_dropped`, `rx_errors` and `tx_errors` ÷ seconds, summed over the recorded interfaces |
 | Average read and write latency | `/proc/diskstats` | Change in `read_milliseconds` ÷ change in `reads_completed`, and the same for writes, per whole disk. The five disks with the most completed I/O in the session. An interval without I/O is a gap |
 | Average requests in flight | `/proc/diskstats` | Change in `weighted_io_milliseconds` ÷ milliseconds between samples, per whole disk, the same five disks |
-| Cgroup memory and swap | the probe's cgroup | `memory.current` and `memory.swap.current` (v2) or `memory.usage_in_bytes` (v1) |
+| Cgroup memory and swap | the probe's cgroup | `memory.current` and `memory.swap.current` (v2), or `memory.usage_in_bytes` and `memory.memsw.usage_in_bytes` less `memory.usage_in_bytes` (v1). v1 has swap only with swap accounting on |
 | Cgroup I/O | the probe's cgroup | Change in read and write bytes ÷ seconds, summed over devices. From `io.stat` (v2) or `blkio.io_service_bytes_recursive` (v1) |
-| Cgroup limit events | the probe's cgroup | Change per interval in each counter of `cpu.stat` and `memory.events`, the first five |
+| Cgroup limit events | the probe's cgroup | Change per interval in `cpu.nr_throttled`, `memory.high`, `memory.max`, `memory.oom_kill` and `pids.max`, the ones the cgroup has. v1 has none of them, so the panel shows `cpuacct.usage` in microseconds |
 
 ## PostgreSQL
 
