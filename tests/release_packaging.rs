@@ -3,6 +3,7 @@
 //! Seams under test:
 //! - `scripts/package-release-tarball.sh` archive layout and modes
 //! - `scripts/write-sha256sums.sh` sorted checksum manifest format
+//! - `site/public/install.sh` download, checksum check and binary install
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -173,4 +174,80 @@ fn write_sha256sums_rejects_unexpected_filenames() {
         .output()
         .unwrap();
     assert!(!output.status.success());
+}
+
+/// Lays out a release for the host architecture the way the R2 bucket does:
+/// `latest.txt` and `v<version>/` holding the tarball and `SHA256SUMS`.
+fn fake_bucket(dir: &Path) -> PathBuf {
+    require_gnu_tar();
+    let root = repo_root();
+    let binary = dir.join("pg-probe");
+    write_fake_binary(&binary);
+    let bucket = dir.join("bucket");
+    let release = bucket.join("v0.1.0");
+    let target = format!("{}-unknown-linux-musl", std::env::consts::ARCH);
+    let output = Command::new(root.join("scripts/package-release-tarball.sh"))
+        .args([
+            "0.1.0",
+            &target,
+            binary.to_str().unwrap(),
+            release.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let archive = String::from_utf8(output.stdout).unwrap();
+    let output = Command::new(root.join("scripts/write-sha256sums.sh"))
+        .args([release.to_str().unwrap(), archive.trim()])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    fs::write(bucket.join("latest.txt"), "0.1.0\n").unwrap();
+    bucket
+}
+
+fn run_install(bucket: &Path, install_dir: &Path) -> std::process::Output {
+    Command::new("sh")
+        .arg(repo_root().join("site/public/install.sh"))
+        .env(
+            "PG_PROBE_DOWNLOAD_URL",
+            format!("file://{}", bucket.display()),
+        )
+        .env("PG_PROBE_INSTALL_DIR", install_dir)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn install_script_installs_the_latest_binary() {
+    let dir = tempdir().unwrap();
+    let bucket = fake_bucket(dir.path());
+    let bin = dir.path().join("bin");
+
+    let output = run_install(&bucket, &bin);
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let installed = bin.join("pg-probe");
+    let mode = fs::metadata(&installed).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o755);
+    let run = Command::new(&installed).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "pg-probe fake\n");
+}
+
+#[test]
+fn install_script_rejects_a_checksum_mismatch() {
+    let dir = tempdir().unwrap();
+    let bucket = fake_bucket(dir.path());
+    let sums = bucket.join("v0.1.0/SHA256SUMS");
+    let manifest = fs::read_to_string(&sums).unwrap();
+    fs::write(&sums, format!("{}{}", "0".repeat(64), &manifest[64..])).unwrap();
+    let bin = dir.path().join("bin");
+
+    let output = run_install(&bucket, &bin);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("checksum mismatch"));
+    assert!(!bin.join("pg-probe").exists());
 }

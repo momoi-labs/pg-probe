@@ -63,7 +63,7 @@ and runs the smoke test against `/usr/bin/pg-probe`.
 
 The repository is private, so visitors cannot download GitHub release assets.
 The release workflow also copies every asset to a public Cloudflare R2 bucket,
-for downloads that do not need a GitHub account:
+and `site/public/install.sh` downloads from there:
 
 ```text
 latest.txt                  the current version, for example 0.3.0
@@ -96,6 +96,18 @@ echo <version> >/tmp/latest.txt
 npx wrangler r2 object put <bucket>/latest.txt --file /tmp/latest.txt \
   --content-type text/plain --remote
 ```
+
+## Install script
+
+`install.sh` checks each download against `SHA256SUMS`. It installs the
+`.deb` when the host has `dpkg` and `apt-get`, the `.rpm` when it has `rpm`
+and `dnf`, `yum` or `zypper`, and the binary in `/usr/local/bin` elsewhere.
+It runs as root, through `sudo`, or through `doas`. With none of these it
+installs the binary in `~/.local/bin`.
+
+`PG_PROBE_VERSION` pins a version, `PG_PROBE_INSTALL_DIR` installs the binary
+in a directory of your choice, and `PG_PROBE_DOWNLOAD_URL` points at another
+bucket.
 
 ## Retry a release
 

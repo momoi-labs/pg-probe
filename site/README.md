@@ -42,10 +42,11 @@ and `public/demo/console/` is a static copy of the page that `pg-probe
 analyze` serves for the same file, with the console's own CSS. Queries and the
 sections below the overview are removed from the copy.
 
-## Placeholders
+## Install script
 
-- The install command, `curl -fsSL https://pg-probe.dev/install.sh | sh`, is
-  shown before `install.sh` exists.
+`public/install.sh` is the script behind `curl -fsSL
+https://pg-probe.dev/install.sh | sh`. It downloads releases from the R2
+bucket, not from GitHub. See `docs/releases.md` in the repository root.
 
 ## Deploy
 
