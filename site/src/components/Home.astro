@@ -30,6 +30,12 @@ const sheets: Record<Language, { cover: ImageMetadata; page: ImageMetadata }> = 
   es: { cover: coverEs, page: locksEs },
 };
 const sheet = sheets[lang];
+// The demo capture printed in each language, from public/demo/report/.
+const samples: Record<Language, string> = {
+  en: '/demo/report/sample-report-en.pdf',
+  'pt-BR': '/demo/report/sample-report-pt-br.pdf',
+  es: '/demo/report/sample-report-es.pdf',
+};
 ---
 <Base lang={lang} title={t.meta.title} description={t.meta.description}>
   <nav class="nav">
@@ -71,6 +77,10 @@ const sheet = sheets[lang];
           <ul class="ticks">
             {t.report.ticks.map((tick) => <li set:html={tick} />)}
           </ul>
+          <div class="cta">
+            <a class="btn btn-outline" href={samples[lang]} target="_blank" rel="noopener">{t.report.sample}</a>
+            <span class="muted">{t.report.sampleNote}</span>
+          </div>
           <p class="fine">{t.report.languages}</p>
         </div>
         <div class="sheets">

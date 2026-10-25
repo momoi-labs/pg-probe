@@ -55,6 +55,8 @@ const en = {
       '<b>Sources that were not available</b> listed after the cover, never drawn as zero',
     ],
     languages: 'In English, Portuguese, or Spanish, whichever your client reads.',
+    sample: 'Open the sample report',
+    sampleNote: 'PDF, 47 pages, in a new tab.',
     coverAlt: 'Report cover',
     pageAlt: 'A report page: lock requests waiting, with a What to look for box above the chart',
   },

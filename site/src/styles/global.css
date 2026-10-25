@@ -94,6 +94,9 @@ p { margin: 0; }
   background: var(--fg); color: var(--bg);
 }
 .btn:hover { background: #e4e4e7; }
+/* A second action next to the main one. */
+.btn-outline { background: transparent; color: var(--fg); border: 1px solid var(--border); }
+.btn-outline:hover { background: var(--panel-2); border-color: var(--accent); }
 .cmd {
   display: inline-flex; align-items: center; gap: 0.6rem; height: 44px; padding: 0 1rem;
   border: 1px solid var(--border); border-radius: 10px; background: var(--panel);

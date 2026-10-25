@@ -55,6 +55,8 @@ const es: Dictionary = {
       '<b>Fuentes que no estaban disponibles</b> enumeradas tras la portada, nunca representadas como cero',
     ],
     languages: 'En español, inglés o portugués, en el idioma que lea tu cliente.',
+    sample: 'Abrir el informe de ejemplo',
+    sampleNote: 'PDF, 47 páginas, en una pestaña nueva.',
     coverAlt: 'Portada del informe',
     pageAlt: 'Una página del informe: solicitudes de bloqueo en espera, con el recuadro Qué observar encima del gráfico',
   },

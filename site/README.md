@@ -33,6 +33,9 @@ pages come from the PDFs there:
 pdftoppm -png -r 110 -f 1 -l 1 -singlefile report-en.pdf report-page-cover-en
 ```
 
+`public/demo/report/` holds the same PDFs as the sample report linked from
+the report section, one per language.
+
 The hero is drawn in HTML from one real 3 minute capture of `db-prod-01`:
 `src/components/TermCapture.astro` holds the last frame of `pg-probe capture`,
 and `public/demo/console/` is a static copy of the page that `pg-probe

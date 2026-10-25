@@ -55,6 +55,8 @@ const ptBR: Dictionary = {
       '<b>Fontes que não estavam disponíveis</b> listadas depois da capa, nunca representadas como zero',
     ],
     languages: 'Em português, inglês ou espanhol, na língua que seu cliente lê.',
+    sample: 'Abrir o relatório de exemplo',
+    sampleNote: 'PDF, 47 páginas, em uma nova aba.',
     coverAlt: 'Capa do relatório',
     pageAlt: 'Uma página do relatório: pedidos de lock em espera, com o quadro O que observar acima do gráfico',
   },
