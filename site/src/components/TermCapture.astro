@@ -30,8 +30,8 @@
   .tc b { font-weight: 700; color: #fafafa; }
   .tc-m { color: #8b8b93; }
   .tc-ps { color: #e4e4e7; }
-  .tc-row, .tc-kv, .tc-grid, .tc-sec, .tc-done { padding-left: 1.25rem; }
-  .tc-badge { background: #e5b53b; color: #09090b; font-weight: 700; padding: 0 0.5rem; }
+  /* The capture starts on the first column, so the badge pads only its end. */
+  .tc-badge { background: #e5b53b; color: #09090b; font-weight: 700; padding: 0 0.5rem 0 0; }
   .tc-ver { background: #3a3834; color: #eeece9; padding: 0 0.5rem; }
   .tc-sec { color: #a1a1aa; display: flex; align-items: center; gap: 0.6rem; margin-top: 0.9em; }
   .tc-sec::after { content: ''; flex: 1; height: 1px; background: #3f3f46; }
@@ -42,7 +42,7 @@
   .tc-grid.tc-head span { color: #a1a1aa; }
   .tc-bar { display: inline-block; width: 12rem; height: 2px; background: #e5b53b; vertical-align: middle; margin-left: 0.6rem; }
   mark { background: transparent; color: inherit; }
-  .tc-done { margin: 1em 0 0 1.25rem; padding-left: 0.6rem; background: #5bd295; color: #09090b; }
+  .tc-done { margin: 1em 0 0; padding-left: 0.6rem; background: #5bd295; color: #09090b; }
   .tc-done b { color: #09090b; margin-right: 0.6rem; }
   .tc-cur { display: inline-block; width: 0.6em; height: 1.1em; background: #e5b53b; vertical-align: text-bottom; animation: blink 1s steps(1) infinite; }
   @keyframes blink { 50% { opacity: 0; } }

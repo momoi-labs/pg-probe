@@ -63,16 +63,15 @@ fn theme() -> Theme {
     pg_probe::top::theme()
 }
 
-/// A field's label in a column 16 cells wide, two cells in.
+/// A field's label in a column 16 cells wide.
 fn label(t: &Theme, text: &str) -> Span<'static> {
-    Span::styled(format!("  {text:<16}"), t.muted())
+    Span::styled(format!("{text:<16}"), t.muted())
 }
 
-/// A section: its title in `muted-foreground`, then the rule to two cells
-/// before the edge.
+/// A section: its title in `muted-foreground`, then the rule to the edge.
 fn section(t: &Theme, width: usize, title: &str) -> Line<'static> {
-    let rule = width.saturating_sub(title.chars().count() + 5);
-    let mut spans = vec![Span::styled(format!("  {title} "), t.muted())];
+    let rule = width.saturating_sub(title.chars().count() + 1);
+    let mut spans = vec![Span::styled(format!("{title} "), t.muted())];
     spans.extend(t.look().rule.spans(t, rule));
     Line::from(spans)
 }
@@ -712,7 +711,7 @@ impl State {
             write_line(
                 &mut page,
                 &Line::from(vec![
-                    Span::styled(format!("  {label:<16}"), style),
+                    Span::styled(format!("{label:<16}"), style),
                     Span::raw(text.to_string()),
                 ]),
                 terminal_width(),
@@ -939,7 +938,7 @@ impl State {
             shared.sort_by_key(|(_, errors)| std::cmp::Reverse(errors.last_sample));
             for ((status, code), errors) in shared.iter().take(MAX_ERROR_LINES) {
                 let mut spans = vec![
-                    Span::styled(format!("  {:<16}", "error"), t.danger()),
+                    Span::styled(format!("{:<16}", "error"), t.danger()),
                     Span::styled(format!("{status}  {code}"), t.danger()),
                     muted(format!("  last in sample {}", errors.last_sample)),
                 ];
@@ -972,21 +971,20 @@ impl State {
 
         lines.push(Line::default());
         // The keys while it runs; a toast once it ends.
-        let room = width.saturating_sub(4);
-        let mut foot = vec![Span::raw("  ")];
+        let mut foot = Vec::new();
         match self.finish {
             Finish::Running => {
                 let hints = KeyHints::new(&t, [("ctrl+c", "stop and keep what was collected")]);
-                foot.extend(widget_line(hints, room).spans);
+                foot.extend(widget_line(hints, width).spans);
             }
             Finish::Done => {
-                foot.extend(widget_line(Toast::new(&t, "Capture finished"), room).spans);
+                foot.extend(widget_line(Toast::new(&t, "Capture finished"), width).spans);
             }
             Finish::Interrupted => foot.extend(
                 widget_line(
                     Toast::new(&t, "Capture interrupted, what was collected is kept")
                         .label("STOPPED"),
-                    room,
+                    width,
                 )
                 .spans,
             ),
@@ -1179,10 +1177,10 @@ pub fn header(sampling: Option<(Duration, Duration)>) {
     let width = terminal_width();
     let color = use_color();
     let t = theme();
+    // The brand starts on the first column, so it pads only its end, and the
+    // version takes the secondary fill after it, as in top.
     let title = Line::from(vec![
-        Span::raw("  "),
-        // The version takes the secondary fill after the brand, as in top.
-        Span::styled(" pg-probe ", t.brand()),
+        Span::styled("pg-probe ", t.brand()),
         Span::styled(
             concat!(" ", env!("CARGO_PKG_VERSION"), " "),
             t.fill(t.tokens().secondary_foreground, t.tokens().secondary),
@@ -1263,19 +1261,19 @@ pub fn cleanup_page(data_dir: &Path, partials: &[PathBuf]) {
         ),
         Line::default(),
         Line::from(Span::styled(
-            format!("  {:<name_width$}  {:>10}  {}", "File", "Size", "Modified"),
+            format!("{:<name_width$}  {:>10}  {}", "File", "Size", "Modified"),
             t.subtle(),
         )),
     ];
     for (name, size, modified) in rows {
         lines.push(Line::from(vec![
-            Span::styled(format!("  {name:<name_width$}  "), t.text()),
+            Span::styled(format!("{name:<name_width$}  "), t.text()),
             Span::styled(format!("{size:>10}"), t.strong()),
             muted(format!("  {modified}")),
         ]));
     }
     lines.push(Line::from(vec![
-        muted(format!("  {} files, ", partials.len())),
+        muted(format!("{} files, ", partials.len())),
         Span::styled(iec(total), t.strong()),
         muted(" in total".to_string()),
     ]));
@@ -1289,7 +1287,7 @@ pub fn cleanup_page(data_dir: &Path, partials: &[PathBuf]) {
     write_styled(
         &mut text,
         base.patch(t.muted()),
-        &format!("  {:<16}", "Confirm"),
+        &format!("{:<16}", "Confirm"),
         color,
     );
     write_styled(&mut text, base.patch(t.strong()), CLEANUP_QUESTION, color);

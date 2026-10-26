@@ -127,8 +127,8 @@ each with its column title.
 - The brand in the header of `top` and the capture is two blocks: the name
   in bold `primary-foreground` on `primary`, then the version on
   `secondary`, where the Header contract puts both on `primary`. The version
-  reads as data, apart from the name. The brand starts on the first column
-  of `top`, so only its end is padded.
+  reads as data, apart from the name. Both views start on the first
+  column, so the brand pads only its end.
 - The header shows the local time of the last refresh, which changes on
   each one, so `top` does not redraw between refreshes. Paused, it shows
   `‖ paused` and the time the data is from.
