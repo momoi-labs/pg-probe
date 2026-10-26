@@ -218,14 +218,33 @@ fn stdout_is_empty_and_artifact_path_is_logged() {
 }
 
 #[test]
-fn missing_data_directory_exits_2() {
+fn missing_data_directory_is_created_private() {
     let directory = tempdir().unwrap();
-    let missing = directory.path().join("does-not-exist");
+    let missing = directory.path().join("new").join("artifacts");
+
+    cargo_bin_cmd!("pg-probe")
+        .arg("capture")
+        .args(["--domain", "linux"])
+        .arg("--data-directory")
+        .arg(&missing)
+        .assert()
+        .success();
+
+    let mode = fs::metadata(&missing).unwrap().permissions().mode();
+    assert_eq!(mode & 0o777, 0o700);
+    assert!(sole_gzip(&missing).is_file());
+}
+
+#[test]
+fn data_directory_that_is_a_file_exits_2() {
+    let directory = tempdir().unwrap();
+    let file = directory.path().join("a-file");
+    fs::write(&file, b"").unwrap();
 
     cargo_bin_cmd!("pg-probe")
         .arg("capture")
         .arg("--data-directory")
-        .arg(&missing)
+        .arg(&file)
         .assert()
         .failure()
         .code(2)

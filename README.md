@@ -89,7 +89,7 @@ inputs; see `.goreleaser.yaml` and `.github/workflows/release.yml`.
 ## Usage
 
 Capture a snapshot into a new compressed SQLite artifact in the current
-directory (or an existing `-D`/`--data-directory`):
+directory (or in `-D`/`--data-directory`, created with mode 0700 when missing):
 
 ```bash
 pg-probe --domain all

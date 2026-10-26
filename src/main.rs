@@ -328,6 +328,24 @@ fn capture(cli: CaptureArgs) -> ExitCode {
 
     let data_dir = cli.data_directory.clone();
 
+    // Like `pg_basebackup -D`, a missing directory is created, private as the
+    // artifacts in it are.
+    if !data_dir.exists() {
+        use std::os::unix::fs::DirBuilderExt;
+        if let Err(error) = std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&data_dir)
+        {
+            tracing::error!(
+                "cannot create the data directory {}: {error}",
+                data_dir.display()
+            );
+            return ExitCode::from(EXIT_USAGE);
+        }
+        tracing::info!("created the data directory {}", data_dir.display());
+    }
+
     if !data_dir.is_dir() {
         tracing::error!(
             "data directory does not exist or is not a directory: {}",
