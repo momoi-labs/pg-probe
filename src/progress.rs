@@ -664,10 +664,12 @@ impl State {
             }
             let _ = write!(
                 line,
-                " peak_memory={} disk_written={}",
-                iec(footprint.peak_memory).replace(' ', ""),
-                iec(footprint.written).replace(' ', "")
+                " peak_memory={}",
+                iec(footprint.peak_memory).replace(' ', "")
             );
+            if let Some(written) = footprint.written {
+                let _ = write!(line, " disk_written={}", iec(written).replace(' ', ""));
+            }
         }
         line
     }
@@ -919,7 +921,9 @@ impl State {
                     muted(" peak resident".to_string()),
                 ],
             ));
-            lines.push(field("Disk writes", vec![strong(iec(footprint.written))]));
+            if let Some(written) = footprint.written {
+                lines.push(field("Disk writes", vec![strong(iec(written))]));
+            }
         }
 
         if !self.errors.is_empty() || !self.unsupported.is_empty() {
@@ -1008,13 +1012,14 @@ struct Footprint {
     cpu_overall: Option<f64>,
     cpu_sampling: Option<f64>,
     peak_memory: u64,
-    written: u64,
+    written: Option<u64>,
 }
 
 struct Usage {
     cpu: Duration,
     peak_memory: u64,
-    written: u64,
+    /// `None` outside Linux, where `ru_oublock` counts operations, not bytes.
+    written: Option<u64>,
 }
 
 /// This process's CPU time, peak resident memory and bytes written to block
@@ -1032,8 +1037,11 @@ fn usage() -> Option<Usage> {
     Some(Usage {
         cpu: time(raw.ru_utime) + time(raw.ru_stime),
         // Linux reports `ru_maxrss` in KiB and `ru_oublock` in 512-byte units.
-        peak_memory: u64::try_from(raw.ru_maxrss).unwrap_or(0) * 1024,
-        written: u64::try_from(raw.ru_oublock).unwrap_or(0) * 512,
+        // macOS reports `ru_maxrss` in bytes.
+        peak_memory: u64::try_from(raw.ru_maxrss).unwrap_or(0)
+            * if cfg!(target_os = "linux") { 1024 } else { 1 },
+        written: cfg!(target_os = "linux")
+            .then(|| u64::try_from(raw.ru_oublock).unwrap_or(0) * 512),
     })
 }
 

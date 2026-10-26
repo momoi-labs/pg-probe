@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create a deterministic release tarball for one musl target.
+# Create a deterministic release tarball for one release target.
 #
 # Usage:
 #   package-release-tarball.sh <version> <target> <binary-path> <output-dir>
@@ -36,6 +36,7 @@ esac
 
 case "$target" in
   x86_64-unknown-linux-musl | aarch64-unknown-linux-musl) ;;
+  x86_64-apple-darwin | aarch64-apple-darwin) ;;
   *)
     echo "unsupported target: ${target}" >&2
     exit 2

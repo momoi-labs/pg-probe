@@ -516,7 +516,8 @@ pub fn run(params: &ConnectionParams, interval: Duration, verbose: bool) -> Resu
     };
     let server = read_server(&client)?;
     let sql = backends_sql(server.version_num);
-    let local = is_local(client.endpoint());
+    // Host figures come from the local `/proc`, which only Linux has.
+    let local = cfg!(target_os = "linux") && is_local(client.endpoint());
     let mut app = App::new(server, interval, local);
     let settings_path = settings::path();
     if let Some(path) = &settings_path {
@@ -1405,10 +1406,12 @@ impl App {
                     spans.extend(self.host_spans(os, true));
                     spans
                 }
-                None => vec![
+                None if cfg!(target_os = "linux") => vec![
                     Span::styled(" · ", t.subtle()),
                     Span::styled("OS not on this host", t.muted()),
                 ],
+                // Host figures need Linux, so no other host has the row.
+                None => Vec::new(),
             };
             self.server_row(buf, area, extra, true);
             put(
@@ -1428,13 +1431,16 @@ impl App {
                 let x = area.right() - room as u16;
                 put(buf, Rect { x, ..area }, 1, self.meter(room));
             }
-            put(
-                buf,
-                area,
-                2,
-                Line::from(fit(self.host_line(width).spans, width)),
-            );
-            row = 3;
+            row = 2;
+            if cfg!(target_os = "linux") {
+                put(
+                    buf,
+                    area,
+                    2,
+                    Line::from(fit(self.host_line(width).spans, width)),
+                );
+                row = 3;
+            }
         }
         put(buf, area, row, self.tabs_line(width));
         let top = area.y.saturating_add(row + 2).min(area.bottom());

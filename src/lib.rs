@@ -17,7 +17,7 @@ pub use cancel::CancelFlag;
 use contract::{now_utc, SnapshotStatus};
 use uuid::Uuid;
 
-use crate::collector::run_collector;
+use crate::collector::{run_collector, run_linux_collector};
 use crate::linux::{
     CgroupsCollector, ComputeCollector, ComputeSampleCollector, IdentityCollector, KernelCollector,
     LimitsCollector, MemoryCollector, NetworkCollector, PressureCollector, StorageCollector,
@@ -144,48 +144,55 @@ fn run_collection(
 
     let mut has_failures = false;
 
+    if domains.linux_enabled() && !cfg!(target_os = "linux") {
+        tracing::warn!(
+            "Linux collection is not supported on this operating system; \
+             use --domain postgresql to skip it"
+        );
+    }
+
     if domains.linux_enabled() {
-        has_failures |= run_collector(&IdentityCollector, &mut writer)?;
+        has_failures |= run_linux_collector(&IdentityCollector, &mut writer)?;
         if cancel.is_cancelled() {
             return Ok(interrupted_report(partial_path));
         }
 
-        has_failures |= run_collector(&ComputeCollector, &mut writer)?;
+        has_failures |= run_linux_collector(&ComputeCollector, &mut writer)?;
         if cancel.is_cancelled() {
             return Ok(interrupted_report(partial_path));
         }
 
-        has_failures |= run_collector(&MemoryCollector, &mut writer)?;
+        has_failures |= run_linux_collector(&MemoryCollector, &mut writer)?;
         if cancel.is_cancelled() {
             return Ok(interrupted_report(partial_path));
         }
 
-        has_failures |= run_collector(&PressureCollector, &mut writer)?;
+        has_failures |= run_linux_collector(&PressureCollector, &mut writer)?;
         if cancel.is_cancelled() {
             return Ok(interrupted_report(partial_path));
         }
 
-        has_failures |= run_collector(&StorageCollector, &mut writer)?;
+        has_failures |= run_linux_collector(&StorageCollector, &mut writer)?;
         if cancel.is_cancelled() {
             return Ok(interrupted_report(partial_path));
         }
 
-        has_failures |= run_collector(&LimitsCollector, &mut writer)?;
+        has_failures |= run_linux_collector(&LimitsCollector, &mut writer)?;
         if cancel.is_cancelled() {
             return Ok(interrupted_report(partial_path));
         }
 
-        has_failures |= run_collector(&CgroupsCollector, &mut writer)?;
+        has_failures |= run_linux_collector(&CgroupsCollector, &mut writer)?;
         if cancel.is_cancelled() {
             return Ok(interrupted_report(partial_path));
         }
 
-        has_failures |= run_collector(&KernelCollector, &mut writer)?;
+        has_failures |= run_linux_collector(&KernelCollector, &mut writer)?;
         if cancel.is_cancelled() {
             return Ok(interrupted_report(partial_path));
         }
 
-        has_failures |= run_collector(&NetworkCollector, &mut writer)?;
+        has_failures |= run_linux_collector(&NetworkCollector, &mut writer)?;
         if cancel.is_cancelled() {
             return Ok(interrupted_report(partial_path));
         }
@@ -263,12 +270,12 @@ fn run_samples(
         tracing::debug!(sample, "sample started");
 
         if domains.linux_enabled() {
-            has_failures |= run_collector(&ComputeSampleCollector, writer)?;
-            has_failures |= run_collector(&MemoryCollector, writer)?;
-            has_failures |= run_collector(&PressureCollector, writer)?;
-            has_failures |= run_collector(&StorageSampleCollector, writer)?;
-            has_failures |= run_collector(&CgroupsCollector, writer)?;
-            has_failures |= run_collector(&NetworkCollector, writer)?;
+            has_failures |= run_linux_collector(&ComputeSampleCollector, writer)?;
+            has_failures |= run_linux_collector(&MemoryCollector, writer)?;
+            has_failures |= run_linux_collector(&PressureCollector, writer)?;
+            has_failures |= run_linux_collector(&StorageSampleCollector, writer)?;
+            has_failures |= run_linux_collector(&CgroupsCollector, writer)?;
+            has_failures |= run_linux_collector(&NetworkCollector, writer)?;
         }
         if let Some(postgres) = &postgres {
             has_failures |= run_collector(postgres, writer)?;

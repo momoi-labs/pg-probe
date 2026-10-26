@@ -138,6 +138,51 @@ where
         .any(|outcome| outcome.status.makes_snapshot_partial()))
 }
 
+/// Runs a Linux collector like [`run_collector`]. On another operating
+/// system it reads nothing and records the collector's source as unsupported,
+/// so the artifact still says what was not collected.
+pub fn run_linux_collector<C, S>(collector: &C, sink: &mut S) -> Result<bool, S::Error>
+where
+    C: Collector,
+    S: Sink,
+{
+    if cfg!(target_os = "linux") {
+        run_collector(collector, sink)
+    } else {
+        run_collector(&NotLinux(collector), sink)
+    }
+}
+
+/// A Linux collector on a host that is not Linux.
+struct NotLinux<'a, C>(&'a C);
+
+impl<C: Collector> Collector for NotLinux<'_, C> {
+    type Output = C::Output;
+
+    fn source(&self) -> &'static str {
+        self.0.source()
+    }
+
+    fn collect(&self) -> (Self::Output, Vec<ComponentOutcome>) {
+        let outcome = ComponentOutcome::failed(
+            self.0.source(),
+            CollectionStatus::Unsupported,
+            "not_linux",
+            None,
+        );
+        (C::Output::default(), vec![outcome])
+    }
+
+    fn write<S: Sink>(
+        &self,
+        sink: &mut S,
+        output: &Self::Output,
+        outcomes: &[ComponentOutcome],
+    ) -> Result<(), S::Error> {
+        self.0.write(sink, output, outcomes)
+    }
+}
+
 /// Records one structured event per collector outcome, mapping each status to a
 /// level so a subscriber can colorize it (collected → info, unsupported → warn,
 /// failure → error). Failure and unsupported events also carry the structured
@@ -326,6 +371,20 @@ mod tests {
         assert_eq!(sink.outcomes[0].source, "test.panicking");
         assert_eq!(sink.outcomes[0].status, CollectionStatus::IoError);
         assert_eq!(sink.outcomes[0].error_code, Some("collector_panicked"));
+    }
+
+    #[test]
+    fn a_linux_collector_elsewhere_records_unsupported_without_collecting() {
+        let mut sink = RecordingSink::default();
+        // It would panic if it ran.
+        let partial = run_collector(&NotLinux(&PanickingCollector), &mut sink).unwrap();
+
+        assert!(!partial);
+        assert_eq!(sink.identity, Some(LinuxIdentity::default()));
+        assert_eq!(sink.outcomes.len(), 1);
+        assert_eq!(sink.outcomes[0].source, "test.panicking");
+        assert_eq!(sink.outcomes[0].status, CollectionStatus::Unsupported);
+        assert_eq!(sink.outcomes[0].error_code, Some("not_linux"));
     }
 
     struct CompleteCollector;

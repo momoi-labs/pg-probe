@@ -99,6 +99,8 @@ function reason(errorCode: string | null, t: Translate, major: string | null, da
       return t('The kernel has no transparent huge pages settings')
     case 'os_release_not_found':
       return t('The host has no /etc/os-release')
+    case 'not_linux':
+      return t('The capture ran on a host that is not Linux')
     case 'database_not_connectable':
       return databases.length > 0
         ? t('These databases do not accept connections: {names}', { names: databases.join(', ') })

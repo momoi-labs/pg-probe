@@ -237,6 +237,7 @@ const translation: Translation = {
     'The capture stopped early, or a source failed.':
       'A captura parou antes do fim, ou uma fonte falhou.',
     'The host has no /etc/os-release': 'O host não tem /etc/os-release',
+    'The capture ran on a host that is not Linux': 'A captura rodou em um host que não é Linux',
     'The kernel has no pressure stall information (PSI)':
       'O kernel não oferece pressure stall information (PSI)',
     'The kernel has no transparent huge pages settings':

@@ -212,6 +212,81 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # Apple frameworks link only on macOS, so each archive builds on a macOS
+  # runner. Blacksmith has Apple Silicon only, so the x86_64 archive is
+  # cross-built there and smoke-tested through Rosetta. Linux collection
+  # records itself as unsupported on macOS.
+  macos-build:
+    name: macOS build (${{ matrix.target }})
+    needs: validate
+    runs-on: blacksmith-6vcpu-macos-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    steps:
+      - name: Check out the tagged commit
+        # actions/checkout@v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: refs/tags/${{ env.TAG }}
+
+      - name: Install toolchain from rust-toolchain.toml
+        # dtolnay/rust-toolchain@master (pin)
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: 1.97.1
+          targets: ${{ matrix.target }}
+
+      - name: Install Node
+        # actions/setup-node@v7.1.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+
+      - name: Build the review console
+        run: |
+          set -euo pipefail
+          npm install --global pnpm@12.14.0
+          pnpm --dir web install --frozen-lockfile
+          pnpm --dir web build
+
+      - name: Install Rosetta for the x86_64 smoke test
+        if: matrix.target == 'x86_64-apple-darwin'
+        run: |
+          arch -x86_64 /usr/bin/true 2>/dev/null ||
+            sudo softwareupdate --install-rosetta --agree-to-license
+
+      - name: Build, archive and smoke-test
+        run: |
+          set -euo pipefail
+          version="${{ needs.validate.outputs.version }}"
+          target="${{ matrix.target }}"
+          cargo build --release --locked --target "$target"
+          binary="target/${target}/release/pg-probe"
+          if ! grep -aq "/console/assets/" "$binary"; then
+            echo "the review console is not embedded in ${binary}" >&2
+            exit 1
+          fi
+          command -v gtar >/dev/null || brew install gnu-tar
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          scripts/package-release-tarball.sh "$version" "$target" "$binary" dist
+          mkdir -p extracted
+          tar -xzf "dist/pg-probe-v${version}-${target}.tar.gz" -C extracted
+          scripts/smoke-test-release-binary.sh \
+            "extracted/pg-probe-v${version}-${target}/pg-probe" work
+
+      - name: Upload the archive
+        # actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: release-dist-${{ matrix.target }}
+          path: dist/pg-probe-v${{ needs.validate.outputs.version }}-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
   native-test:
     name: Native test (${{ matrix.runner }})
     needs: [validate, build]
@@ -323,7 +398,7 @@ jobs:
 
   publish:
     name: Publish release
-    needs: [validate, build, native-test]
+    needs: [validate, build, macos-build, native-test]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: release
     permissions:
@@ -355,13 +430,25 @@ jobs:
           name: release-dist
           path: dist
 
-      - name: Reject unexpected files and verify SHA256SUMS
+      - name: Download macOS archives
+        # actions/download-artifact@v4.3.0
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: release-dist-*-apple-darwin
+          path: dist
+          merge-multiple: true
+
+      # GoReleaser's SHA256SUMS covers the Linux assets. The macOS archives
+      # join it here, before anything is uploaded.
+      - name: Reject unexpected files, verify and extend SHA256SUMS
         run: |
           set -euo pipefail
           version="${{ needs.validate.outputs.version }}"
           expected="$(printf '%s\n' \
             "pg-probe-v${version}-x86_64-unknown-linux-musl.tar.gz" \
             "pg-probe-v${version}-aarch64-unknown-linux-musl.tar.gz" \
+            "pg-probe-v${version}-x86_64-apple-darwin.tar.gz" \
+            "pg-probe-v${version}-aarch64-apple-darwin.tar.gz" \
             "pg-probe_${version}_amd64.deb" \
             "pg-probe_${version}_arm64.deb" \
             "pg-probe-${version}-1.x86_64.rpm" \
@@ -374,6 +461,12 @@ jobs:
             exit 1
           fi
           (cd dist && sha256sum -c SHA256SUMS)
+          (
+            cd dist
+            sha256sum "pg-probe-v${version}-"*-apple-darwin.tar.gz >>SHA256SUMS
+            LC_ALL=C sort -k2,2 -o SHA256SUMS SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
 
       # install.sh downloads from this bucket, which stays public while the
       # repository is private. Versioned files are cached as immutable, so a
@@ -416,6 +509,8 @@ jobs:
           for file in \
             "pg-probe-v${version}-x86_64-unknown-linux-musl.tar.gz" \
             "pg-probe-v${version}-aarch64-unknown-linux-musl.tar.gz" \
+            "pg-probe-v${version}-x86_64-apple-darwin.tar.gz" \
+            "pg-probe-v${version}-aarch64-apple-darwin.tar.gz" \
             "pg-probe_${version}_amd64.deb" \
             "pg-probe_${version}_arm64.deb" \
             "pg-probe-${version}-1.x86_64.rpm" \
@@ -457,6 +552,7 @@ jobs:
           subject-path: |
             dist/pg-probe-v${{ needs.validate.outputs.version }}-x86_64-unknown-linux-musl.tar.gz
             dist/pg-probe-v${{ needs.validate.outputs.version }}-aarch64-unknown-linux-musl.tar.gz
+            dist/pg-probe-v${{ needs.validate.outputs.version }}-*-apple-darwin.tar.gz
             dist/pg-probe_${{ needs.validate.outputs.version }}_*.deb
             dist/pg-probe-${{ needs.validate.outputs.version }}-1.*.rpm
             dist/SHA256SUMS
@@ -495,10 +591,15 @@ jobs:
           libc, so the packages declare no dependencies and install on any
           release of their family.
 
+          macOS builds run the review console, \`pg-probe top\` and the
+          PostgreSQL part of a capture. Linux collection needs Linux.
+
           ### Assets
 
           - \`pg-probe-v${version}-x86_64-unknown-linux-musl.tar.gz\`
           - \`pg-probe-v${version}-aarch64-unknown-linux-musl.tar.gz\`
+          - \`pg-probe-v${version}-x86_64-apple-darwin.tar.gz\`
+          - \`pg-probe-v${version}-aarch64-apple-darwin.tar.gz\`
           - \`pg-probe_${version}_amd64.deb\`, \`pg-probe_${version}_arm64.deb\`
           - \`pg-probe-${version}-1.x86_64.rpm\`, \`pg-probe-${version}-1.aarch64.rpm\`
           - \`SHA256SUMS\`
@@ -508,6 +609,7 @@ jobs:
           \`\`\`sh
           sudo dpkg -i pg-probe_${version}_amd64.deb      # Debian, Ubuntu
           sudo rpm -i pg-probe-${version}-1.x86_64.rpm    # RHEL, Rocky, CentOS
+          brew install momoi-labs/packages/pg-probe       # macOS
           \`\`\`
 
           ### Verify checksums
@@ -529,6 +631,8 @@ jobs:
             --notes "$notes" \
             "dist/pg-probe-v${version}-x86_64-unknown-linux-musl.tar.gz" \
             "dist/pg-probe-v${version}-aarch64-unknown-linux-musl.tar.gz" \
+            "dist/pg-probe-v${version}-x86_64-apple-darwin.tar.gz" \
+            "dist/pg-probe-v${version}-aarch64-apple-darwin.tar.gz" \
             "dist/pg-probe_${version}_amd64.deb" \
             "dist/pg-probe_${version}_arm64.deb" \
             "dist/pg-probe-${version}-1.x86_64.rpm" \
@@ -545,6 +649,8 @@ jobs:
           expected="$(printf '%s\n' \
             "pg-probe-v${version}-x86_64-unknown-linux-musl.tar.gz" \
             "pg-probe-v${version}-aarch64-unknown-linux-musl.tar.gz" \
+            "pg-probe-v${version}-x86_64-apple-darwin.tar.gz" \
+            "pg-probe-v${version}-aarch64-apple-darwin.tar.gz" \
             "pg-probe_${version}_amd64.deb" \
             "pg-probe_${version}_arm64.deb" \
             "pg-probe-${version}-1.x86_64.rpm" \
@@ -557,3 +663,63 @@ jobs:
             exit 1
           fi
           gh release edit "$tag" --draft=false
+
+      # The cask downloads from R2, which serves visitors while the repository
+      # is private. Like latest.txt, it only moves forward.
+      - name: Update the Homebrew cask
+        if: ${{ vars.R2_BUCKET != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN is not set; the cask was not updated"
+            exit 0
+          fi
+          version="${{ needs.validate.outputs.version }}"
+          repo=momoi-labs/homebrew-packages
+          path=Casks/pg-probe.rb
+          current=""
+          sha=""
+          if gh api "repos/${repo}/contents/${path}" >cask.json 2>/dev/null; then
+            sha="$(jq -r .sha cask.json)"
+            current="$(jq -r .content cask.json | base64 -d | sed -n 's/^  version "\(.*\)"$/\1/p')"
+          fi
+          newest="$(printf '%s\n%s\n' "$current" "$version" | sort -V | tail -n 1)"
+          if [[ "$current" == "$version" || "$newest" != "$version" ]]; then
+            echo "the cask stays at ${current}"
+            exit 0
+          fi
+          sum() { awk -v name="$1" '$2 == name { print $1 }' dist/SHA256SUMS; }
+          arm="$(sum "pg-probe-v${version}-aarch64-apple-darwin.tar.gz")"
+          intel="$(sum "pg-probe-v${version}-x86_64-apple-darwin.tar.gz")"
+          test -n "$arm" && test -n "$intel"
+          cat >pg-probe.rb <<EOF
+          cask "pg-probe" do
+            arch arm: "aarch64", intel: "x86_64"
+
+            version "${version}"
+            sha256 arm:   "${arm}",
+                   intel: "${intel}"
+
+            url "https://dl.pg-probe.dev/v#{version}/pg-probe-v#{version}-#{arch}-apple-darwin.tar.gz"
+            name "pg-probe"
+            desc "Review PostgreSQL and Linux diagnostic snapshots"
+            homepage "https://pg-probe.dev"
+
+            binary "pg-probe-v#{version}-#{arch}-apple-darwin/pg-probe"
+
+            # The binary is not Apple-notarized.
+            postflight do
+              system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", staged_path.to_s]
+            end
+          end
+          EOF
+          args=(-X PUT "repos/${repo}/contents/${path}"
+            -f message="Brew cask update for pg-probe version v${version}"
+            -f content="$(base64 <pg-probe.rb | tr -d '\n')")
+          if [[ -n "$sha" ]]; then
+            args+=(-f sha="$sha")
+          fi
+          gh api "${args[@]}" >/dev/null
+          echo "the cask moved to ${version}"

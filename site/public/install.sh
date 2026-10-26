@@ -114,7 +114,11 @@ install_binary() {
 }
 
 main() {
-  [ "$(uname -s)" = Linux ] || fail "pg-probe runs on Linux only"
+  case "$(uname -s)" in
+    Linux) ;;
+    Darwin) fail "on macOS, install with: brew install momoi-labs/packages/pg-probe" ;;
+    *) fail "pg-probe runs on Linux and macOS only" ;;
+  esac
 
   case "$(uname -m)" in
     x86_64 | amd64)

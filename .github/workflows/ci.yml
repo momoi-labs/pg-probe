@@ -98,6 +98,38 @@ jobs:
       - name: Build release binary
         run: cargo build --release --locked
 
+  # macOS runs the console and the PostgreSQL part of a capture. Most
+  # integration tests read a Linux host, so this job runs the console tests
+  # and the release smoke test, which captures with Linux unsupported.
+  macos:
+    name: macOS check
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: blacksmith-6vcpu-macos-latest
+    steps:
+      - name: Check out repository
+        # actions/checkout@v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - name: Install toolchain from rust-toolchain.toml
+        # dtolnay/rust-toolchain@master (pin)
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: 1.97.1
+          components: clippy
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+
+      - name: Run console tests
+        run: cargo test --locked --test analyze_cli
+
+      - name: Build and smoke-test the release binary
+        run: |
+          set -euo pipefail
+          cargo build --release --locked
+          scripts/smoke-test-release-binary.sh target/release/pg-probe work
+
   musl-build:
     name: Musl build (${{ matrix.target }})
     needs: changes

@@ -2,7 +2,7 @@
 
 Changesets keeps one version PR open on `main`. Merging it tags the version
 and runs the release workflow, which builds, checks and publishes the musl
-archives on GitHub. The setup follows self-host's, without Homebrew or macOS.
+and macOS archives on GitHub. The setup follows self-host's.
 
 ## Add release notes
 
@@ -58,6 +58,22 @@ GoReleaser also wraps each binary in a `.deb` and an `.rpm`. The binary is
 static musl, so the packages declare no dependencies, not even libc. The
 release fails if either package declares one, and it installs each package
 and runs the smoke test against `/usr/bin/pg-probe`.
+
+The macOS archives build on Blacksmith's macOS runners, since Apple's
+frameworks link only on macOS. Those runners are Apple Silicon, so the x86_64
+archive is cross-built there and its smoke test runs through Rosetta. In each
+smoke test, Linux collection is recorded as unsupported. The publish job adds
+the archives to `SHA256SUMS`.
+
+## Homebrew cask
+
+After the release is published, the workflow writes `Casks/pg-probe.rb` in
+`momoi-labs/homebrew-packages`, so users install with
+`brew install momoi-labs/packages/pg-probe`. The cask downloads from R2,
+removes the quarantine attribute, since the binary is not notarized, and only
+moves to a newer version. It needs the `HOMEBREW_TAP_TOKEN` organization
+secret, shared with self-host, with write access to that repository. Without
+it, the release warns and leaves the cask as it is.
 
 ## Downloads on R2
 
