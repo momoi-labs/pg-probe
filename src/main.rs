@@ -52,6 +52,8 @@ enum Command {
     Analyze(AnalyzeArgs),
     /// Show the queries running now, longest first (read-only session).
     Top(TopArgs),
+    /// Let an AI agent query diagnostic artifacts over MCP (stdio).
+    Mcp(McpArgs),
 }
 
 #[derive(Debug, Args)]
@@ -162,6 +164,13 @@ struct AnalyzeArgs {
 }
 
 #[derive(Debug, Args)]
+struct McpArgs {
+    /// Directory containing .sqlite.gz diagnostic artifacts.
+    #[arg(short = 'D', long, value_name = "DIR", default_value = ".")]
+    data_directory: PathBuf,
+}
+
+#[derive(Debug, Args)]
 struct TopArgs {
     /// PostgreSQL host or socket directory to connect to (psql `-h`).
     #[arg(short = 'h', long, value_name = "HOST")]
@@ -200,6 +209,7 @@ fn main() -> ExitCode {
 
     match cli.command {
         Command::Analyze(args) => analyze(args),
+        Command::Mcp(args) => mcp(args),
         Command::Capture(args) => capture(args),
         Command::Top(args) => top(args),
     }
@@ -253,6 +263,31 @@ fn analyze(args: AnalyzeArgs) -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("pg-probe: review server failed: {error}");
+            ExitCode::from(EXIT_PERSIST)
+        }
+    }
+}
+
+/// Stdout carries the protocol, so every message goes to stderr.
+fn mcp(args: McpArgs) -> ExitCode {
+    if !args.data_directory.is_dir() {
+        eprintln!(
+            "pg-probe: data directory does not exist or is not a directory: {}",
+            args.data_directory.display()
+        );
+        return ExitCode::from(EXIT_USAGE);
+    }
+    let runtime = match tokio::runtime::Runtime::new() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("pg-probe: failed to start async runtime: {error}");
+            return ExitCode::from(EXIT_PERSIST);
+        }
+    };
+    match runtime.block_on(pg_probe::mcp::serve(args.data_directory)) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("pg-probe: MCP server failed: {error}");
             ExitCode::from(EXIT_PERSIST)
         }
     }

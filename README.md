@@ -257,6 +257,38 @@ and later, as a member of `pg_read_all_stats`.
 - Query text and function source appear on the terminal only. They are never
   written to disk.
 
+### Ask an AI agent
+
+`pg-probe mcp` lets an AI agent such as Claude Code or Codex read the
+artifacts in a directory. It is a Model Context Protocol (MCP) server over
+stdio, inside the same binary. Add it once:
+
+```bash
+claude mcp add pg-probe -- pg-probe mcp -D ~/snapshots
+codex mcp add pg-probe -- pg-probe mcp -D ~/snapshots
+```
+
+Other agents take the same command in their MCP settings:
+
+```json
+{ "mcpServers": { "pg-probe": { "command": "pg-probe", "args": ["mcp", "-D", "/home/me/snapshots"] } } }
+```
+
+Then ask the agent about a snapshot. It has four tools:
+
+- `list_snapshots` lists the artifacts.
+- `describe_schema` explains each table and column, its unit and its source.
+- `query` runs one read-only SQLite statement and returns up to 1,000 rows.
+  SQL can use `percentile()`, `median()` and math functions.
+- `export_query` writes every row of a statement to a new CSV file.
+
+`-D` sets the default directory. To read another one during a session, tell
+the agent where the artifacts are; it passes that path to each tool.
+
+The server never connects to PostgreSQL and never changes an artifact. It
+stops a statement after 30 seconds. What the agent reads goes to the model it
+uses, and the artifact holds no credentials or query text.
+
 ## Artifact format
 
 The artifact is a gzip-compressed SQLite database. Its schema version is stored

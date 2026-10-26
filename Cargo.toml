@@ -16,7 +16,7 @@ libc = "0.2.189"
 postgres = "0.19.12"
 postgres_rustls = "0.1.0"
 refinery = { version = "0.9.2", default-features = false, features = ["rusqlite"] }
-rusqlite = { version = "0.39.0", default-features = false, features = ["bundled", "modern_sqlite", "serialize"] }
+rusqlite = { version = "0.39.0", default-features = false, features = ["bundled", "hooks", "limits", "modern_sqlite", "serialize"] }
 rustls = "0.23.43"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
@@ -26,6 +26,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 tokio = { version = "1.49.0", features = ["macros", "net", "rt-multi-thread", "signal"] }
 uuid = { version = "1.20.0", features = ["v4"] }
 webpki-roots = "1.0.6"
+rmcp = { version = "3.7.0", default-features = false, features = ["macros", "server", "transport-io"] }
 ratatui = "0.30.2"
 sqlformat = "0.5.0"
 tui-kiso = { git = "https://github.com/momoi-labs/blueprint", rev = "49350a4f960501f3e4b2c86936586a295c9b7964" }

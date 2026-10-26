@@ -9,9 +9,10 @@ base=${1:?usage: check-changeset.sh BASE [HEAD]}
 head=${2:-HEAD}
 
 # The binary is built from the Rust sources, the schema, and the console in
-# web/, which build.rs embeds, with the pinned toolchain. The sample
-# artifacts in web/dev-artifacts/ do not ship.
-shipped='^(src/|schema/|web/|build\.rs$|Cargo\.(toml|lock)$|rust-toolchain\.toml$)'
+# web/, which build.rs embeds, with the pinned toolchain and the SQLite flags
+# in .cargo/config.toml. The sample artifacts in web/dev-artifacts/ do not
+# ship.
+shipped='^(src/|schema/|web/|build\.rs$|Cargo\.(toml|lock)$|\.cargo/config\.toml$|rust-toolchain\.toml$)'
 unshipped='^web/dev-artifacts/'
 changeset='^\.changeset/.+\.md$'
 

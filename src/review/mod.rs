@@ -38,7 +38,7 @@ struct TableMetadata {
 }
 
 #[derive(Debug, Serialize)]
-struct SnapshotListing {
+pub(crate) struct SnapshotListing {
     id: String,
     file_name: String,
     size_bytes: u64,
@@ -68,7 +68,7 @@ struct SampleListing {
 /// many thousands of rows; past this, the response says it was truncated.
 const ROW_LIMIT: usize = 100_000;
 
-type ApiError = (StatusCode, Json<Value>);
+pub(crate) type ApiError = (StatusCode, Json<Value>);
 
 fn api_error(status: StatusCode, message: impl Into<String>) -> ApiError {
     (status, Json(serde_json::json!({ "error": message.into() })))
@@ -109,7 +109,13 @@ async fn schema() -> Result<Json<Value>, ApiError> {
 }
 
 async fn snapshots(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
-    let mut entries = fs::read_dir(state.data_directory.as_ref())
+    let listings = list_snapshots(state.data_directory.as_ref())?;
+    Ok(Json(serde_json::json!({ "snapshots": listings })))
+}
+
+/// Lists the readable artifacts in a data directory, sorted by file name.
+pub(crate) fn list_snapshots(data_directory: &Path) -> Result<Vec<SnapshotListing>, ApiError> {
+    let mut entries = fs::read_dir(data_directory)
         .map_err(|error| api_error(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
         .filter_map(Result::ok)
         .filter(|entry| entry.file_name().to_string_lossy().ends_with(".sqlite.gz"))
@@ -124,7 +130,7 @@ async fn snapshots(State(state): State<AppState>) -> Result<Json<Value>, ApiErro
             }
         }
     }
-    Ok(Json(serde_json::json!({ "snapshots": listings })))
+    Ok(listings)
 }
 
 async fn snapshot(
@@ -239,7 +245,7 @@ async fn root() -> Redirect {
     Redirect::to("/console/")
 }
 
-fn resolve_artifact(data_directory: &Path, id: &str) -> Result<PathBuf, ApiError> {
+pub(crate) fn resolve_artifact(data_directory: &Path, id: &str) -> Result<PathBuf, ApiError> {
     if id.contains('/') || id.contains('\\') || id == "." || id == ".." {
         return Err(api_error(StatusCode::NOT_FOUND, "snapshot not found"));
     }
@@ -275,7 +281,7 @@ fn resolve_artifact(data_directory: &Path, id: &str) -> Result<PathBuf, ApiError
     Err(api_error(StatusCode::NOT_FOUND, "snapshot not found"))
 }
 
-fn open_artifact(path: &Path) -> Result<Connection, ApiError> {
+pub(crate) fn open_artifact(path: &Path) -> Result<Connection, ApiError> {
     let file = fs::File::open(path)
         .map_err(|error| api_error(StatusCode::NOT_FOUND, error.to_string()))?;
     let mut decoder = GzDecoder::new(file);
@@ -431,7 +437,7 @@ fn query_rows(
     })
 }
 
-fn sqlite_value(value: ValueRef<'_>) -> Value {
+pub(crate) fn sqlite_value(value: ValueRef<'_>) -> Value {
     match value {
         ValueRef::Null => Value::Null,
         ValueRef::Integer(value) => value.into(),

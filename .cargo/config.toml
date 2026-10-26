@@ -1,0 +1,4 @@
+[env]
+# Lets SQL on an artifact compute percentiles and use math functions such as
+# sqrt and ln. See docs/adr/0009-mcp-server-over-artifacts.md.
+LIBSQLITE3_FLAGS = "SQLITE_ENABLE_PERCENTILE SQLITE_ENABLE_MATH_FUNCTIONS"

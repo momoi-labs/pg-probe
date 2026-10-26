@@ -40,7 +40,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
         run: |
-          rust='^(src/|tests/|schema/|build\.rs$|Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.github/workflows/ci\.yml$)'
+          rust='^(src/|tests/|schema/|build\.rs$|Cargo\.(toml|lock)$|\.cargo/config\.toml$|rust-toolchain\.toml$|\.github/workflows/ci\.yml$)'
           packaging='^(scripts/|site/public/install\.sh$|\.goreleaser\.yaml$|package(-lock)?\.json$|\.changeset/config\.json$)'
 
           # A pull request checks out its merge commit, whose first parent is

@@ -3,6 +3,7 @@ pub mod cancel;
 pub mod collector;
 pub mod contract;
 pub mod linux;
+pub mod mcp;
 pub mod panic_guard;
 pub mod postgres;
 pub mod review;
