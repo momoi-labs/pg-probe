@@ -11,6 +11,8 @@ on:
 
 permissions:
   contents: read
+  # Lets a failed job cancel the rest of the run.
+  actions: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -71,7 +73,6 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     runs-on: ${{ matrix.runner }}
     strategy:
-      fail-fast: false
       matrix:
         runner: [blacksmith-4vcpu-ubuntu-2404, blacksmith-4vcpu-ubuntu-2404-arm]
     steps:
@@ -97,6 +98,14 @@ jobs:
 
       - name: Build release binary
         run: cargo build --release --locked
+
+      # One failure fails the run, so the other jobs stop instead of spending
+      # minutes on a result that no longer matters.
+      - name: Cancel the run on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel "${{ github.run_id }}" --repo "${{ github.repository }}"
 
   # macOS runs the console and the PostgreSQL part of a capture. Most
   # integration tests read a Linux host, so this job runs the console tests
@@ -130,13 +139,20 @@ jobs:
           cargo build --release --locked
           scripts/smoke-test-release-binary.sh target/release/pg-probe work
 
+      # One failure fails the run, so the other jobs stop instead of spending
+      # minutes on a result that no longer matters.
+      - name: Cancel the run on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel "${{ github.run_id }}" --repo "${{ github.repository }}"
+
   musl-build:
     name: Musl build (${{ matrix.target }})
     needs: changes
     if: needs.changes.outputs.rust == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     strategy:
-      fail-fast: false
       matrix:
         target:
           - x86_64-unknown-linux-musl
@@ -165,6 +181,14 @@ jobs:
 
       - name: Build static musl release target
         run: cargo zigbuild --locked --release --target "${{ matrix.target }}"
+
+      # One failure fails the run, so the other jobs stop instead of spending
+      # minutes on a result that no longer matters.
+      - name: Cancel the run on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel "${{ github.run_id }}" --repo "${{ github.repository }}"
 
   package-scripts:
     name: Package script and GoReleaser checks
@@ -210,3 +234,11 @@ jobs:
         run: |
           npm ci
           npm run test:release
+
+      # One failure fails the run, so the other jobs stop instead of spending
+      # minutes on a result that no longer matters.
+      - name: Cancel the run on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run cancel "${{ github.run_id }}" --repo "${{ github.repository }}"
