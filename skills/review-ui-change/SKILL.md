@@ -1,6 +1,6 @@
 ---
 name: review-ui-change
-description: Review the review console and the pg-probe.dev site after a change to what pg-probe shows, and update them when they no longer match. Use when a change touches pg-probe top (src/top.rs, src/top/), the capture progress (src/progress.rs), the review console (web/), the printed report, or the version, before committing it.
+description: Review the review console and the pg-probe.dev site after a change to what pg-probe shows, and update them when they no longer match. Use when a change touches pg-probe top (src/top.rs, src/top/), the capture progress (src/progress.rs), the review console (web/), the printed report, the MCP server (src/mcp.rs, schema/catalog.md, schema/error-codes.md), or the version, before committing it.
 ---
 
 # Review the console and the site after a UI change
@@ -16,6 +16,7 @@ things. A change to one surface leaves the others stale unless someone checks.
 | `src/progress.rs` | `site/src/components/TermCapture.astro` | Copy the last frame of a real `pg-probe capture` by hand |
 | `web/` (the console) | `site/public/demo/console/`, `ConsoleCards.astro` | A static copy of the page `pg-probe analyze` serves; see `site/README.md` |
 | The printed report | `site/public/demo/report/*.pdf`, `site/src/assets/shots/report-page-*.png` | Print from the console, then `pdftoppm`; see `site/README.md` |
+| `src/mcp.rs`, `schema/catalog.md`, `schema/error-codes.md`, the `mcp` flags in `src/main.rs` | The MCP section in `site/src/i18n/*.ts` (`agent`), `AgentChat.astro`, `site/public/llms.txt`, and "Ask an AI agent" in `README.md` | Edit the text by hand. `AgentChat.astro` is a real Claude Code session on the demo capture: when a tool name, a limit or the server instructions change, run the question again on that capture and copy the new calls and answer |
 | The version in `Cargo.toml` | The badge in every capture above | Refresh all of them |
 
 A change can also reach the text around the screens. Search
