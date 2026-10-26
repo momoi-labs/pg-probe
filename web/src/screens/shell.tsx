@@ -46,6 +46,10 @@ export function Shell() {
         <Link to="/" className="brand">
           <PgProbeMark className="brand-emblem" />
           pg-probe
+          {/* The version on the secondary fill, as in the terminal. Badge
+              from kiso-react 0.22 leaves out .badge-neutral; see
+              Exceptions in docs/kiso.md. */}
+          <span className="badge badge-neutral">{__PG_PROBE_VERSION__}</span>
         </Link>
       }
       header={<SectionNavigation />}

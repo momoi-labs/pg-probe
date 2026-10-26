@@ -143,6 +143,12 @@ each with its column title.
   high, with no fill behind it. Kiso 1.0's BrandMark holds a letter or a
   14 px line icon on the primary fill, and the emblem cannot be read at that
   size. Kiso needs a BrandMark for a product logo.
+- The shell's brand ends with the version in a `.badge .badge-neutral` span,
+  not a Badge: kiso-react 0.22 renders the neutral Badge without
+  `.badge-neutral`, so it has no fill. `ui.css` fills `.badge-neutral` with
+  `secondary`, as the terminal fills the version, where the Badge contract
+  says `surface` with a border. The version comes from `Cargo.toml` when the
+  console is built.
 - In print, the first block after the anchor in a report pane body has no
   top margin, since the anchor is an empty first child that Kiso's block
   spacing would count.
