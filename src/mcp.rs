@@ -1,6 +1,7 @@
 //! A local MCP server over stdio that lets AI agents read artifacts. See
 //! `docs/adr/0009-mcp-server-over-artifacts.md`.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -26,6 +27,7 @@ pub const ROW_LIMIT: usize = 1_000;
 pub const TIME_LIMIT: Duration = Duration::from_secs(30);
 
 const CATALOG: &str = include_str!("../schema/catalog.md");
+const ERROR_CODES: &str = include_str!("../schema/error-codes.md");
 const SCHEMA_SQL: &str = include_str!("../schema/migrations/V1__initial_schema.sql");
 
 const INSTRUCTIONS: &str = "pg-probe reads PostgreSQL and Linux diagnostic \
@@ -39,7 +41,11 @@ median() and math functions such as sqrt() are available. export_query writes \
 every row to a new CSV file for analysis outside SQLite. State only what a \
 query showed. Before you explain a status or an error, query the tables that \
 hold its cause, and when the artifact does not show the cause, say so instead \
-of guessing.";
+of guessing. Say the artifact does not record something only after \
+describe_schema showed no table or column for it. In your answer, cite the \
+table, column and value behind each fact, for example \
+postgres_database.is_template = 1. Label any statement that no query showed \
+as an inference.";
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct ListSnapshotsParams {
@@ -84,6 +90,10 @@ pub struct QueryResult {
     pub rows: Vec<Vec<Value>>,
     /// True when the statement returned more than [`ROW_LIMIT`] rows.
     pub truncated: bool,
+    /// What each `error_code` in the rows means, so the agent reads the cause
+    /// instead of guessing it from the code's name.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub error_codes: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -290,10 +300,37 @@ pub fn run_query(connection: &Connection, sql: &str) -> Result<QueryResult, Stri
             .map_err(query_error)?;
         rows.push(values);
     }
+    let error_codes = explain_error_codes(&columns, &rows);
     Ok(QueryResult {
         columns,
         rows,
         truncated,
+        error_codes,
+    })
+}
+
+/// The meaning of every code in the `error_code` columns of the rows. A join
+/// can return more than one.
+fn explain_error_codes(columns: &[String], rows: &[Vec<Value>]) -> BTreeMap<String, String> {
+    let indexes: Vec<usize> = (0..columns.len())
+        .filter(|&index| columns[index] == "error_code")
+        .collect();
+    rows.iter()
+        .flat_map(|row| indexes.iter().filter_map(|&index| row[index].as_str()))
+        .filter_map(|code| {
+            error_code_entries()
+                .find(|(name, _)| *name == code)
+                .map(|(name, meaning)| (name.to_owned(), meaning.to_owned()))
+        })
+        .collect()
+}
+
+/// The entries of `schema/error-codes.md`: each code and what it means.
+fn error_code_entries() -> impl Iterator<Item = (&'static str, &'static str)> {
+    ERROR_CODES.lines().filter_map(|line| {
+        let rest = line.strip_prefix("- `")?;
+        let (code, meaning) = rest.split_once("`: ")?;
+        Some((code, meaning))
     })
 }
 
@@ -380,6 +417,7 @@ fn table_list() -> String {
             .replace('\n', " ");
         text.push_str(&format!("- `{name}`: {summary}\n"));
     }
+    text.push_str(&format!("\n#{}", ERROR_CODES.trim_end()));
     text
 }
 
@@ -510,6 +548,87 @@ mod tests {
         );
         assert!(data_directory(default, Some("relative".to_owned())).is_err());
         assert!(data_directory(default, Some("/does/not/exist".to_owned())).is_err());
+    }
+
+    #[test]
+    fn query_explains_the_error_codes_it_returns() {
+        let connection = Connection::open_in_memory().unwrap();
+        let result = run_query(
+            &connection,
+            "SELECT 'database_not_connectable' AS error_code UNION ALL SELECT NULL",
+        )
+        .unwrap();
+        assert_eq!(result.error_codes.len(), 1);
+        assert!(result.error_codes["database_not_connectable"].contains("template"));
+        let joined = run_query(
+            &connection,
+            "SELECT NULL AS error_code, 'database_not_connectable' AS error_code",
+        )
+        .unwrap();
+        assert!(joined.error_codes.contains_key("database_not_connectable"));
+        let plain = run_query(&connection, "SELECT 1 AS n").unwrap();
+        assert!(plain.error_codes.is_empty());
+    }
+
+    /// Every `.rs` file under `src/`, cut at its tests.
+    fn production_sources() -> Vec<String> {
+        fn walk(directory: &Path, sources: &mut Vec<String>) {
+            for entry in fs::read_dir(directory).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    walk(&path, sources);
+                } else if path.extension().is_some_and(|extension| extension == "rs") {
+                    let text = fs::read_to_string(&path).unwrap();
+                    let end = text.find("#[cfg(test)]").unwrap_or(text.len());
+                    sources.push(text[..end].to_owned());
+                }
+            }
+        }
+        let mut sources = Vec::new();
+        walk(
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut sources,
+        );
+        sources
+    }
+
+    #[test]
+    fn error_codes_match_the_code() {
+        let sources = production_sources();
+        let documented: Vec<&str> = error_code_entries().map(|(code, _)| code).collect();
+        let unknown: Vec<&&str> = documented
+            .iter()
+            .filter(|code| {
+                !sources
+                    .iter()
+                    .any(|text| text.contains(&format!("\"{code}\"")))
+            })
+            .collect();
+        assert!(
+            unknown.is_empty(),
+            "schema/error-codes.md names codes the code never writes: {unknown:?}"
+        );
+
+        // Literal codes passed straight to ComponentOutcome::failed. Codes that
+        // reach it through variables are not checked here.
+        let mut missing = Vec::new();
+        for text in &sources {
+            for call in text.split("ComponentOutcome::failed(").skip(1) {
+                let arguments = &call[..call.find(')').unwrap_or(call.len())];
+                for literal in arguments.split('"').skip(1).step_by(2) {
+                    let is_code = literal
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+                    if is_code && !documented.contains(&literal) {
+                        missing.push(literal.to_owned());
+                    }
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "schema/error-codes.md does not describe: {missing:?}"
+        );
     }
 
     #[test]
