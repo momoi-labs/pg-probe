@@ -124,8 +124,14 @@ each with its column title.
 - `F1` to `F4` choose the views, as in pg_activity, so `F1` does not open
   help. `?` opens help from the list only, and the footer of the details page
   does not show it.
-- The spinner turns once per refresh, so `top` does not redraw between
-  refreshes.
+- The brand in the header of `top` and the capture is two blocks: the name
+  in bold `primary-foreground` on `primary`, then the version on
+  `secondary`, where the Header contract puts both on `primary`. The version
+  reads as data, apart from the name. The brand starts on the first column
+  of `top`, so only its end is padded.
+- The header shows the local time of the last refresh, which changes on
+  each one, so `top` does not redraw between refreshes. Paused, it shows
+  `‖ paused` and the time the data is from.
 - The blocking and vacuum views show their session count only while open,
   since each sends its own query to the server.
 - `Ctrl+C` stops a capture without asking first, and keeps what was

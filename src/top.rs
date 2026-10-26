@@ -33,8 +33,8 @@ use serde::{Deserialize, Serialize};
 use sqlformat::{Dialect, FormatOptions, QueryParams};
 use thiserror::Error;
 use tui_kiso::{
-    braille, fit, set_background, set_foreground, Columns, KeyHints, Mark, Modal, Page, Scroll,
-    Tabs, Theme, Title,
+    fit, set_background, set_foreground, Columns, KeyHints, Mark, Modal, Page, Scroll, Tabs, Theme,
+    Title,
 };
 
 use settings::Settings;
@@ -427,8 +427,8 @@ struct App {
     /// The selected row of the list, and where the list is scrolled.
     selected: usize,
     list: Scroll,
-    /// Refreshes so far: the spinner turns once per refresh.
-    tick: u32,
+    /// The local time of the last refresh, as HH:MM:SS.
+    refreshed: Option<String>,
 }
 
 struct OsState {
@@ -633,7 +633,7 @@ impl App {
             os: local.then(OsState::new),
             selected: 0,
             list,
-            tick: 0,
+            refreshed: None,
         }
     }
 
@@ -822,7 +822,7 @@ impl App {
             os.refresh(&observed);
         }
         self.refresh_popup(client)?;
-        self.tick = self.tick.wrapping_add(1);
+        self.refreshed = local_time();
         self.blocks = if self.view == View::Blocking {
             fetch_blocks(client, blocking_sql(self.server.version_num))?
         } else {
@@ -1065,25 +1065,18 @@ impl App {
         let screen = frame.area();
         let buf = frame.buffer_mut();
         // Every row counts: the page starts on the first row and the keys
-        // take the last one, with two columns free at each side. The cells
-        // stay unpainted, so the terminal's background, set with OSC 11 in
-        // `run`, shows through.
-        let body = Rect::new(
-            screen.x.saturating_add(2),
-            screen.y,
-            screen.width.saturating_sub(4),
-            screen.height.saturating_sub(1),
-        );
+        // take the last one, across the full width. Unused cells stay
+        // unpainted, so the terminal's background, set with OSC 11 in `run`,
+        // shows through.
+        let body = Rect {
+            height: screen.height.saturating_sub(1),
+            ..screen
+        };
         let foot = Rect::new(body.x, screen.bottom().saturating_sub(1), body.width, 1)
             .intersection(screen);
-        // The scrollbar takes the second column right of the page.
-        let page = Rect {
-            width: body.width.saturating_sub(2),
-            ..body
-        };
         match &self.popup {
-            Some(popup) => self.draw_details(buf, page, popup),
-            None => self.draw_list(buf, page),
+            Some(popup) => self.draw_details(buf, body, popup),
+            None => self.draw_list(buf, body),
         }
         self.draw_hints(buf, foot);
         if let Some(popup) = &self.popup {
@@ -1103,28 +1096,44 @@ impl App {
     }
 
     /// The brand and the server, then `extra`, with the refresh on the
-    /// right: a spinner that turns on each refresh, or "paused".
-    fn server_row(&self, buf: &mut Buffer, area: Rect, extra: Vec<Span<'static>>, spinner: bool) {
+    /// right: the time of the last refresh and the interval, or "paused"
+    /// and the time the data is from.
+    fn server_row(&self, buf: &mut Buffer, area: Rect, extra: Vec<Span<'static>>, refresh: bool) {
         let t = &self.theme;
         let server = &self.server;
+        // The time changes on each refresh, so a live view shows it is live.
+        let time = self.refreshed.as_deref().map(|time| {
+            [
+                Span::styled(time.to_owned(), t.text()),
+                Span::styled(" · ", t.subtle()),
+            ]
+        });
         let refresh = if self.paused {
-            // The spinner stops on a full braille cell.
-            Line::from(Span::styled(
-                "⠿ paused",
+            let mut spans = vec![Span::styled(
+                "‖ paused",
                 t.link().add_modifier(Modifier::BOLD),
-            ))
-        } else if spinner {
-            Line::from(vec![
-                Span::styled(braille(self.tick), t.fg(t.tokens().primary)),
-                Span::styled(format!(" every {} s", self.interval.as_secs()), t.muted()),
-            ])
+            )];
+            if let Some([time, _]) = time {
+                spans.extend([Span::styled(" · ", t.subtle()), time]);
+            }
+            Line::from(spans)
+        } else if refresh {
+            let mut spans: Vec<Span> = time.into_iter().flatten().collect();
+            spans.push(Span::styled(
+                format!("every {} s", self.interval.as_secs()),
+                t.muted(),
+            ));
+            Line::from(spans)
         } else {
             Line::default()
         };
         let mut spans = vec![
+            // The badge starts on the first column, so it pads only its end.
+            // The version takes the secondary fill, after the brand.
+            Span::styled("pg-probe ", t.brand()),
             Span::styled(
-                concat!(" pg-probe ", env!("CARGO_PKG_VERSION"), " "),
-                t.brand(),
+                concat!(" ", env!("CARGO_PKG_VERSION"), " "),
+                t.fill(t.tokens().secondary_foreground, t.tokens().secondary),
             ),
             Span::raw(" "),
             Span::styled(format!("PostgreSQL {}", server.version), t.strong()),
@@ -1428,8 +1437,6 @@ impl App {
             row = 3;
         }
         put(buf, area, row, self.tabs_line(width));
-        let (head, page) = self.list_page(width);
-        put(buf, area, row + 1, head);
         let top = area.y.saturating_add(row + 2).min(area.bottom());
         let mut rows = Rect {
             y: top,
@@ -1437,22 +1444,41 @@ impl App {
             ..area
         };
         if self.preview {
-            let preview = self.preview_page(width);
-            let height = (preview.len() as u16).min(rows.height / 2);
+            let half = Rect {
+                height: rows.height / 2,
+                ..rows
+            };
+            let (lower, preview) = fit_page(half, |width| self.preview_page(width), Page::len);
+            let height = (preview.len() as u16).min(lower.height);
             rows.height -= height;
             let lower = Rect {
                 y: rows.bottom(),
                 height,
-                ..rows
+                ..lower
             };
             preview
                 .view(t, &Scroll::default())
                 .mark(Mark::Dim)
                 .render(lower, buf);
         }
+        let (rows, (head, page)) =
+            fit_page(rows, |width| self.list_page(width), |(_, page)| page.len());
+        put(buf, area, row + 1, head);
         // The rows on screen change with the preview, the screen size and
         // the layout, so every draw scrolls the selection back into view.
         self.list.follow();
+        if page.is_empty() {
+            // An empty list says so in the middle of its rows.
+            let middle = Rect {
+                y: rows.y + rows.height / 2,
+                height: rows.height.min(1),
+                ..rows
+            };
+            Line::styled("Nothing here right now.", t.muted())
+                .centered()
+                .render(middle, buf);
+            return;
+        }
         page.view(t, &self.list)
             .selected(Some(self.selected))
             .render(rows, buf);
@@ -1569,9 +1595,6 @@ impl App {
             cells.push(vec![Span::styled(wait, t.text())]);
             page.item(layout.lines(t, &spec, cells, &backend.query, width));
         }
-        if entries.is_empty() {
-            page.line(Line::styled("  Nothing here right now.", t.muted()));
-        }
         (layout.head(t, &spec), page)
     }
 
@@ -1667,9 +1690,6 @@ impl App {
             cells.push(vec![Span::styled(backend.wait_label(), t.text())]);
             page.item(layout.lines(t, &spec, cells, &backend.query, width));
         }
-        if self.vacuums.is_empty() {
-            page.line(Line::styled("  Nothing here right now.", t.muted()));
-        }
         (layout.head(t, &spec), page)
     }
 
@@ -1710,8 +1730,8 @@ impl App {
         if area.height == 0 {
             return;
         }
-        // The list's first row, without the spinner: this page is about one
-        // backend, not the refresh.
+        // The list's first row, without the time of the refresh: this page
+        // is about one backend, not the refresh.
         self.server_row(buf, area, Vec::new(), false);
         put(
             buf,
@@ -1745,8 +1765,8 @@ impl App {
             height: area.bottom() - top,
             ..area
         };
-        self.details_page(popup, width)
-            .view(t, &popup.scroll)
+        let (view, page) = fit_page(view, |width| self.details_page(popup, width), Page::len);
+        page.view(t, &popup.scroll)
             .mark(Mark::Dim)
             .render(view, buf);
     }
@@ -2269,6 +2289,36 @@ fn fact_lines(
 
 /// Text of the product, such as a notice or a server error, wrapped to the
 /// page. Server text is flattened first.
+/// The local time of day as HH:MM:SS, or `None` when the C library cannot
+/// tell it.
+fn local_time() -> Option<String> {
+    // SAFETY: `time` accepts a null pointer, and `localtime_r` writes only
+    // to the zeroed `tm` it gets.
+    let now = unsafe { libc::time(std::ptr::null_mut()) };
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    if unsafe { libc::localtime_r(&now, &mut tm) }.is_null() {
+        return None;
+    }
+    Some(format!(
+        "{:02}:{:02}:{:02}",
+        tm.tm_hour, tm.tm_min, tm.tm_sec
+    ))
+}
+
+/// `build` at the width of `area`, while its rows fit. When they do not,
+/// it is built two columns narrower, and the scrollbar takes the last one.
+fn fit_page<T>(area: Rect, build: impl Fn(usize) -> T, rows: impl Fn(&T) -> usize) -> (Rect, T) {
+    let page = build(usize::from(area.width));
+    if rows(&page) <= usize::from(area.height) {
+        return (area, page);
+    }
+    let area = Rect {
+        width: area.width.saturating_sub(2),
+        ..area
+    };
+    (area, build(usize::from(area.width)))
+}
+
 fn message_page(width: usize, message: &str, style: Style) -> Page {
     let mut page = Page::default();
     for line in split_cells(&single_line(message), width) {
@@ -2910,7 +2960,7 @@ mod tests {
     }
 
     #[test]
-    fn every_layer_fits_80_by_24_inside_the_side_margins() {
+    fn every_layer_fits_80_by_24() {
         let mut list = app(View::Running);
         list.os = Some(OsState::new());
         list.backends[0].query = format!("SELECT {} FROM t", "column_name, ".repeat(20));
@@ -2932,10 +2982,20 @@ mod tests {
             ("details", &mut details),
         ] {
             let rows = rows(&buffer(app, 80, 24));
-            for row in &rows {
-                let cells: Vec<char> = row.chars().collect();
-                let margins = [cells[0], cells[1], cells[78], cells[79]];
-                assert!(margins.iter().all(|c| *c == ' '), "{name}: {row:?}");
+            assert_eq!(rows.len(), 24, "{name}");
+            assert!(rows.iter().all(|row| row.chars().count() == 80), "{name}");
+            // The page and the keys start on the first column.
+            if name != "help" {
+                assert!(rows[2].starts_with(|c| c != ' '), "{name}: {:?}", rows[2]);
+                assert!(rows[23].starts_with(|c| c != ' '), "{name}: {:?}", rows[23]);
+            }
+            // The refresh ends on the last column.
+            if name == "list" {
+                assert!(rows[0].ends_with("every 2 s"), "{name}: {:?}", rows[0]);
+            }
+            // The scrollbar takes the last column.
+            if name == "details" {
+                assert!(rows[4].ends_with('│'), "{name}: {:?}", rows[4]);
             }
             if name == "help" {
                 let screen = rows.join("\n");
@@ -2947,8 +3007,62 @@ mod tests {
         // The query does not fit after the host's figures, so it moves under
         // them, with the wait and its title.
         let screen = rows(&buffer(&mut list, 80, 24)).join("\n");
-        assert!(screen.contains("  ▌   SELECT column_name,"), "{screen}");
-        assert!(screen.contains("      Waiting Lock · UPDATE t"), "{screen}");
+        assert!(screen.contains("\n▌   SELECT column_name,"), "{screen}");
+        assert!(screen.contains("\n    Waiting Lock · UPDATE t"), "{screen}");
+    }
+
+    #[test]
+    fn the_page_takes_the_full_width_until_it_scrolls() {
+        let mut app = app(View::Running);
+        app.popup = Some(Popup {
+            pid: "101".to_owned(),
+            details: Some(Details::default()),
+            memory: None,
+            ended: false,
+            scroll: Scroll::default(),
+            function: None,
+            explain: None,
+        });
+        let session = |rows: &[String]| {
+            rows.iter()
+                .find(|row| row.starts_with("Session "))
+                .cloned()
+                .expect("the session section")
+        };
+        // The page fits: its rule ends on the last column.
+        let tall = rows(&buffer(&mut app, 80, 60));
+        assert!(session(&tall).ends_with('─'), "{tall:#?}");
+        // The page scrolls: it ends two columns before the edge, and the
+        // scrollbar takes the last one.
+        let rows = rows(&buffer(&mut app, 80, 24));
+        let row = session(&rows);
+        assert!(row.ends_with("─ │"), "{row:?}");
+    }
+
+    #[test]
+    fn the_header_shows_the_time_of_the_last_refresh() {
+        let mut app = app(View::Running);
+        app.refreshed = Some("12:03:04".to_owned());
+        let header = rows(&buffer(&mut app, 120, 24)).remove(0);
+        assert!(header.ends_with("12:03:04 · every 2 s"), "{header:?}");
+        app.paused = true;
+        let header = rows(&buffer(&mut app, 120, 24)).remove(0);
+        assert!(header.ends_with("‖ paused · 12:03:04"), "{header:?}");
+    }
+
+    #[test]
+    fn an_empty_list_says_so_in_the_middle() {
+        let mut app = app(View::Vacuum);
+        let rows = rows(&buffer(&mut app, 80, 24));
+        let row = rows
+            .iter()
+            .position(|row| row.contains("Nothing here right now."))
+            .expect("the empty message");
+        // The rows of the list run from 5 to 22.
+        assert_eq!(row, 14, "{rows:#?}");
+        let left = rows[row].len() - rows[row].trim_start().len();
+        let right = rows[row].len() - rows[row].trim_end().len();
+        assert!(left.abs_diff(right) <= 1, "{:?}", rows[row]);
     }
 
     #[test]
@@ -3007,10 +3121,10 @@ mod tests {
         let buffer = buffer(&mut app, 160, 13);
         let rows = rows(&buffer);
         let row = |pid: &str| rows.iter().position(|row| row.contains(pid)).unwrap() as u16;
-        let selected = buffer[(2, row("102"))].clone();
+        let selected = buffer[(0, row("102"))].clone();
         assert_eq!(selected.symbol(), "▌");
         assert_eq!(selected.bg, app.theme.selected_color());
-        assert_eq!(buffer[(2, row("101"))].symbol(), " ");
+        assert_eq!(buffer[(0, row("101"))].symbol(), " ");
     }
 
     #[test]
@@ -3062,7 +3176,7 @@ mod tests {
         assert!(screen.contains("SELECT pg_sleep(5)"));
         assert!(!screen.contains("103"));
         assert!(screen.contains("Sessions  3/100"));
-        assert!(screen.contains(concat!(" pg-probe ", env!("CARGO_PKG_VERSION"))));
+        assert!(screen.starts_with(concat!("pg-probe  ", env!("CARGO_PKG_VERSION"), " ")));
     }
 
     #[test]
@@ -3191,13 +3305,13 @@ mod tests {
         );
         let lines: Vec<&str> = screen.lines().collect();
         let section = |name: &str| {
-            lines.iter().position(|l| {
-                l.starts_with(&format!("  {name} ─")) && l.trim_end().ends_with("─ 1")
-            })
+            lines
+                .iter()
+                .position(|l| l.starts_with(&format!("{name} ─")) && l.trim_end().ends_with("─ 1"))
         };
         assert!(section("bench").is_some(), "{screen}");
         let reports = section("reports").expect("a section per group");
-        assert!(lines[reports + 2].starts_with("  ▌ 101"), "{screen}");
+        assert!(lines[reports + 2].starts_with("▌ 101"), "{screen}");
     }
 
     #[test]

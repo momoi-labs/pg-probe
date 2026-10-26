@@ -1181,9 +1181,11 @@ pub fn header(sampling: Option<(Duration, Duration)>) {
     let t = theme();
     let title = Line::from(vec![
         Span::raw("  "),
+        // The version takes the secondary fill after the brand, as in top.
+        Span::styled(" pg-probe ", t.brand()),
         Span::styled(
-            concat!(" pg-probe ", env!("CARGO_PKG_VERSION"), " "),
-            t.brand(),
+            concat!(" ", env!("CARGO_PKG_VERSION"), " "),
+            t.fill(t.tokens().secondary_foreground, t.tokens().secondary),
         ),
         Span::styled(" Capture", t.strong()),
         Span::styled(
