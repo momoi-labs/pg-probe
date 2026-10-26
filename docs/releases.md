@@ -59,11 +59,13 @@ static musl, so the packages declare no dependencies, not even libc. The
 release fails if either package declares one, and it installs each package
 and runs the smoke test against `/usr/bin/pg-probe`.
 
-The macOS archives build on Blacksmith's macOS runners, since Apple's
-frameworks link only on macOS. Those runners are Apple Silicon, so the x86_64
-archive is cross-built there and its smoke test runs through Rosetta. In each
-smoke test, Linux collection is recorded as unsupported. The publish job adds
-the archives to `SHA256SUMS`.
+The macOS archives build on GitHub's macOS runners, `macos-latest` for arm64
+and `macos-15-intel` for x86_64, since Apple's frameworks link only on macOS.
+In each smoke test, Linux collection is recorded as unsupported. The publish
+job adds the archives to `SHA256SUMS`.
+
+Every workflow runs on GitHub-hosted runners, which cost nothing for a public
+repository.
 
 ## Homebrew cask
 

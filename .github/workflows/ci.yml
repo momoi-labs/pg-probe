@@ -25,14 +25,14 @@ jobs:
   # run, from the Version workflow, runs every job.
   changes:
     name: Detect changes
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
       packaging: ${{ steps.filter.outputs.packaging }}
     steps:
       - name: Check out repository
         # actions/checkout@v4.2.2
-        uses: useblacksmith/checkout@v1
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
 
@@ -74,11 +74,11 @@ jobs:
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        runner: [blacksmith-4vcpu-ubuntu-2404, blacksmith-4vcpu-ubuntu-2404-arm]
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
     steps:
       - name: Check out repository
         # actions/checkout@v4.2.2
-        uses: useblacksmith/checkout@v1
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
       - name: Install toolchain from rust-toolchain.toml
         # dtolnay/rust-toolchain@master (pin)
@@ -114,7 +114,7 @@ jobs:
     name: macOS check
     needs: changes
     if: needs.changes.outputs.rust == 'true'
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: macos-latest
     steps:
       - name: Check out repository
         # actions/checkout@v4.2.2
@@ -151,7 +151,7 @@ jobs:
     name: Musl build (${{ matrix.target }})
     needs: changes
     if: needs.changes.outputs.rust == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         target:
@@ -160,7 +160,7 @@ jobs:
     steps:
       - name: Check out repository
         # actions/checkout@v4.2.2
-        uses: useblacksmith/checkout@v1
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
       - name: Install toolchain from rust-toolchain.toml
         # dtolnay/rust-toolchain@master (pin)
@@ -194,11 +194,11 @@ jobs:
     name: Package script and GoReleaser checks
     needs: changes
     if: needs.changes.outputs.packaging == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         # actions/checkout@v4.2.2
-        uses: useblacksmith/checkout@v1
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
 

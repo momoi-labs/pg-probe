@@ -28,11 +28,11 @@ jobs:
     if: >-
       ${{ !contains(github.event.pull_request.labels.*.name, 'no-changeset') &&
       github.head_ref != 'changeset-release/main' }}
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
         # actions/checkout@v4.2.2
-        uses: useblacksmith/checkout@v1
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 2
 

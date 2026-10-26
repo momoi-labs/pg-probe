@@ -36,7 +36,7 @@ env:
 jobs:
   validate:
     name: Validate tag and tree
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     outputs:
@@ -44,7 +44,7 @@ jobs:
     steps:
       - name: Check out the tagged commit
         # actions/checkout@v4.2.2
-        uses: useblacksmith/checkout@v1
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: refs/tags/${{ env.TAG }}
           fetch-depth: 0
@@ -107,13 +107,13 @@ jobs:
   build:
     name: GoReleaser build musl archives
     needs: validate
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
       - name: Check out the tagged commit
         # actions/checkout@v4.2.2
-        uses: useblacksmith/checkout@v1
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: refs/tags/${{ env.TAG }}
           fetch-depth: 0
@@ -212,20 +212,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Apple frameworks link only on macOS, so each archive builds on a macOS
-  # runner. Blacksmith has Apple Silicon only, so the x86_64 archive is
-  # cross-built there and smoke-tested through Rosetta. Linux collection
-  # records itself as unsupported on macOS.
+  # Apple frameworks link only on macOS, so each archive builds and runs on a
+  # native runner. Linux collection records itself as unsupported there.
   macos-build:
     name: macOS build (${{ matrix.target }})
     needs: validate
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+        include:
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
     steps:
       - name: Check out the tagged commit
         # actions/checkout@v4.2.2
@@ -252,12 +254,6 @@ jobs:
           npm install --global pnpm@12.14.0
           pnpm --dir web install --frozen-lockfile
           pnpm --dir web build
-
-      - name: Install Rosetta for the x86_64 smoke test
-        if: matrix.target == 'x86_64-apple-darwin'
-        run: |
-          arch -x86_64 /usr/bin/true 2>/dev/null ||
-            sudo softwareupdate --install-rosetta --agree-to-license
 
       - name: Build, archive and smoke-test
         run: |
@@ -297,18 +293,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: blacksmith-4vcpu-ubuntu-2404
+          - runner: ubuntu-24.04
             target: x86_64-unknown-linux-musl
             deb_arch: amd64
             rpm_arch: x86_64
-          - runner: blacksmith-4vcpu-ubuntu-2404-arm
+          - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
             deb_arch: arm64
             rpm_arch: aarch64
     steps:
       - name: Check out the tagged commit
         # actions/checkout@v4.2.2
-        uses: useblacksmith/checkout@v1
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: refs/tags/${{ env.TAG }}
 
@@ -399,7 +395,7 @@ jobs:
   publish:
     name: Publish release
     needs: [validate, build, macos-build, native-test]
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ubuntu-24.04
     environment: release
     permissions:
       contents: write
@@ -408,7 +404,7 @@ jobs:
     steps:
       - name: Check out the tagged commit
         # actions/checkout@v4.2.2
-        uses: useblacksmith/checkout@v1
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: refs/tags/${{ env.TAG }}
 
