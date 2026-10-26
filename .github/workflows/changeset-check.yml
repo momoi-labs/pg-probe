@@ -23,7 +23,11 @@ concurrency:
 jobs:
   changeset:
     name: Changeset
-    if: ${{ !contains(github.event.pull_request.labels.*.name, 'no-changeset') }}
+    # The version PR consumes the changesets instead of adding one. GitHub
+    # now runs pull_request workflows on it too, so skip the check there.
+    if: >-
+      ${{ !contains(github.event.pull_request.labels.*.name, 'no-changeset') &&
+      github.head_ref != 'changeset-release/main' }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Check out repository
