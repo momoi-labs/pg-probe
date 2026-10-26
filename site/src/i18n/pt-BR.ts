@@ -165,6 +165,8 @@ const ptBR: Dictionary = {
     ubuntuText: 'deb, testado no Ubuntu 24.04',
     archText: 'binário estático, sem dependências',
     copy: 'Copiar o comando de instalação',
+    macos: 'No Mac também rodam o console, o pg-probe top e o servidor MCP, em Apple Silicon e Intel. As métricas do host vêm do servidor Linux.',
+    copyMacos: 'Copiar o comando do Homebrew',
     download: 'Baixar para Linux',
     downloadText: 'deb, rpm ou um binário estático, sem dependências.',
     fine: 'Código aberto sob a PostgreSQL License. A captura, o console e o relatório vêm no mesmo binário.',

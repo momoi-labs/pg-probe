@@ -2,11 +2,19 @@
 
 > pg-probe records PostgreSQL and Linux host metrics into one SQLite file, a snapshot. `pg-probe mcp` lets an AI agent read snapshots over the Model Context Protocol (MCP), with read-only SQL. This file tells an agent how to install pg-probe and connect to it.
 
-pg-probe runs on Linux only, on x86_64 and arm64. It is one static binary with no dependencies.
+pg-probe runs on Linux and macOS, on x86_64 and arm64. The MCP server works the same on both. On macOS, a capture records PostgreSQL only, because host metrics need Linux.
 
 ## Install
 
-Install for the current user. This needs no root and no password prompt:
+On macOS, install with Homebrew:
+
+```sh
+brew install momoi-labs/packages/pg-probe
+```
+
+The binary is `<prefix>/bin/pg-probe`, where `<prefix>` is the output of `brew --prefix`, for example `/opt/homebrew/bin/pg-probe`. Use that absolute path in the MCP settings below.
+
+On Linux, install for the current user. This needs no root and no password prompt:
 
 ```sh
 curl -fsSL https://pg-probe.dev/install.sh | PG_PROBE_INSTALL_DIR="$HOME/.local/bin" sh

@@ -165,6 +165,8 @@ const en = {
     ubuntuText: 'deb, tested on Ubuntu 24.04',
     archText: 'static binary, no dependencies',
     copy: 'Copy the install command',
+    macos: 'On a Mac, the console, pg-probe top and the MCP server run too, on Apple Silicon and Intel. Host metrics come from the Linux server.',
+    copyMacos: 'Copy the Homebrew command',
     download: 'Download for Linux',
     downloadText: 'deb, rpm, or a static binary, with no dependencies.',
     fine: 'Open source under the PostgreSQL License. The capture, the console, and the report ship in the same binary.',

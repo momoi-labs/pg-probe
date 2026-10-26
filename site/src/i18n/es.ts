@@ -165,6 +165,8 @@ const es: Dictionary = {
     ubuntuText: 'deb, probado en Ubuntu 24.04',
     archText: 'binario estático, sin dependencias',
     copy: 'Copiar el comando de instalación',
+    macos: 'En un Mac también funcionan la consola, pg-probe top y el servidor MCP, en Apple Silicon e Intel. Las métricas del host vienen del servidor Linux.',
+    copyMacos: 'Copiar el comando de Homebrew',
     download: 'Descargar para Linux',
     downloadText: 'deb, rpm o un binario estático, sin dependencias.',
     fine: 'Código abierto bajo la PostgreSQL License. La captura, la consola y el informe vienen en el mismo binario.',
