@@ -66,3 +66,11 @@ live in `README.md` (`## Development`) and `.github/workflows/ci.yml`.
 
 The UI follows Kiso. Read `docs/kiso.md` before changing a screen, and use
 the `kiso-page` skill to build or change one.
+
+### Console and site review
+
+The site shows real captures of `top`, the capture progress, the console and
+the report. After a change to any of them, use the `review-ui-change` skill in
+`skills/` to review the console and the site, and update what no longer
+matches. Repository skills live in `skills/`, linked from `.claude/skills/`
+and `.agents/skills/`.

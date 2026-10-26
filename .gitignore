@@ -24,3 +24,9 @@ web/dev-artifacts/*
 
 # Changesets, installed from the root package.json
 /node_modules
+
+# The skills in skills/ are linked into .claude/skills/ for Claude Code. Keep
+# the links, even where a global ignore drops .claude/, and nothing else.
+!/.claude/
+/.claude/*
+!/.claude/skills/
