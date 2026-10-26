@@ -1165,7 +1165,6 @@ fn terminal_width() -> usize {
         .map(|(columns, _)| usize::from(columns))
         .unwrap_or(80)
         .saturating_sub(1)
-        .max(40)
 }
 
 /// Prints the page title once, when stderr is a terminal. The actions, such
