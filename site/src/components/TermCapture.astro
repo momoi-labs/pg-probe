@@ -4,7 +4,7 @@
 ---
 <div class="tc">
 <div class="tc-cmd"><span class="tc-ps">postgres@db-prod-01:~$</span> pg-probe capture -h 127.0.0.1 -U postgres --duration 3m --interval 5s</div>
-<div class="tc-row"><span class="tc-badge">pg-probe 0.2.2</span> <b>Capture</b> <span class="tc-m">· 3m every 5s</span></div>
+<div class="tc-row"><span class="tc-badge">pg-probe</span><span class="tc-ver">0.4.0</span> <b>Capture</b> <span class="tc-m">· 3m every 5s</span></div>
 <div class="tc-sec">Progress</div>
 <div class="tc-kv"><span>Samples</span><b>37</b></div>
 <div class="tc-kv"><span>Elapsed</span><span><b>3m00s</b> <span class="tc-m">of 3m00s</span> <i class="tc-bar"></i></span></div>
@@ -15,6 +15,7 @@
 <div class="tc-grid"><span>Snapshot</span><b>50</b><span>1</span><span>0</span><span></span></div>
 <div class="tc-grid"><span>Linux</span><b>13</b><span>0</span><span>0</span><span class="tc-m">each sample</span></div>
 <div class="tc-grid"><span>PostgreSQL</span><b>13</b><span>0</span><span>0</span><span class="tc-m">each sample</span></div>
+<div class="tc-kv"><span></span><span class="tc-m">ok and unsup: last sample · errors: all samples</span></div>
 <div class="tc-sec">Cost</div>
 <div class="tc-kv"><span>Sample time</span><span><b>86.0ms</b> <span class="tc-m">last · p95</span> <b>552.4ms</b> <span class="tc-m">· p99</span> <b>1.3s</b> <span class="tc-m">· 36 samples</span></span></div>
 <div class="tc-kv"><span>CPU</span><span><b>0.54%</b> <span class="tc-m">sampling ·</span> <b>0.56%</b> <span class="tc-m">overall</span></span></div>
@@ -31,6 +32,7 @@
   .tc-ps { color: #e4e4e7; }
   .tc-row, .tc-kv, .tc-grid, .tc-sec, .tc-done { padding-left: 1.25rem; }
   .tc-badge { background: #e5b53b; color: #09090b; font-weight: 700; padding: 0 0.5rem; }
+  .tc-ver { background: #3a3834; color: #eeece9; padding: 0 0.5rem; }
   .tc-sec { color: #a1a1aa; display: flex; align-items: center; gap: 0.6rem; margin-top: 0.9em; }
   .tc-sec::after { content: ''; flex: 1; height: 1px; background: #3f3f46; }
   .tc-kv { display: grid; grid-template-columns: 9.5rem 1fr; }

@@ -142,9 +142,11 @@ p { margin: 0; }
 
 /* top */
 .top-box { border: 1px solid var(--border); border-radius: 18px; background: var(--panel); padding: clamp(1.5rem, 4vw, 3rem); }
-/* The screen, and what it costs beside it. */
-.top-grid { display: grid; grid-template-columns: minmax(0, 840px) 1fr; gap: 2rem; align-items: end; }
-.cost { display: grid; gap: 1rem; padding-bottom: 0.25rem; }
+/* The screen at the full width, so its 120 columns stay readable, and what
+   it costs in a row under it. */
+.top-grid { display: grid; gap: 2rem; }
+.cost { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; padding-bottom: 0.25rem; }
+.cost h3, .cost .fine { grid-column: 1 / -1; }
 .cost h3 { font-size: 0.75rem; font-family: var(--mono); font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
 .cost b { display: block; font-size: 1.6rem; font-weight: 500; letter-spacing: -0.03em; line-height: 1.1; }
 .cost span { color: var(--dim); font-size: 0.85rem; }
@@ -178,9 +180,6 @@ p { margin: 0; }
 @media (max-width: 860px) {
   .nav .wrap > ul > li:not(:last-child) { display: none; }
   .split,   .compat { grid-template-columns: 1fr 1fr; }
-  .top-grid { grid-template-columns: 1fr; }
   .grid3 { grid-template-columns: 1fr; }
-  .cost { grid-template-columns: repeat(3, 1fr); }
-  .cost h3, .cost .fine { grid-column: 1 / -1; }
   .sheets { min-height: 26rem; }
 }

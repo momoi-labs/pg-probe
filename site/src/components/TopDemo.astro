@@ -1,8 +1,8 @@
 ---
 // pg-probe top, one view at a time. Every screen is a real capture of
 // `pg-probe top` in a terminal of 120 columns and 35 rows under pgbench,
-// drawn as HTML. The keys above the screen, the keys of top, and the key
-// hints drawn in the screen switch views.
+// drawn as HTML by scripts/top-screens.sh. The keys above the screen, the
+// keys of top, and the key hints drawn in the screen switch views.
 import TopScreen from './TopScreen.astro';
 import { dictionary, type Language } from '../i18n';
 
@@ -97,7 +97,7 @@ const views = [
 </script>
 
 <style>
-  .top-demo { max-width: 840px; margin-top: 2.5rem; }
+  .top-demo { margin-top: 2.5rem; }
   [hidden] { display: none !important; }
 
   .seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 3px; margin-bottom: 0.75rem; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
