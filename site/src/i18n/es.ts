@@ -103,7 +103,7 @@ const es: Dictionary = {
     lead: 'Mira las consultas que se ejecutan ahora, de la más larga a la más corta, y qué espera cada una. Funciona desde PostgreSQL 9.3.',
     views: 'Vistas de pg-probe top',
     running: 'En ejecución',
-    runningNote: 'Todos los backends activos, de mayor a menor tiempo de ejecución, con su CPU, I/O y espera de I/O, leídas de <code>/proc</code>.',
+    runningNote: 'Todos los backends que no están inactivos, de mayor a menor tiempo de ejecución, con su CPU, I/O y espera de I/O, leídas de <code>/proc</code>.',
     waiting: 'En espera',
     waitingNote: 'Los backends que esperan un bloqueo, y el bloqueo que espera cada uno.',
     blocking: 'Bloqueando',

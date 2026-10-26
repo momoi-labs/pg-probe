@@ -103,7 +103,7 @@ const ptBR: Dictionary = {
     lead: 'Veja as consultas que estão rodando agora, das mais longas para as mais curtas, e o que cada uma espera. Funciona a partir do PostgreSQL 9.3.',
     views: 'Telas do pg-probe top',
     running: 'Em execução',
-    runningNote: 'Todos os backends ativos, do maior para o menor tempo de execução, com sua CPU, I/O e espera de I/O, lidos do <code>/proc</code>.',
+    runningNote: 'Todos os backends que não estão ociosos, do maior para o menor tempo de execução, com sua CPU, I/O e espera de I/O, lidos do <code>/proc</code>.',
     waiting: 'Em espera',
     waitingNote: 'Backends esperando por um lock, e o lock que cada um espera.',
     blocking: 'Bloqueando',
