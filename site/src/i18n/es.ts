@@ -14,6 +14,7 @@ const es: Dictionary = {
     how: 'Cómo funciona',
     report: 'Informe',
     top: 'Métricas en vivo',
+    agent: 'Agente de IA',
   },
   hero: {
     eyebrow: 'Para quien trabaja con PostgreSQL',
@@ -74,6 +75,28 @@ const es: Dictionary = {
       {
         title: 'Tu propio SQL',
         text: 'El artefacto es una base de datos SQLite. Ábrelo con <code>sqlite3</code> cuando la consola no baste.',
+      },
+    ],
+  },
+  agent: {
+    eyebrow: 'Pregunta a un agente de IA',
+    title: 'Deja que tu agente de IA lea el fichero.',
+    lead: '<code>pg-probe mcp</code> da a Claude Code, a Codex o a cualquier agente que hable MCP acceso de solo lectura a los snapshots de un directorio. Pregunta en lenguaje natural, por ejemplo "¿Falló algún colector? ¿Por qué?". El agente escribe el SQL y cita la tabla detrás de cada respuesta.',
+    copy: 'Copiar el comando',
+    commandNote:
+      'En Codex, ejecuta <code>codex mcp add</code> con los mismos argumentos. Otros agentes reciben <code>pg-probe mcp -D &lt;directorio&gt;</code> en su configuración de MCP.',
+    features: [
+      {
+        title: 'Conoce el esquema',
+        text: 'Cada tabla y columna viene con su unidad y su origen, y cada código de error de los colectores con lo que significa.',
+      },
+      {
+        title: 'SQL de solo lectura',
+        text: 'Una consulta a la vez, hasta 1.000 filas, con <code>percentile()</code> para p95 y p99. Los resultados mayores van a un nuevo fichero CSV.',
+      },
+      {
+        title: 'Se ejecuta en tu portátil',
+        text: 'El servidor se ejecuta en local y nunca se conecta a PostgreSQL. Lo que lee el agente va al modelo que usa.',
       },
     ],
   },

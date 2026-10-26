@@ -14,6 +14,7 @@ const en = {
     how: 'How it works',
     report: 'Report',
     top: 'Live metrics',
+    agent: 'AI agent',
   },
   hero: {
     eyebrow: 'For PostgreSQL engineers',
@@ -74,6 +75,28 @@ const en = {
       {
         title: 'Your own SQL',
         text: 'The artifact is plain SQLite. Open it with <code>sqlite3</code> when the console is not enough.',
+      },
+    ],
+  },
+  agent: {
+    eyebrow: 'Ask an AI agent',
+    title: 'Let your AI agent read the file.',
+    lead: '<code>pg-probe mcp</code> gives Claude Code, Codex, or any agent that speaks MCP read-only access to the snapshots in a directory. Ask in plain language, for example "Did any collector fail? Why?". The agent writes the SQL and cites the table behind each answer.',
+    copy: 'Copy the command',
+    commandNote:
+      'For Codex, run <code>codex mcp add</code> with the same arguments. Other agents take <code>pg-probe mcp -D &lt;directory&gt;</code> in their MCP settings.',
+    features: [
+      {
+        title: 'Knows the schema',
+        text: 'Every table and column comes with its unit and its source, and every collector error code with what it means.',
+      },
+      {
+        title: 'Read-only SQL',
+        text: 'One statement at a time, up to 1,000 rows, with <code>percentile()</code> for p95 and p99. Larger results go to a new CSV file.',
+      },
+      {
+        title: 'Runs on your laptop',
+        text: 'The server runs locally and never connects to PostgreSQL. What the agent reads goes to the model it uses.',
       },
     ],
   },

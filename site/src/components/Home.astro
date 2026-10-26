@@ -16,6 +16,7 @@ import locksEs from '../assets/shots/report-page-locks-es.png';
 
 const releases = 'https://github.com/momoi-labs/pg-probe/releases/latest';
 const repo = 'https://github.com/momoi-labs/pg-probe';
+const agentCommand = 'claude mcp add pg-probe -- pg-probe mcp -D ~/snapshots';
 
 interface Props {
   lang: Language;
@@ -44,6 +45,7 @@ const samples: Record<Language, string> = {
       <ul>
         <li><a href="#how">{t.nav.how}</a></li>
         <li><a href="#report">{t.nav.report}</a></li>
+        <li><a href="#agent">{t.nav.agent}</a></li>
         <li><a href="#top">{t.nav.top}</a></li>
         <li><a href={repo}>GitHub</a></li>
         <li><LanguageMenu lang={lang} /></li>
@@ -103,6 +105,24 @@ const samples: Record<Language, string> = {
         <p class="fine">{t.console.fine}</p>
         <div class="grid3">
           {t.console.features.map((feature) => <div><h4>{feature.title}</h4><p set:html={feature.text} /></div>)}
+        </div>
+      </div>
+    </section>
+
+    <section class="sec" id="agent" style="padding-top: 0">
+      <div class="wrap">
+        <span class="eyebrow">{t.agent.eyebrow}</span>
+        <h2>{t.agent.title}</h2>
+        <p class="lead" set:html={t.agent.lead} />
+        <div class="install command">
+          <code><b>$</b> {agentCommand}</code>
+          <button type="button" data-copy={agentCommand} aria-label={t.agent.copy}>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5v-1a1.5 1.5 0 00-1.5-1.5H4a1.5 1.5 0 00-1.5 1.5V9A1.5 1.5 0 004 10.5h1"/></svg>
+          </button>
+        </div>
+        <p class="fine" set:html={t.agent.commandNote} />
+        <div class="grid3">
+          {t.agent.features.map((feature) => <div><h4>{feature.title}</h4><p set:html={feature.text} /></div>)}
         </div>
       </div>
     </section>
