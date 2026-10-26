@@ -1,0 +1,82 @@
+---
+// One real Claude Code session over `pg-probe mcp`, on the demo capture of
+// db-prod-01. The tool calls are the ones it made, in order; the answer is
+// its own, translated in the other languages. When the box comes into view,
+// a script replays the session: the question, each call, then the answer.
+import { dictionary, type Language } from '../i18n';
+
+interface Props {
+  lang: Language;
+}
+const { lang } = Astro.props;
+const t = dictionary(lang).agent.chat;
+
+const calls = [
+  ['list_snapshots', ''],
+  ['describe_schema', ''],
+  ['query', 'postgres_database_stats'],
+  ['query', 'postgres_activity_aggregates'],
+  ['describe_schema', 'postgres_activity_aggregates'],
+  ['describe_schema', 'postgres_lock_aggregates'],
+  ['query', 'postgres_activity_aggregates'],
+  ['query', 'postgres_lock_aggregates'],
+];
+---
+<figure class="chat" aria-label={t.label}>
+  <p class="ask" data-step>{t.question}</p>
+  <ol class="calls">
+    {calls.map(([tool, table]) => <li data-step="call"><span>{tool}</span>{table && ` ${table}`}</li>)}
+  </ol>
+  <div class="answer">
+    <p data-step set:html={t.summary} />
+    <ul>
+      {t.points.map((point) => <li data-step set:html={point} />)}
+    </ul>
+  </div>
+</figure>
+
+<script>
+  // Without the script, or with reduced motion, the whole session shows at once.
+  const chat = document.querySelector<HTMLElement>('.chat');
+  if (chat && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const steps = [...chat.querySelectorAll<HTMLElement>('[data-step]')];
+    chat.classList.add('replay');
+    const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));
+    async function play() {
+      for (const step of steps) {
+        step.classList.add('on');
+        if (step.dataset.step === 'call') {
+          step.classList.add('run');
+          await wait(550);
+          step.classList.remove('run');
+        } else {
+          await wait(step.classList.contains('ask') ? 700 : 350);
+        }
+      }
+    }
+    const seen = new IntersectionObserver((entries) => {
+      if (!entries[0].isIntersecting) return;
+      seen.disconnect();
+      play();
+    }, { threshold: 0.4 });
+    seen.observe(chat);
+  }
+</script>
+
+<style>
+  .chat { margin: 0; border: 1px solid var(--border); border-radius: 14px; background: var(--panel); padding: 1.25rem; font-size: 0.9rem; }
+  .ask { margin-left: auto; width: fit-content; max-width: 85%; background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px; padding: 0.6rem 0.9rem; }
+  .calls { list-style: none; margin: 1rem 0 0; padding: 0; font-family: var(--mono); font-size: 0.75rem; color: var(--dim); }
+  .calls span { color: var(--accent); }
+  .calls span::before { content: '\2192  '; color: var(--dim); }
+  .answer { margin-top: 1rem; color: var(--muted); }
+  .answer p { color: var(--fg); }
+  .answer ul { margin: 0.75rem 0 0; padding-left: 1.1rem; display: grid; gap: 0.5rem; }
+  .answer :global(code) { font-size: 0.8em; }
+  /* The replay hides each step until its turn; the box keeps its height. */
+  .replay [data-step] { opacity: 0; transform: translateY(4px); transition: opacity 0.3s, transform 0.3s; }
+  .replay [data-step].on { opacity: 1; transform: none; }
+  .calls .run span { animation: blink 0.6s ease-in-out infinite alternate; }
+  .calls .run span::before { content: '\25CF  '; color: var(--accent); }
+  @keyframes blink { to { opacity: 0.35; } }
+</style>

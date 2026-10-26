@@ -85,6 +85,7 @@ p { margin: 0; }
 .nav ul { display: flex; align-items: center; gap: 1.75rem; list-style: none; margin: 0; padding: 0; font-size: 0.9rem; }
 .nav ul a { text-decoration: none; color: var(--muted); }
 .nav ul a:hover { color: var(--fg); }
+.nav .badge { margin-left: 0.3rem; padding: 0.05rem 0.4rem; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent); font-family: var(--mono); font-size: 0.65rem; letter-spacing: 0.08em; text-transform: uppercase; vertical-align: 0.1em; }
 
 /* Buttons and commands */
 .cta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-top: 2rem; }
@@ -159,6 +160,7 @@ p { margin: 0; }
 .compat b { display: block; font-size: 1.35rem; font-weight: 500; letter-spacing: -0.03em; }
 .compat span { color: var(--dim); font-size: 0.85rem; }
 #install { scroll-margin-top: 4rem; }
+#agent { scroll-margin-top: 5rem; }
 .install { display: flex; align-items: stretch; margin-top: 1.5rem; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); overflow: hidden; }
 .install code { flex: 1; min-width: 0; padding: 1rem 1.25rem; border: 0; border-radius: 0; background: none; font-size: 0.95rem; overflow-x: auto; white-space: nowrap; }
 .install code b { color: var(--accent); font-weight: 400; margin-right: 0.4rem; }
@@ -168,6 +170,10 @@ p { margin: 0; }
 .install button.done { color: var(--accent); }
 /* A command under a heading: as wide as the command, not the page. */
 .install.command { display: inline-flex; margin: 1.25rem 0 0; }
+.agent-grid { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(2rem, 5vw, 4rem); align-items: start; }
+.prompt-label { margin-top: 2rem; font-size: 0.75rem; font-family: var(--mono); font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.install.prompt { margin-top: 0.75rem; }
+.install.prompt code { white-space: normal; line-height: 1.6; }
 .fine a { color: var(--muted); }
 
 
@@ -180,6 +186,7 @@ p { margin: 0; }
 @media (max-width: 860px) {
   .nav .wrap > ul > li:not(:last-child) { display: none; }
   .split,   .compat { grid-template-columns: 1fr 1fr; }
+  .agent-grid { grid-template-columns: 1fr; }
   .grid3 { grid-template-columns: 1fr; }
   .sheets { min-height: 26rem; }
 }

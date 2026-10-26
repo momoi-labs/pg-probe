@@ -1,0 +1,80 @@
+# pg-probe
+
+> pg-probe records PostgreSQL and Linux host metrics into one SQLite file, a snapshot. `pg-probe mcp` lets an AI agent read snapshots over the Model Context Protocol (MCP), with read-only SQL. This file tells an agent how to install pg-probe and connect to it.
+
+pg-probe runs on Linux only, on x86_64 and arm64. It is one static binary with no dependencies.
+
+## Install
+
+Install for the current user. This needs no root and no password prompt:
+
+```sh
+curl -fsSL https://pg-probe.dev/install.sh | PG_PROBE_INSTALL_DIR="$HOME/.local/bin" sh
+```
+
+The script checks each download against the release's SHA256SUMS. It prints the path it installed, for example `installed /home/me/.local/bin/pg-probe`. Use that absolute path in the MCP settings below, because the agent may not start the server with the person's PATH.
+
+Check the install with `<path> --version`. The `mcp` command needs a release that lists it in `<path> --help`.
+
+## Add the MCP server
+
+Below, `<path>` is the installed binary and `<dir>` is the absolute path of the directory where the person said their snapshots (`*.sqlite.gz`) are. Expand `~` to the home directory. When the person did not say, ask. Do not guess the directory.
+
+Claude Code:
+
+```sh
+claude mcp add -s user pg-probe -- <path> mcp -D <dir>
+```
+
+Codex:
+
+```sh
+codex mcp add pg-probe -- <path> mcp -D <dir>
+```
+
+Other agents take the same command in their MCP settings:
+
+```json
+{ "mcpServers": { "pg-probe": { "command": "<path>", "args": ["mcp", "-D", "<dir>"] } } }
+```
+
+Most agents load a new MCP server only in a new session. Tell the person to restart the agent, then ask it about a snapshot.
+
+## Another directory in a session
+
+`-D` is only the default. In any session the person can name another directory. Pass its absolute path as `data_directory` to `list_snapshots`, `query` and `export_query`. The settings stay the same.
+
+## Tools
+
+- `list_snapshots` lists the snapshots in the directory, with the directory's absolute path.
+- `describe_schema` without a table explains how snapshots, samples and counters work, lists every table, and says what each collector error code means. With a table, it describes each column, its unit and where pg-probe reads it.
+- `query` runs one read-only SQLite statement on one snapshot and returns at most 1,000 rows. SQL can use `percentile()`, `median()` and math functions such as `sqrt()`.
+- `export_query` writes every row of a statement to a new CSV file. It never overwrites a file.
+
+## How to answer
+
+- State only what a query showed. Cite the table, column and value behind each fact.
+- Label anything that no query showed as an inference.
+- Before you explain a status or an error code, query the tables that hold its cause.
+- Say a snapshot does not record something only after `describe_schema` showed no table or column for it.
+- Cumulative counters need the difference between consecutive samples.
+
+## What the server does not do
+
+It never connects to PostgreSQL and never changes a snapshot. It stops a statement after 30 seconds. A snapshot holds no credentials and no query text.
+
+## Capture a snapshot
+
+On the PostgreSQL server, with the same connection options as psql:
+
+```sh
+pg-probe capture --duration 5m --interval 10s -h <host> -U <user> -d <database>
+```
+
+The snapshot is written to the current directory, or to `-D <dir>`. The session is read-only and has a statement timeout.
+
+## Links
+
+- [Site](https://pg-probe.dev/)
+- [Source and README](https://github.com/momoi-labs/pg-probe)
+- [Releases](https://github.com/momoi-labs/pg-probe/releases/latest)

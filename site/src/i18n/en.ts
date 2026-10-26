@@ -14,7 +14,8 @@ const en = {
     how: 'How it works',
     report: 'Report',
     top: 'Live metrics',
-    agent: 'AI agent',
+    agent: 'MCP',
+    new: 'New',
   },
   hero: {
     eyebrow: 'For PostgreSQL engineers',
@@ -79,25 +80,32 @@ const en = {
     ],
   },
   agent: {
-    eyebrow: 'Ask an AI agent',
-    title: 'Let your AI agent read the file.',
-    lead: '<code>pg-probe mcp</code> gives Claude Code, Codex, or any agent that speaks MCP read-only access to the snapshots in a directory. Ask in plain language, for example "Did any collector fail? Why?". The agent writes the SQL and cites the table behind each answer.',
-    copy: 'Copy the command',
-    commandNote:
-      'For Codex, run <code>codex mcp add</code> with the same arguments. Other agents take <code>pg-probe mcp -D &lt;directory&gt;</code> in their MCP settings.',
-    features: [
-      {
-        title: 'Knows the schema',
-        text: 'Every table and column comes with its unit and its source, and every collector error code with what it means.',
-      },
-      {
-        title: 'Read-only SQL',
-        text: 'One statement at a time, up to 1,000 rows, with <code>percentile()</code> for p95 and p99. Larger results go to a new CSV file.',
-      },
-      {
-        title: 'Runs on your laptop',
-        text: 'The server runs locally and never connects to PostgreSQL. What the agent reads goes to the model it uses.',
-      },
+    eyebrow: 'MCP',
+    title: 'Analysis with AI.',
+    lead: 'Connect pg-probe to Claude Code, Codex, Cursor, or any tool that speaks MCP. Ask in plain language: the AI reads the snapshots with read-only access, writes the SQL on the internal tables for you, and cites the table and value behind each answer.',
+    promptLabel: 'Ask your agent',
+    prompt:
+      'Install pg-probe and add its MCP server by following https://pg-probe.dev/llms.txt. My snapshots are in ~/snapshots, but I may point to another folder in each session.',
+    copy: 'Copy the prompt',
+    promptNote:
+      'The agent reads <a href="/llms.txt">llms.txt</a> and sets itself up. To set it up by hand in the terminal: <code>claude mcp add pg-probe -- pg-probe mcp</code>.',
+    chat: {
+      label: 'A real Claude Code session on the demo capture',
+      question: 'Why did transactions per second drop around 15:04 UTC?',
+      summary:
+        'TPS fell because of row-lock contention.',
+      points: [
+        '<b>The drop:</b> the commit+rollback rate in <code>postgres_database_stats</code> went from about 5,600/s at 15:03:24 to 2.6/s at 15:03:39.',
+        '<b>Who waited:</b> 32 client backends were <code>active</code> with <code>wait_event_type = Lock</code>, on <code>tuple</code> ExclusiveLock and <code>transactionid</code> ShareLock (<code>postgres_lock_aggregates</code>).',
+        '<b>Likely holder:</b> one client backend was <code>active</code> with <code>wait_event_type = Timeout</code> and <code>max_age_seconds</code> 14 to 15. It was sleeping inside a transaction. This is an inference.',
+        '<b>Not recorded:</b> the artifact keeps no PIDs or query text, so it cannot name the session or statement.',
+      ],
+      fine: 'A real answer from Claude Code on the demo capture, shortened, with the tool calls it made.',
+    },
+    ticks: [
+      '<b>Knows the schema:</b> the unit, the source, and what each error code means.',
+      '<b>Read-only SQL:</b> up to 1,000 rows, with <code>percentile()</code> for p95 and p99, or every row in a CSV.',
+      '<b>Runs on your laptop:</b> never connects to PostgreSQL. What the AI reads goes to the model it uses.',
     ],
   },
   security: {

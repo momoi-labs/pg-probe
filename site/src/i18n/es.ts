@@ -14,7 +14,8 @@ const es: Dictionary = {
     how: 'Cómo funciona',
     report: 'Informe',
     top: 'Métricas en vivo',
-    agent: 'Agente de IA',
+    agent: 'MCP',
+    new: 'Nuevo',
   },
   hero: {
     eyebrow: 'Para quien trabaja con PostgreSQL',
@@ -79,25 +80,32 @@ const es: Dictionary = {
     ],
   },
   agent: {
-    eyebrow: 'Pregunta a un agente de IA',
-    title: 'Deja que tu agente de IA lea el fichero.',
-    lead: '<code>pg-probe mcp</code> da a Claude Code, a Codex o a cualquier agente que hable MCP acceso de solo lectura a los snapshots de un directorio. Pregunta en lenguaje natural, por ejemplo "¿Falló algún colector? ¿Por qué?". El agente escribe el SQL y cita la tabla detrás de cada respuesta.',
-    copy: 'Copiar el comando',
-    commandNote:
-      'En Codex, ejecuta <code>codex mcp add</code> con los mismos argumentos. Otros agentes reciben <code>pg-probe mcp -D &lt;directorio&gt;</code> en su configuración de MCP.',
-    features: [
-      {
-        title: 'Conoce el esquema',
-        text: 'Cada tabla y columna viene con su unidad y su origen, y cada código de error de los colectores con lo que significa.',
-      },
-      {
-        title: 'SQL de solo lectura',
-        text: 'Una consulta a la vez, hasta 1.000 filas, con <code>percentile()</code> para p95 y p99. Los resultados mayores van a un nuevo fichero CSV.',
-      },
-      {
-        title: 'Se ejecuta en tu portátil',
-        text: 'El servidor se ejecuta en local y nunca se conecta a PostgreSQL. Lo que lee el agente va al modelo que usa.',
-      },
+    eyebrow: 'MCP',
+    title: 'Análisis con IA.',
+    lead: 'Conecta pg-probe a Claude Code, Codex, Cursor o cualquier herramienta con MCP. Pregunta en lenguaje natural: la IA consulta los snapshots con acceso de solo lectura, escribe el SQL sobre las tablas internas por ti y cita la tabla y el valor detrás de cada respuesta.',
+    promptLabel: 'Pídeselo a tu agente',
+    prompt:
+      'Instala pg-probe y añade su servidor MCP siguiendo https://pg-probe.dev/llms.txt. Mis snapshots están en ~/snapshots, pero puedo indicar otra carpeta en cada sesión.',
+    copy: 'Copiar el prompt',
+    promptNote:
+      'El agente lee <a href="/llms.txt">llms.txt</a> y se configura solo. Si prefieres configurarlo a mano en la terminal: <code>claude mcp add pg-probe -- pg-probe mcp</code>.',
+    chat: {
+      label: 'Una sesión real de Claude Code sobre la captura de demostración',
+      question: '¿Por qué cayeron las transacciones por segundo hacia las 15:04 UTC?',
+      summary:
+        'El TPS cayó por contención de bloqueos de fila.',
+      points: [
+        '<b>La caída:</b> la tasa de commit+rollback en <code>postgres_database_stats</code> pasó de unas 5.600/s a las 15:03:24 a 2,6/s a las 15:03:39.',
+        '<b>Quién esperó:</b> 32 client backends estaban <code>active</code> con <code>wait_event_type = Lock</code>, en <code>tuple</code> ExclusiveLock y <code>transactionid</code> ShareLock (<code>postgres_lock_aggregates</code>).',
+        '<b>Probable titular:</b> un client backend estaba <code>active</code> con <code>wait_event_type = Timeout</code> y <code>max_age_seconds</code> de 14 a 15. Dormía dentro de una transacción. Esto es una inferencia.',
+        '<b>No registrado:</b> el artefacto no guarda PIDs ni texto de consultas, así que no puede nombrar la sesión ni la sentencia.',
+      ],
+      fine: 'Una respuesta real de Claude Code sobre la captura de demostración, resumida y traducida, con las llamadas a herramientas que hizo.',
+    },
+    ticks: [
+      '<b>Conoce el esquema:</b> la unidad, el origen y el significado de cada código de error.',
+      '<b>SQL de solo lectura:</b> hasta 1.000 filas, con <code>percentile()</code> para p95 y p99, o todo en un CSV.',
+      '<b>Se ejecuta en tu portátil:</b> nunca se conecta a PostgreSQL. Lo que lee la IA va al modelo que usa.',
     ],
   },
   security: {
