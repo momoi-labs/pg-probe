@@ -1,5 +1,35 @@
 # pg-probe
 
+## 0.5.0
+
+### Minor Changes
+
+- b8e9f23: The review console shows the pg-probe version next to the brand.
+- 81a5eed: `pg-probe capture` creates a missing data directory, private to its owner, as
+  `pg_basebackup -D` does, instead of failing.
+- 0e80ca4: pg-probe runs on macOS, on Apple Silicon and Intel. Install it with
+  `brew install momoi-labs/packages/pg-probe`. The review console and
+  `pg-probe top` work as on Linux, without the host row in `top`. A capture
+  collects PostgreSQL and records Linux collection as unsupported; use
+  `--domain postgresql` to skip it.
+- b5811fa: `pg-probe mcp` lets an AI agent such as Claude Code or Codex query the
+  artifacts in a directory, instead of reading the console panel by panel. It is
+  a local MCP server over stdio with four tools: list the snapshots, describe
+  each table and column, run a read-only SQL query, and export a query to CSV.
+  SQL on an artifact can now compute percentiles and use math functions.
+- 1771dc8: `pg-probe top` now uses the full width of the terminal, with no empty columns
+  at its sides, and a page that fits uses the full width as well. An empty list
+  says so in the middle of the screen. The header shows the time of the last
+  refresh in place of the spinner, and `‖ paused` with the time of the data
+  while paused. In `top` and in the capture, the version shows apart from the
+  name, on a gray fill.
+
+### Patch Changes
+
+- 7026a6a: The capture output starts on the first column, aligned with the shell prompt,
+  and its section rules and status banner reach the edge of the terminal, as in
+  `pg-probe top`.
+
 ## 0.4.0
 
 ### Minor Changes
