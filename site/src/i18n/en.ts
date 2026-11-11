@@ -141,6 +141,8 @@ const en = {
     blockingNote: 'Who holds the lock, with the queue behind each holder as a tree.',
     vacuum: 'Vacuum',
     vacuumNote: 'Every autovacuum and manual vacuum. From PostgreSQL 9.6, also its phase and how much of the table it has scanned.',
+    settings: 'Settings',
+    settingsNote: 'Every row of <code>pg_settings</code> by category, with the default, the source, and when a new value applies. <code>d</code> keeps only what differs from the default.',
     query: 'Query',
     queryNote: 'One backend: the full query and every age. On the database host, also its CPU, memory, and I/O.',
     plan: 'Plan',

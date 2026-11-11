@@ -141,6 +141,8 @@ const es: Dictionary = {
     blockingNote: 'Quién tiene el bloqueo, con la cola detrás de cada uno en forma de árbol.',
     vacuum: 'Vacuum',
     vacuumNote: 'Cada autovacuum y vacuum manual. Desde PostgreSQL 9.6, también su fase y cuánto de la tabla ha recorrido.',
+    settings: 'Configuración',
+    settingsNote: 'Todas las filas de <code>pg_settings</code> por categoría, con el valor predeterminado, el origen y cuándo se aplica un valor nuevo. <code>d</code> deja solo lo que difiere del predeterminado.',
     query: 'Consulta',
     queryNote: 'Un backend: la consulta completa y todos los tiempos transcurridos. En el host de la base de datos, también su CPU, memoria e I/O.',
     plan: 'Plan',
