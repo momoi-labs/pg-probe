@@ -314,6 +314,17 @@ struct Popup {
     function: Option<FunctionPanel>,
     /// The estimated plan of the query, opened with `e`.
     explain: Option<ExplainPanel>,
+    /// The table that owns the TOAST table an autovacuum is working on.
+    toast_owner: Option<ToastOwner>,
+}
+
+/// The lookup of the table behind a TOAST table, made once per TOAST table.
+struct ToastOwner {
+    /// The TOAST table, such as `pg_toast.pg_toast_16385`.
+    toast: String,
+    /// The owner as `schema.table`, `None` when no table owns it any more, or
+    /// why the lookup failed.
+    result: Result<Option<String>, String>,
 }
 
 struct ExplainPanel {
@@ -849,6 +860,7 @@ impl App {
             scroll: Scroll::default(),
             function: None,
             explain: None,
+            toast_owner: None,
         });
         self.refresh_popup(client)
     }
@@ -944,7 +956,48 @@ impl App {
         if self.os.is_some() && !popup.ended {
             popup.memory = os::read_memory(&popup.pid);
         }
+        self.refresh_toast_owner(client);
         Ok(())
+    }
+
+    /// Finds the table that owns the TOAST table an autovacuum names in its
+    /// query. One catalog query per TOAST table, in the database of the
+    /// backend. A failure is shown in the panel, never fatal.
+    fn refresh_toast_owner(&mut self, client: &ConnectedClient) {
+        let Some(popup) = &self.popup else {
+            return;
+        };
+        if popup.ended {
+            return;
+        }
+        let toast = popup
+            .details
+            .as_ref()
+            .and_then(|details| autovacuum_table(&details.query))
+            .filter(|name| toast_table_oid(name).is_some());
+        let Some(toast) = toast else {
+            if let Some(popup) = &mut self.popup {
+                popup.toast_owner = None;
+            }
+            return;
+        };
+        if popup
+            .toast_owner
+            .as_ref()
+            .is_some_and(|owner| owner.toast == toast)
+        {
+            return;
+        }
+        let database = self
+            .backend_by_pid(&popup.pid)
+            .map(|backend| backend.database.clone())
+            .unwrap_or_default();
+        let result = self.in_database(client, &database, |session| {
+            fetch_toast_owner(session, &toast).map_err(|_| "The catalog query failed.".to_owned())
+        });
+        if let Some(popup) = &mut self.popup {
+            popup.toast_owner = Some(ToastOwner { toast, result });
+        }
     }
 
     fn visible(&self) -> Vec<&Backend> {
@@ -1945,6 +1998,18 @@ impl App {
             fact(&mut page, "I/O wait", plain(io_wait.to_owned()));
         }
 
+        if let Some(owner) = &popup.toast_owner {
+            page.blank();
+            page.section(t, width, "Table", None);
+            fact(&mut page, "TOAST table", plain(owner.toast.clone()));
+            let (text, style) = match &owner.result {
+                Ok(Some(table)) => (table.clone(), t.text()),
+                Ok(None) => ("no table owns it now".to_owned(), t.muted()),
+                Err(reason) => (reason.clone(), t.muted()),
+            };
+            fact(&mut page, "Belongs to", vec![Span::styled(text, style)]);
+        }
+
         page.blank();
         page.section(t, width, "Query", None);
         code_block(
@@ -2725,6 +2790,48 @@ fn autovacuum_table(query: &str) -> Option<String> {
     (!name.is_empty()).then(|| name.to_owned())
 }
 
+/// The digits of a TOAST table name such as `pg_toast.pg_toast_16385`. Only
+/// digits are spliced into the owner lookup.
+fn toast_table_oid(name: &str) -> Option<&str> {
+    let oid = name.strip_prefix("pg_toast.pg_toast_")?;
+    (!oid.is_empty() && oid.bytes().all(|byte| byte.is_ascii_digit())).then_some(oid)
+}
+
+/// Builds the `SELECT` that names the table owning a TOAST table. It matches
+/// the name `pg_toast_<digits>` and reads `reltoastrelid`, not the digits as
+/// an owner OID, because a rewrite can leave the two different.
+fn toast_owner_sql(toast: &str) -> Option<String> {
+    let oid = toast_table_oid(toast)?;
+    Some(format!(
+        "\
+SELECT n.nspname, c.relname \
+FROM pg_class c \
+JOIN pg_namespace n ON n.oid = c.relnamespace \
+JOIN pg_class t ON t.oid = c.reltoastrelid \
+JOIN pg_namespace tn ON tn.oid = t.relnamespace \
+WHERE tn.nspname = 'pg_toast' AND t.relname = 'pg_toast_{oid}' \
+LIMIT 1"
+    ))
+}
+
+fn fetch_toast_owner(
+    client: &ConnectedClient,
+    toast: &str,
+) -> Result<Option<String>, AdapterError> {
+    let Some(sql) = toast_owner_sql(toast) else {
+        return Ok(None);
+    };
+    let rows = client.exec_bounded_rows(&sql, SOURCE, &mut Vec::new())?;
+    Ok(rows.rows.into_iter().next().map(|row| {
+        let text = |index: usize| {
+            row.get(index)
+                .map(|value| text_of(value))
+                .unwrap_or_default()
+        };
+        format!("{}.{}", text(0), text(1))
+    }))
+}
+
 fn fetch_vacuums(client: &ConnectedClient, sql: &str) -> Result<Vec<Vacuum>, AdapterError> {
     let rows = client.exec_bounded_rows(sql, SOURCE, &mut Vec::new())?;
     Ok(rows
@@ -2981,6 +3088,7 @@ mod tests {
             scroll: Scroll::default(),
             function: None,
             explain: None,
+            toast_owner: None,
         });
         for (name, app) in [
             ("list", &mut list),
@@ -3028,6 +3136,7 @@ mod tests {
             scroll: Scroll::default(),
             function: None,
             explain: None,
+            toast_owner: None,
         });
         let session = |rows: &[String]| {
             rows.iter()
@@ -3439,6 +3548,51 @@ mod tests {
     }
 
     #[test]
+    fn toast_lookup_only_splices_digits() {
+        assert_eq!(toast_table_oid("pg_toast.pg_toast_16385"), Some("16385"));
+        assert_eq!(toast_table_oid("public.orders"), None);
+        assert_eq!(toast_table_oid("pg_toast.pg_toast_"), None);
+        assert_eq!(toast_table_oid("pg_toast.pg_toast_1' OR '1"), None);
+        assert!(toast_owner_sql("pg_toast.pg_toast_16385")
+            .unwrap()
+            .contains("t.relname = 'pg_toast_16385'"));
+        assert_eq!(toast_owner_sql("pg_toast.pg_toast_x"), None);
+    }
+
+    #[test]
+    fn details_panel_names_the_table_of_a_toast_vacuum() {
+        let mut app = app(View::Running);
+        let query = "autovacuum: VACUUM pg_toast.pg_toast_16385 (to prevent wraparound)";
+        app.backends[0].query = query.to_owned();
+        app.popup = Some(Popup {
+            pid: "101".to_owned(),
+            details: Some(Details {
+                query: query.to_owned(),
+                ..Details::default()
+            }),
+            memory: None,
+            ended: false,
+            scroll: Scroll::default(),
+            function: None,
+            explain: None,
+            toast_owner: Some(ToastOwner {
+                toast: "pg_toast.pg_toast_16385".to_owned(),
+                result: Ok(Some("public.orders".to_owned())),
+            }),
+        });
+        let mut terminal = Terminal::new(TestBackend::new(160, 40)).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let screen: String = buffer
+            .content()
+            .chunks(usize::from(buffer.area.width))
+            .map(|line| line.iter().map(|cell| cell.symbol()).collect::<String>() + "\n")
+            .collect();
+        assert!(screen.contains("Belongs to"), "{screen}");
+        assert!(screen.contains("public.orders"), "{screen}");
+    }
+
+    #[test]
     fn details_panel_shows_the_whole_query_and_ages() {
         let mut app = app(View::Running);
         let long = format!("SELECT {} FROM t", "column_name, ".repeat(20));
@@ -3457,6 +3611,7 @@ mod tests {
             scroll: Scroll::default(),
             function: None,
             explain: None,
+            toast_owner: None,
         });
         let mut terminal = Terminal::new(TestBackend::new(160, 40)).unwrap();
         terminal.draw(|frame| app.draw(frame)).unwrap();
