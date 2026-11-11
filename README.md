@@ -211,13 +211,14 @@ TLS handshake or the connection failed.
 | `F2` or `2` | Queries waiting on a lock |
 | `F3` or `3` | Queries that block others |
 | `F4` or `4` | Vacuums in progress, manual and autovacuum |
+| `F5` or `5` | Server settings |
 | `↑` `↓`, `PgUp` `PgDn` | Select a query |
 | `v` or `Enter` | Open the query page |
-| `Space` | Pause or resume the refresh |
-| `Tab` | Show the selected query, formatted, under the list |
+| `Space` | Pause or resume the refresh. Its hint is filled and reads `paused` while the refresh is paused |
+| `Tab` | Show the selected query, formatted, under the list. Its hint is filled while the preview is open |
 | `t` | Show the blocking view as a tree of who waits on whom |
 | `c` | Compact columns: user@database (table@database in the vacuum view) and short states and types, more room for the query |
-| `g` | Group the list by state, database, user, or none |
+| `g` | Group the list by state, database, user, or none. Its hint is filled and names the grouping while one is on |
 | `h` | Two-line header with the active and waiting sessions of the last refreshes |
 | `?` | List every key |
 | `q` | Quit. In a panel, `q` goes back instead; `Ctrl+C` quits from anywhere |
@@ -238,6 +239,28 @@ query, client, application, connection, transaction, and query ages, and
 | `←` `→` | Other functions, when the query calls more than one |
 | `v`, `q` or `Esc` | Back to the list |
 
+The settings view lists every row of `pg_settings` under its category. `●`
+marks a value that differs from the built-in default and that a file, the
+command line, `ALTER SYSTEM`, a database or a role set. `!` marks a value
+that waits for a restart, on PostgreSQL 9.5 and later. Each row has the
+value and the default; a list under 48 columns has no default column. The
+panel beside the list shows the description, the value, the default, how
+many times a changed amount is more or less than the default (`4× more`),
+the source with its file and line, and when a new value applies. PostgreSQL
+shows the file to a superuser and, from version 10, to a member of
+`pg_read_all_settings`. Values are in the units `SHOW` prints, such as `128MB`.
+The value is the one a new session gets (`reset_val`), so the
+`statement_timeout` of `top` itself shows with the source `client`. In the
+settings view:
+
+| Key | Action |
+|---|---|
+| `/` | Search the names and the categories. `Enter` keeps the search, `Esc` clears it |
+| `d` | Only the settings that differ from the default. Its hint is filled while it is on |
+| `p` | Only the settings that wait for a restart. Its hint is filled while it is on |
+| `r` | Read the settings again |
+| `Esc` | Clear the search, then the filters |
+
 Function statistics need `track_functions` set to `pl` or `all`. The plan
 comes from `EXPLAIN` without `ANALYZE`, so it may differ from the plan the
 backend runs. Queries cut at `track_activity_query_size` or with `$1`
@@ -257,6 +280,8 @@ and later, as a member of `pg_read_all_stats`.
   5-second `statement_timeout`. The session cannot write.
 - One `SELECT` over `pg_stat_activity` per refresh. On a test server with 206
   connections under pgbench, it took 0.7 ms per call and 0.15% of one core.
+- The settings view reads `pg_settings` once when it opens and again on `r`,
+  never per refresh.
 - The blocking view, the query page, and the function and plan popups each add
   one query, only while open. The blocking view on 9.3 to 9.5 reads `pg_locks`
   once per refresh, because `pg_blocking_pids` arrived in 9.6.

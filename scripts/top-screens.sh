@@ -123,4 +123,8 @@ docker exec -d "$name" psql -U postgres -q -c 'SET vacuum_cost_delay = 100' \
 sleep 4
 key 4 5
 shot vacuum
+# Only the settings that differ from the default.
+key 5 2
+key d 1
+shot settings
 key q 1

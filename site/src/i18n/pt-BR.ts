@@ -141,6 +141,8 @@ const ptBR: Dictionary = {
     blockingNote: 'Quem segura o lock, com a fila atrás de cada um em forma de árvore.',
     vacuum: 'Vacuum',
     vacuumNote: 'Todo autovacuum e vacuum manual. A partir do PostgreSQL 9.6, também sua fase e quanto da tabela já foi lido.',
+    settings: 'Configurações',
+    settingsNote: 'Todas as linhas de <code>pg_settings</code> por categoria, com o padrão, a origem e quando um novo valor passa a valer. <code>d</code> mantém só o que difere do padrão.',
     query: 'Consulta',
     queryNote: 'Um backend: a consulta completa e todos os tempos decorridos. No host do banco, também sua CPU, memória e I/O.',
     plan: 'Plano',

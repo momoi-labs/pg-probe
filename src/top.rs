@@ -6,13 +6,15 @@
 //! statement timeout, and each refresh runs one constant `SELECT` over
 //! `pg_stat_activity`. The blocking view adds `pg_blocking_pids`, which takes
 //! lock-manager locks, so it only runs while that view is open. The vacuum
-//! view reads `pg_stat_progress_vacuum`, also only while it is open.
+//! view reads `pg_stat_progress_vacuum`, also only while it is open. The
+//! settings view reads `pg_settings` once when it opens, and again on `r`.
 //!
 //! When the server runs on this host, host load and memory and per-backend
 //! CPU and I/O come from the local `/proc`, which costs the server nothing.
 
 mod explain;
 mod function;
+mod gucs;
 mod os;
 mod settings;
 
@@ -348,10 +350,17 @@ enum View {
     Waiting,
     Blocking,
     Vacuum,
+    Settings,
 }
 
 impl View {
-    const ALL: [Self; 4] = [Self::Running, Self::Waiting, Self::Blocking, Self::Vacuum];
+    const ALL: [Self; 5] = [
+        Self::Running,
+        Self::Waiting,
+        Self::Blocking,
+        Self::Vacuum,
+        Self::Settings,
+    ];
 
     const fn name(self) -> &'static str {
         match self {
@@ -359,6 +368,7 @@ impl View {
             Self::Waiting => "Waiting",
             Self::Blocking => "Blocking",
             Self::Vacuum => "Vacuum",
+            Self::Settings => "Settings",
         }
     }
 }
@@ -390,6 +400,16 @@ impl Group {
             Self::State => "state",
             Self::Database => "database",
             Self::User => "user",
+        }
+    }
+
+    /// The `g` hint: the grouping in use as an on hint, see `fill_on`.
+    const fn hint(self) -> (&'static str, &'static str) {
+        match self {
+            Self::None => ("g", "group"),
+            Self::State => (" g", "by state "),
+            Self::Database => (" g", "by database "),
+            Self::User => (" g", "by user "),
         }
     }
 
@@ -433,6 +453,8 @@ struct App {
     blocks: HashMap<String, Vec<String>>,
     /// Vacuums in progress. Filled only in the vacuum view.
     vacuums: Vec<Vacuum>,
+    /// The server's settings. Read when the settings view opens.
+    gucs: gucs::GucView,
     /// Local `/proc` metrics, present only when the server runs on this host.
     os: Option<OsState>,
     /// The selected row of the list, and where the list is scrolled.
@@ -642,6 +664,7 @@ impl App {
             backends: Vec::new(),
             blocks: HashMap::new(),
             vacuums: Vec::new(),
+            gucs: gucs::GucView::default(),
             os: local.then(OsState::new),
             selected: 0,
             list,
@@ -757,6 +780,16 @@ impl App {
                     }
                     continue;
                 }
+                if self.view == View::Settings {
+                    match self.gucs.key(key, self.has_pending_restart()) {
+                        gucs::Pressed::Handled => continue,
+                        gucs::Pressed::Reload => {
+                            self.load_gucs(client, terminal)?;
+                            continue;
+                        }
+                        gucs::Pressed::Pass => {}
+                    }
+                }
                 let view = self.view;
                 let before = self.settings();
                 match key.code {
@@ -779,6 +812,7 @@ impl App {
                     KeyCode::F(2) | KeyCode::Char('2') => self.view = View::Waiting,
                     KeyCode::F(3) | KeyCode::Char('3') => self.view = View::Blocking,
                     KeyCode::F(4) | KeyCode::Char('4') => self.view = View::Vacuum,
+                    KeyCode::F(5) | KeyCode::Char('5') => self.view = View::Settings,
                     KeyCode::Down | KeyCode::Char('j') => self.select_by(1),
                     KeyCode::Up | KeyCode::Char('k') => self.select_by(-1),
                     KeyCode::PageDown => self.select_by(PAGE as isize),
@@ -796,6 +830,9 @@ impl App {
                 }
                 if self.view != view {
                     self.select_first();
+                    if self.view == View::Settings {
+                        self.load_gucs(client, terminal)?;
+                    }
                     if !self.paused {
                         self.refresh(client, sql)?;
                         next_refresh = Instant::now() + self.interval;
@@ -808,6 +845,23 @@ impl App {
                 next_refresh = Instant::now() + self.interval;
             }
         }
+    }
+
+    fn has_pending_restart(&self) -> bool {
+        gucs::has_pending_restart(self.server.version_num)
+    }
+
+    /// Reads `pg_settings`, with the loading state on screen meanwhile. It
+    /// runs when the settings view opens and on `r`, never per refresh.
+    fn load_gucs(
+        &mut self,
+        client: &ConnectedClient,
+        terminal: &mut DefaultTerminal,
+    ) -> Result<(), TopError> {
+        self.gucs.loading();
+        terminal.draw(|frame| self.draw(frame))?;
+        self.gucs.load(client, self.server.version_num);
+        Ok(())
     }
 
     fn refresh(&mut self, client: &ConnectedClient, sql: &str) -> Result<(), TopError> {
@@ -1019,7 +1073,9 @@ impl App {
     /// The grouping in effect. The blocking tree and the vacuum view have
     /// their own order.
     fn shown_group(&self) -> Group {
-        if self.view == View::Vacuum || self.view == View::Blocking && self.tree {
+        if matches!(self.view, View::Vacuum | View::Settings)
+            || self.view == View::Blocking && self.tree
+        {
             Group::None
         } else {
             self.group
@@ -1045,7 +1101,7 @@ impl App {
                 View::Running => backend.is_running(),
                 View::Waiting => backend.waits_on_lock(),
                 View::Blocking => self.blocks.contains_key(&backend.pid),
-                View::Vacuum => false,
+                View::Vacuum | View::Settings => false,
             })
             .map(|backend| (String::new(), backend))
             .collect::<Vec<_>>();
@@ -1138,7 +1194,12 @@ impl App {
             self.draw_explain_panel(buf, screen, popup);
         }
         if self.help {
-            draw_help(buf, &self.theme, screen);
+            if self.view == View::Settings {
+                let right = [HELP[1], SETTINGS_HELP[1]];
+                draw_help(buf, &self.theme, screen, &SETTINGS_HELP[..1], &right);
+            } else {
+                draw_help(buf, &self.theme, screen, &HELP[..1], &HELP[1..]);
+            }
         }
     }
 
@@ -1419,15 +1480,18 @@ impl App {
     /// count only while open.
     fn tabs_line(&self, width: usize) -> Line<'static> {
         let labels = View::ALL.map(|view| {
-            let count = if view == self.view {
-                Some(self.visible().len())
+            let count = if view == View::Settings {
+                self.gucs.count()
+            } else if view == self.view {
+                Some(self.visible().len().to_string())
             } else {
+                let count = |keep: fn(&Backend) -> bool| {
+                    Some(self.backends.iter().filter(|b| keep(b)).count().to_string())
+                };
                 match view {
-                    View::Running => Some(self.backends.iter().filter(|b| b.is_running()).count()),
-                    View::Waiting => {
-                        Some(self.backends.iter().filter(|b| b.waits_on_lock()).count())
-                    }
-                    View::Blocking | View::Vacuum => None,
+                    View::Running => count(Backend::is_running),
+                    View::Waiting => count(Backend::waits_on_lock),
+                    View::Blocking | View::Vacuum | View::Settings => None,
                 }
             };
             let mut label = view.name().to_owned();
@@ -1496,6 +1560,16 @@ impl App {
             }
         }
         put(buf, area, row, self.tabs_line(width));
+        if self.view == View::Settings {
+            let top = area.y.saturating_add(row + 1).min(area.bottom());
+            let rows = Rect {
+                y: top,
+                height: area.bottom() - top,
+                ..area
+            };
+            self.gucs.draw(t, buf, rows, self.has_pending_restart());
+            return;
+        }
         let top = area.y.saturating_add(row + 2).min(area.bottom());
         let mut rows = Rect {
             y: top,
@@ -2095,7 +2169,11 @@ impl App {
 
     /// The keys of the top layer, in the order the help screen gives them.
     fn draw_hints(&self, buf: &mut Buffer, area: Rect) {
-        let pause = if self.paused { "resume" } else { "pause" };
+        let pause = if self.paused {
+            (" space", "paused ")
+        } else {
+            ("space", "pause")
+        };
         let overlay = self
             .popup
             .as_ref()
@@ -2109,22 +2187,57 @@ impl App {
                 ("↑↓", "scroll"),
                 ("f", "functions"),
                 ("e", "explain"),
-                ("space", pause),
+                pause,
                 ("esc", "back"),
             ]
+        } else if self.view == View::Settings {
+            let gucs = &self.gucs;
+            let hints = gucs.hints(self.has_pending_restart());
+            let mut keys = KeyHints::new(&self.theme, hints.clone());
+            if gucs.search.is_active() {
+                let room = usize::from(area.width) / 2;
+                keys = keys.prefix(gucs.search.prompt(&self.theme, gucs.matches(), room));
+            }
+            let mut spans = keys.spans(usize::from(area.width));
+            fill_on(&self.theme, &mut spans, &hints);
+            Line::from(spans).render(area, buf);
+            return;
         } else {
             vec![
-                ("1-4", "view"),
+                ("1-5", "view"),
                 ("↑↓", "move"),
                 ("enter", "details"),
-                ("tab", "preview"),
-                ("g", "group"),
-                ("space", pause),
+                if self.preview {
+                    (" tab", "preview ")
+                } else {
+                    ("tab", "preview")
+                },
+                self.shown_group().hint(),
+                pause,
                 ("?", "help"),
                 ("q", "quit"),
             ]
         };
-        KeyHints::new(&self.theme, hints).render(area, buf);
+        let mut spans = KeyHints::new(&self.theme, hints.clone()).spans(usize::from(area.width));
+        fill_on(&self.theme, &mut spans, &hints);
+        Line::from(spans).render(area, buf);
+    }
+}
+
+/// Fills the hint of each switch that is on, so the footer says what is in
+/// effect. An on hint has a space before its key and after its label, the
+/// room of the fill at each side.
+fn fill_on(t: &Theme, spans: &mut [Span<'_>], hints: &[(&str, &str)]) {
+    for index in 1..spans.len() {
+        let on = hints.iter().any(|(key, label)| {
+            key.starts_with(' ')
+                && spans[index - 1].content == *key
+                && spans[index].content.strip_prefix(' ') == Some(label)
+        });
+        if on {
+            spans[index - 1].style = t.brand();
+            spans[index].style = t.brand();
+        }
     }
 }
 
@@ -2502,7 +2615,8 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
             ("F1 1", "Running queries"),
             ("F2 2", "Waiting queries"),
             ("F3 3", "Blocking queries"),
-            ("F4 4", "Vacuum in progress, manual and autovacuum"),
+            ("F4 4", "Vacuums, manual and autovacuum"),
+            ("F5 5", "Server settings"),
         ],
     ),
     (
@@ -2522,6 +2636,36 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
             ("e", "Estimated plan (EXPLAIN)"),
             ("↑ ↓ PgUp PgDn", "Scroll"),
             ("v q Esc Enter", "Back to the list"),
+        ],
+    ),
+];
+
+/// The keys and the marks of the settings view. Its help shows them with
+/// the views, in place of the keys of the session lists.
+const SETTINGS_HELP: &HelpSections = &[
+    (
+        "Settings",
+        &[
+            ("↑ ↓ j k", "Move the selection"),
+            ("PgUp PgDn", "Move one page"),
+            ("Home End", "First or last row"),
+            ("/", "Search the names and the categories"),
+            ("d", "Only what differs from the default"),
+            ("p", "Only what waits for a restart"),
+            ("r", "Read the settings again"),
+            ("Esc", "Clear the search, then the filters"),
+            ("Space", "Pause or resume refreshes"),
+            ("h", "Two-line header with session history"),
+            ("?", "This help"),
+            ("q", "Quit"),
+            ("Ctrl+C", "Quit from anywhere"),
+        ],
+    ),
+    (
+        "Marks",
+        &[
+            ("●", "Differs from the built-in default"),
+            ("!", "Waits for a restart"),
         ],
     ),
 ];
@@ -2570,10 +2714,9 @@ fn help_column(t: &Theme, sections: &HelpSections, width: usize) -> Vec<Line<'st
     lines
 }
 
-/// The help lists the list keys on the left and the rest on the right, so
-/// it fits a 24-line terminal. On a narrow one the actions wrap.
-fn draw_help(buf: &mut Buffer, t: &Theme, screen: Rect) {
-    let (left, right) = (&HELP[..1], &HELP[1..]);
+/// The help lists the keys of the list on the left and the rest on the
+/// right, so it fits a 24-line terminal. On a narrow one the actions wrap.
+fn draw_help(buf: &mut Buffer, t: &Theme, screen: Rect, left: &HelpSections, right: &HelpSections) {
     let natural = |sections: &HelpSections| {
         let (key, action) = help_widths(sections);
         key + action
@@ -3166,6 +3309,28 @@ mod tests {
     }
 
     #[test]
+    fn the_footer_fills_the_hint_of_each_switch_that_is_on() {
+        let mut app = app(View::Running);
+        let filled = |app: &mut App| -> String {
+            let buffer = buffer(app, 120, 24);
+            let brand = app.theme.brand();
+            (0..120)
+                .map(|x| &buffer[(x, 23)])
+                .filter(|cell| cell.bg == brand.bg.unwrap())
+                .map(ratatui::buffer::Cell::symbol)
+                .collect()
+        };
+        assert_eq!(filled(&mut app), "");
+        app.preview = true;
+        app.group = Group::User;
+        app.paused = true;
+        assert_eq!(filled(&mut app), " tab preview  g by user  space paused ");
+        // The vacuum view has no grouping, so its hint is not on there.
+        app.view = View::Vacuum;
+        assert_eq!(filled(&mut app), " tab preview  space paused ");
+    }
+
+    #[test]
     fn an_empty_list_says_so_in_the_middle() {
         let mut app = app(View::Vacuum);
         let rows = rows(&buffer(&mut app, 80, 24));
@@ -3529,6 +3694,25 @@ mod tests {
         assert!(screen.contains(" Vacuum 1 "), "{screen}");
         assert!(screen.contains("scanning heap"), "{screen}");
         assert!(screen.contains("25.0%"), "{screen}");
+    }
+
+    #[test]
+    fn the_settings_view_has_its_own_keys_and_help() {
+        let mut app = app(View::Settings);
+        let rows = rows(&buffer(&mut app, 80, 24));
+        let screen = rows.join("\n");
+        assert!(screen.contains("4 Vacuum"), "{screen}");
+        assert!(screen.contains("Settings"), "{screen}");
+        assert!(screen.contains("Reading the settings…"), "{screen}");
+        // 9.3 has no pending_restart, so the footer has no `p`.
+        assert!(rows[23].starts_with("1-5 view • ↑↓ move • / search • d changed • r reload"));
+        app.help = true;
+        let screen = self::rows(&buffer(&mut app, 80, 24)).join("\n");
+        assert!(screen.contains("Server settings"), "{screen}");
+        assert!(screen.contains("Read the settings again"), "{screen}");
+        assert!(screen.contains("Quit from anywhere"), "{screen}");
+        assert!(screen.contains("Waits for a restart"), "{screen}");
+        assert!(screen.contains("╰─ any key close"), "{screen}");
     }
 
     #[test]
