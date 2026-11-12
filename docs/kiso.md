@@ -84,7 +84,7 @@ file has a bug.
 | Report (`screens/report.tsx`, `screens/cover.tsx`) | Report: `ReportCover` as the cover with a `.report-kicker`, `DataCoverage` for the unavailable sources, a linked contents page, then the shared section Disclosures, open. The report sets `data-chart-fill="none"`, so paper has no textured fill: line charts draw only their lines, a stacked area keeps a flat tint, and a meter track is plain. `PanelGrid` passes `static` and ignores the saved layout. Each chart or table prints on its own page. "Print report" in the snapshot header is a DropdownMenu of report languages; an item opens the report with `?lang=` and the print dialog |
 | Logs (`screens/not-collected.tsx`) | Empty states, informational |
 | No snapshots, list error (`screens/start.tsx`) | Empty states, first run; Errors |
-| `pg-probe top` (`src/top.rs`) | List-detail: the sessions of a view as a list, and a session's details as a page in place of the list. Help, functions and explain are dialogs. The settings view (`src/top/gucs.rs`) lists `pg_settings` under a section per category, with the selected setting's details beside the list |
+| `pg-probe top` (`src/top.rs`) | List-detail: the sessions of a view as a list, and a session's details as a page in place of the list. Help, functions and explain are dialogs. The settings view (`src/top/gucs.rs`) lists `pg_settings` under a section per category, with the selected setting's details beside the list. The log view (`src/top/log.rs`) lists the lines of the server's csvlog as they arrive, with the summary of the filter that is on beside the list, and the details of the selected line under the list. `←` and `→` move the rule between the list and the summary, because a statement in the summary needs more room than the default gives and `tui-kiso` has no pane the reader resizes |
 | Capture progress (`src/progress.rs`) | Dashboard: progress, collectors, cost and issues as sections of one block |
 
 ## Terminal view
@@ -120,8 +120,13 @@ each with its column title.
 - `top` has no command palette (`Ctrl+P` or `:`), no `f` filters and no `a`
   actions. It has few actions, and each has its own key on the help screen.
   In a query's details, `f` opens the functions the query calls. Only the
-  settings view has the `/` search: the session lists change on each refresh
-  and are short.
+  settings view and the log view have the `/` search: the session lists
+  change on each refresh and are short.
+- The log view has a key for each of its three filters (`e`, `t`, `c`), as
+  the settings view has `d` and `p`, in place of the `f` filters dialog of
+  the contract. The hint of the filter that is on is filled.
+- The log view shows the details of the selected line under the list, not
+  as a page in place of the list, so the lines around it stay in view.
 - The settings view shows the details of the selected setting in a panel
   beside the list, where the contract opens a record's details as a page in
   place of the list. A setting has a few short facts, and reading them while
@@ -139,7 +144,7 @@ each with its column title.
   `postgresql.conf`.
 - The help of the settings view lists its keys and marks with the views, in
   place of the keys of the session lists, so it fits 80 by 24.
-- `F1` to `F5` choose the views, as in pg_activity, so `F1` does not open
+- `F1` to `F6` choose the views, as in pg_activity, so `F1` does not open
   help. `?` opens help from the list only, and the footer of the details page
   does not show it.
 - The brand in the header of `top` and the capture is two blocks: the name

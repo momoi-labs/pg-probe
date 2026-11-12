@@ -143,6 +143,8 @@ const en = {
     vacuumNote: 'Every autovacuum and manual vacuum. From PostgreSQL 9.6, also its phase and how much of the table it has scanned.',
     settings: 'Settings',
     settingsNote: 'Every row of <code>pg_settings</code> by category, with the default, the source, and when a new value applies. <code>d</code> keeps only what differs from the default.',
+    log: 'Log',
+    logNote: 'The csvlog of the server as it grows, on the database host. <code>e</code>, <code>t</code> and <code>c</code> keep only the errors, the temp files or the checkpoints, with a summary of each since <code>top</code> started.',
     query: 'Query',
     queryNote: 'One backend: the full query and every age. On the database host, also its CPU, memory, and I/O.',
     plan: 'Plan',

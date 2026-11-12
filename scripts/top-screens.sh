@@ -3,7 +3,7 @@
 # site/src/assets/top/, from a real top in a terminal 120 columns by 35 rows.
 #
 # It starts PostgreSQL 17 in Docker, runs pgbench and a report workload
-# against it, then stages a lock and a manual vacuum, so every view has
+# against it, then stages a lock, a manual vacuum and a few errors, so every view has
 # something to show. top runs in the container as the postgres user, so it
 # can read each backend's I/O, inside a detached tmux, and each screen goes
 # through scripts/ansi-to-html.mjs. Everything it starts is removed on exit.
@@ -37,7 +37,8 @@ echo "starting PostgreSQL"
 # a pgbench commit, still runs longest.
 docker run -d --name "$name" -e POSTGRES_HOST_AUTH_METHOD=trust \
   postgres:17 -c track_functions=all -c max_connections=200 \
-  -c synchronous_commit=off >/dev/null
+  -c synchronous_commit=off -c logging_collector=on -c log_destination=csvlog \
+  -c log_temp_files=0 -c log_checkpoints=on >/dev/null
 docker cp "$bin" "$name:/usr/local/bin/pg-probe" >/dev/null
 # The server that initdb starts first listens on the socket only.
 until docker exec "$name" pg_isready -h 127.0.0.1 -U postgres -q; do sleep 1; done
@@ -127,4 +128,18 @@ shot vacuum
 key 5 2
 key d 1
 shot settings
+
+echo "writing errors, temp files and a checkpoint to the log"
+for i in 1 2 3 4; do
+  docker exec "$name" psql -U postgres -q \
+    -c "INSERT INTO pgbench_branches (bid) VALUES ($i)" \
+    -c "SELECT * FROM order_items WHERE id = $i" \
+    -c "SELECT abalance / (aid - aid) FROM pgbench_accounts WHERE aid = $i" \
+    >/dev/null 2>&1 || true
+done
+psql -c 'CHECKPOINT'
+# The errors, with their summary beside the lines.
+key 6 3
+key e 1
+shot log
 key q 1
