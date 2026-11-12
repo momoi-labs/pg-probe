@@ -8,5 +8,8 @@
   "compatibility_date": "2026-10-24",
   "assets": {
     "directory": "dist"
-  }
+  },
+  // Empty on purpose: `wrangler preview`, which Workers Builds runs on a
+  // pull request, refuses to run without the block.
+  "previews": {}
 }
