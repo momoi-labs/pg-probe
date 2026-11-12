@@ -79,7 +79,7 @@ file has a bug.
 | --- | --- |
 | Shell (`screens/shell.tsx`) | Application shell, `layout="topbar"`. Metrics, Logs and Queries are Header navigation |
 | Snapshot header (`screens/snapshot.tsx`) | Dashboard page framing: PageHeader with the artifact Select, and an Alert for sources that were not collected |
-| Metrics (`screens/metrics.tsx`, `system.tsx`, `postgres.tsx`) | Dashboard, one Disclosure per section. System and PostgreSQL use `PanelGrid`. Overview tiles sit in the product `.tile-grid`: each tile is a whole-card link, and a pane head is a drag handle |
+| Metrics (`screens/metrics.tsx`, `system.tsx`, `postgres.tsx`, `wraparound.tsx`) | Dashboard, one Disclosure per section. System, PostgreSQL and Wraparound use `PanelGrid`. In Wraparound, a table row shows a Sparkline of the samples in which a vacuum ran, inside the product `.trend`, which gives it one width. Overview tiles sit in the product `.tile-grid`: each tile is a whole-card link, and a pane head is a drag handle |
 | Queries (`screens/queries.tsx`) | Dashboard, `PanelGrid` |
 | Report (`screens/report.tsx`, `screens/cover.tsx`) | Report: `ReportCover` as the cover with a `.report-kicker`, `DataCoverage` for the unavailable sources, a linked contents page, then the shared section Disclosures, open. The report sets `data-chart-fill="none"`, so paper has no textured fill: line charts draw only their lines, a stacked area keeps a flat tint, and a meter track is plain. `PanelGrid` passes `static` and ignores the saved layout. Each chart or table prints on its own page. "Print report" in the snapshot header is a DropdownMenu of report languages; an item opens the report with `?lang=` and the print dialog |
 | Logs (`screens/not-collected.tsx`) | Empty states, informational |

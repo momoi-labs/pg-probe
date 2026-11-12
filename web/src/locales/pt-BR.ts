@@ -337,6 +337,44 @@ const translation: Translation = {
     '{used} of {total} {unit}': '{used} de {total} {unit}',
     '{user}, superuser': '{user}, superusuário',
     '{what} are not collected yet': '{what} ainda não são coletados',
+    Wraparound: 'Wraparound',
+    'Wraparound panels': 'Painéis de wraparound',
+    'Vacuum tries by table': 'Tentativas de vacuum por tabela',
+    'whole capture, top 10 by tries seen, then by xid age':
+      'captura inteira, 10 primeiras por tentativas vistas, depois por idade de xid',
+    'Tries seen': 'Tentativas vistas',
+    'For wraparound': 'Por wraparound',
+    Finished: 'Concluídas',
+    'Vacuum running, per sample': 'Vacuum rodando, por amostra',
+    'xid age': 'idade de xid',
+    'TOAST of {table}': 'TOAST de {table}',
+    'one read of the table': 'uma leitura da tabela',
+    'table not read': 'tabela não lida',
+    'Finished is unknown for a table the capture read once. The capture reads tables once per minute.':
+      'Concluídas é desconhecido para uma tabela que a captura leu uma vez. A captura lê as tabelas uma vez por minuto.',
+    'The capture role cannot see the sessions of other roles, so their vacuums are missing here.':
+      'A role da captura não vê as sessões de outras roles, então os vacuums delas não aparecem aqui.',
+    'Not recorded in this artifact. Captures before schema version 4 have no wraparound state.':
+      'Não registrado neste artefato. Capturas anteriores à versão 4 do schema não têm o estado de wraparound.',
+    'Multixact member space': 'Espaço de membros de multixact',
+    'last sample': 'última amostra',
+    'Segment files in pg_multixact/members': 'Arquivos de segmento em pg_multixact/members',
+    '{files} of {limit} ({percent}%)': '{files} de {limit} ({percent}%)',
+    'The growth needs more than one sample.': 'O crescimento precisa de mais de uma amostra.',
+    '{sign}{rate} files per minute over the capture':
+      '{sign}{rate} arquivos por minuto durante a captura',
+    'Not recorded: the capture role may not list pg_multixact/members. It needs a superuser, or from PostgreSQL 11 EXECUTE on pg_ls_dir.':
+      'Não registrado: a role da captura não pode listar pg_multixact/members. É preciso um superusuário ou, a partir do PostgreSQL 11, EXECUTE em pg_ls_dir.',
+    'Oldest databases': 'Bancos de dados mais antigos',
+    'last sample, by xid age': 'última amostra, por idade de xid',
+    Database: 'Banco de dados',
+    'Multixact age': 'Idade de multixact',
+    'Multixact rank': 'Rank de multixact',
+    'does not accept connections': 'não aceita conexões',
+    'no mxid_age before PostgreSQL 9.5': 'sem mxid_age antes do PostgreSQL 9.5',
+    'PostgreSQL before 9.5 has no multixact age. The rank gives the order: 1 is the oldest.':
+      'O PostgreSQL anterior ao 9.5 não tem idade de multixact. O rank dá a ordem: 1 é o mais antigo.',
+    'Since last autovacuum': 'Desde o último autovacuum',
   },
   explain: {
     'cpu-utilization': {
@@ -535,6 +573,21 @@ const translation: Translation = {
       shows:
         'Linhas por segundo em todos os bancos de dados. Leitura são as linhas retornadas por varreduras. Gravação são as linhas inseridas, atualizadas e excluídas.',
       look: 'Leitura conta toda linha que uma varredura retornou, antes dos filtros, então uma taxa de leitura alta com poucas transações aponta para varreduras sequenciais de tabelas grandes. Uma taxa de gravação que sobe junto com o WAL gerado é normal. Compare o formato com Transações por segundo.',
+    },
+    'vacuum-tries-by-table': {
+      shows:
+        'Os vacuums que o pg-probe viu rodando em cada tabela durante a captura, e quantos vacuums a tabela concluiu no mesmo período. Uma tentativa é um vacuum, identificado pela hora em que começou. A linha fica alta nas amostras em que um vacuum rodava na tabela.',
+      look: 'Uma tabela com várias tentativas e zero concluídas. O autovacuum dela começa e para antes do fim, então a tabela nunca é congelada e a idade continua crescendo. O PostgreSQL só aumenta autovacuum_count quando um vacuum termina. O log do servidor tem o motivo de cada parada. Uma tentativa que ainda rodava na última amostra não é uma falha: a captura terminou antes.',
+    },
+    'multixact-member-space': {
+      shows:
+        'Quanto do espaço de membros de multixact está em uso, contado em arquivos de segmento em pg_multixact/members, e quanto cresceu durante a captura. O espaço fica cheio com 82.040 arquivos.',
+      look: 'A fração em uso e o crescimento. Quando o espaço enche, o PostgreSQL recusa todo comando que precisa de um multixact novo. Só um vacuum que termina nas tabelas com o multixact mais antigo devolve espaço, então leia este painel junto com Tentativas de vacuum por tabela.',
+    },
+    'oldest-databases': {
+      shows:
+        'Os bancos de dados na última amostra, ordenados pela idade do id de transação mais antigo, com a idade e o rank do multixact mais antigo.',
+      look: 'O banco no topo é onde o vacuum precisa terminar primeiro. O template0 pode ser o mais antigo e não aceita conexões. O PostgreSQL anterior ao 9.5 não tem idade de multixact, então o rank dá a ordem: 1 é o mais antigo.',
     },
   },
 }

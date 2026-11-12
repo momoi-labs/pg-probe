@@ -24,6 +24,7 @@ import { useT, type Translate } from '../i18n.ts'
 import { useInReport } from '../report.ts'
 import { Note, panelId, Section } from './panels.tsx'
 import { isClientBackend, Postgres, useWalRate } from './postgres.tsx'
+import { Wraparound } from './wraparound.tsx'
 import { System, useCpuShares, useDiskBusy } from './system.tsx'
 
 const NOT_RECORDED = 'not recorded in this artifact'
@@ -375,6 +376,7 @@ export function Metrics() {
       <Overview />
       <System />
       <Postgres />
+      <Wraparound />
     </>
   )
 }
