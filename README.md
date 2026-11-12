@@ -212,6 +212,7 @@ TLS handshake or the connection failed.
 | `F3` or `3` | Queries that block others |
 | `F4` or `4` | Vacuum: tables past a freeze limit, the multixact member space, and vacuums in progress |
 | `F5` or `5` | Server settings |
+| `F6` or `6` | Server log, on the database host |
 | `↑` `↓`, `PgUp` `PgDn` | Select a query |
 | `v` or `Enter` | Open the query page |
 | `Space` | Pause or resume the refresh. Its hint is filled and reads `paused` while the refresh is paused |
@@ -261,6 +262,43 @@ settings view:
 | `r` | Read the settings again |
 | `Esc` | Clear the search, then the filters |
 
+The log view shows the lines of the server's csvlog as they arrive, like
+`tail -f`, and counts them since `top` started. It reads the file from the
+local disk, so it works only on the database host, with `logging_collector`
+on and `csvlog` in `log_destination`, and as a user that may read the file:
+the server's user or root. The role needs to see `log_directory` and
+`data_directory`: a superuser or, from PostgreSQL 10, a member of
+`pg_read_all_settings`. The first row shows the file that is read. The
+times are the ones in the log, in the server's `log_timezone`. The second row
+counts the lines, the errors, the temp files and the checkpoints. A key
+turns each filter on, and the same key or `Esc` turns it off:
+
+| Key | Filter | Lines | Summary beside the list |
+|---|---|---|---|
+| `e` | Errors | Lines with an error SQLSTATE, in any `lc_messages` | The 10 errors with the most lines per user and database: the count, the count of the last 5 minutes, the time of the last one, the condition name of the SQLSTATE and the message without its values |
+| `t` | Temp files | `temporary file` lines. Needs `log_temp_files` | The 10 statements that wrote the most bytes per user and database: files, bytes and the p95 file size |
+| `c` | Checkpoints | `checkpoint starting` and `checkpoint complete` lines. Needs `log_checkpoints` | What started them, the median interval, p95 and p99 of buffers, write, sync and total time, WAL files, and the last 5 checkpoints |
+
+The temp file and checkpoint filters need `lc_messages` in English, because
+`top` knows those lines by their text. When a setting is off, the view says
+which one, and `S` opens the settings view at it. Under 100 columns the
+summary goes under the list. In the log view:
+
+| Key | Action |
+|---|---|
+| `e`, `t`, `c` | Only the errors, the temp files or the checkpoints. The hint of the filter that is on is filled |
+| `←` `→` | Make the summary beside the list wider or narrower |
+| `↑` `↓`, `PgUp` `PgDn`, `Home` | Select a line. The list stops following the newest line |
+| `End` | Follow the newest line again |
+| `v` or `Enter` | Show every field of the selected line and its statement under the list. `PgUp` `PgDn` scroll them. The summary stays beside them on a screen of 100 columns or more |
+| `/` | Search the messages, statements, users, databases, codes and PIDs of the lines on screen |
+| `S` | Open the settings view at the setting that is off |
+| `Esc` | Close the details, then clear the search, then the filter |
+
+The list holds the last 1,000 lines; the summaries count every line since
+`top` started. File sizes are within 3% in the percentiles. The checkpoint
+percentiles and the median interval use the last 1,000 checkpoints.
+
 Function statistics need `track_functions` set to `pl` or `all`. The plan
 comes from `EXPLAIN` without `ANALYZE`, so it may differ from the plan the
 backend runs. Queries cut at `track_activity_query_size` or with `$1`
@@ -282,6 +320,11 @@ and later, as a member of `pg_read_all_stats`.
   connections under pgbench, it took 0.7 ms per call and 0.15% of one core.
 - The settings view reads `pg_settings` once when it opens and again on `r`,
   never per refresh.
+- The log view runs one `SELECT` on `pg_settings` when `top` starts and when
+  the view opens. On each refresh, in any view, `top` reads from the local
+  file what the server appended, at most 8 MiB, and never asks the server
+  for the log. The text of the log stays on the screen: `top` writes none of
+  it to disk.
 - The blocking view, the query page, and the function and plan popups each add
   one query, only while open. The blocking view on 9.3 to 9.5 reads `pg_locks`
   once per refresh, because `pg_blocking_pids` arrived in 9.6.

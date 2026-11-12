@@ -143,6 +143,8 @@ const es: Dictionary = {
     vacuumNote: 'Cada autovacuum y vacuum manual. Desde PostgreSQL 9.6, también su fase y cuánto de la tabla ha recorrido.',
     settings: 'Configuración',
     settingsNote: 'Todas las filas de <code>pg_settings</code> por categoría, con el valor predeterminado, el origen y cuándo se aplica un valor nuevo. <code>d</code> deja solo lo que difiere del predeterminado.',
+    log: 'Log',
+    logNote: 'El csvlog del servidor a medida que crece, en el host de la base de datos. <code>e</code>, <code>t</code> y <code>c</code> dejan solo los errores, los archivos temporales o los checkpoints, con un resumen de cada uno desde que <code>top</code> inició.',
     query: 'Consulta',
     queryNote: 'Un backend: la consulta completa y todos los tiempos transcurridos. En el host de la base de datos, también su CPU, memoria e I/O.',
     plan: 'Plan',

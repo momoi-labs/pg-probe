@@ -279,6 +279,16 @@ impl GucView {
         }
     }
 
+    /// Shows only the settings with `name` in their name, as a search for
+    /// it does. The filters go off, since they may hide the setting.
+    pub(super) fn find(&mut self, name: &str) {
+        self.changed_only = false;
+        self.pending_only = false;
+        self.search.clear();
+        self.search.query = name.to_owned();
+        self.first();
+    }
+
     fn first(&mut self) {
         self.selected = 0;
         self.scroll.top();
@@ -328,7 +338,7 @@ impl GucView {
             KeyCode::PageUp => self.move_by(-(PAGE as isize)),
             KeyCode::Home => self.first(),
             KeyCode::End => self.move_by(isize::MAX / 2),
-            KeyCode::Char('q' | ' ' | '?' | 'h' | '1'..='5') | KeyCode::F(_) => {
+            KeyCode::Char('q' | ' ' | '?' | 'h' | '1'..='6') | KeyCode::F(_) => {
                 return Pressed::Pass
             }
             // The keys of the session lists do nothing here.
@@ -343,7 +353,7 @@ impl GucView {
             return vec![("enter", "keep"), ("esc", "clear")];
         }
         let mut hints = vec![
-            ("1-5", "view"),
+            ("1-6", "view"),
             ("↑↓", "move"),
             ("/", "search"),
             if self.changed_only {

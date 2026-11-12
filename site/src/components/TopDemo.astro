@@ -19,6 +19,7 @@ const views = [
   { key: '3', label: t.blocking, screen: 'blocking', note: t.blockingNote },
   { key: '4', label: t.vacuum, screen: 'vacuum', note: t.vacuumNote },
   { key: '5', label: t.settings, screen: 'settings', note: t.settingsNote },
+  { key: '6', label: t.log, screen: 'log', note: t.logNote },
   { key: 'Enter', label: t.query, screen: 'query', note: t.queryNote },
   { key: 'e', label: t.plan, screen: 'query-plan', note: t.planNote },
   { key: 'f', label: t.function, screen: 'query-functions', note: t.functionNote },
@@ -43,11 +44,11 @@ const views = [
 </div>
 
 <script>
-  // The keys work like top: 1 to 5 switch views, Enter opens the backend,
+  // The keys work like top: 1 to 6 switch views, Enter opens the backend,
   // e and f its plan and function, Esc goes back. Unlike top, e and f work
   // from any view, so a visitor does not need Enter first.
   const root = document.querySelector<HTMLElement>('.top-demo')!;
-  const lists = ['running', 'waiting', 'blocking', 'vacuum', 'settings'];
+  const lists = ['running', 'waiting', 'blocking', 'vacuum', 'settings', 'log'];
   let current = 'running';
   let lastList = 'running';
 
@@ -61,7 +62,7 @@ const views = [
 
   function press(key: string): boolean {
     let to: string | undefined;
-    if (['1', '2', '3', '4', '5'].includes(key)) to = lists[Number(key) - 1];
+    if (['1', '2', '3', '4', '5', '6'].includes(key)) to = lists[Number(key) - 1];
     else if (key === 'Enter') to = 'query';
     else if (key === 'e') to = 'query-plan';
     else if (key === 'f') to = 'query-functions';
@@ -87,7 +88,7 @@ const views = [
     const text = span.textContent!;
     const label = span.nextElementSibling as HTMLElement | null;
     let key: string | undefined;
-    if (/^ [1-5] $/.test(text)) key = text.trim();
+    if (/^ [1-6] $/.test(text)) key = text.trim();
     else if (text in hints && label?.textContent?.startsWith(' ')) key = hints[text];
     if (!key || !label) continue;
     for (const part of [span, label]) {

@@ -143,6 +143,8 @@ const ptBR: Dictionary = {
     vacuumNote: 'Todo autovacuum e vacuum manual. A partir do PostgreSQL 9.6, também sua fase e quanto da tabela já foi lido.',
     settings: 'Configurações',
     settingsNote: 'Todas as linhas de <code>pg_settings</code> por categoria, com o padrão, a origem e quando um novo valor passa a valer. <code>d</code> mantém só o que difere do padrão.',
+    log: 'Log',
+    logNote: 'O csvlog do servidor conforme cresce, no host do banco. <code>e</code>, <code>t</code> e <code>c</code> mantêm só os erros, os arquivos temporários ou os checkpoints, com um resumo de cada um desde que o <code>top</code> iniciou.',
     query: 'Consulta',
     queryNote: 'Um backend: a consulta completa e todos os tempos decorridos. No host do banco, também sua CPU, memória e I/O.',
     plan: 'Plano',

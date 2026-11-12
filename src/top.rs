@@ -15,6 +15,7 @@
 mod explain;
 mod function;
 mod gucs;
+mod log;
 mod os;
 mod settings;
 mod wraparound;
@@ -352,15 +353,17 @@ enum View {
     Blocking,
     Vacuum,
     Settings,
+    Log,
 }
 
 impl View {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::Running,
         Self::Waiting,
         Self::Blocking,
         Self::Vacuum,
         Self::Settings,
+        Self::Log,
     ];
 
     const fn name(self) -> &'static str {
@@ -370,6 +373,7 @@ impl View {
             Self::Blocking => "Blocking",
             Self::Vacuum => "Vacuum",
             Self::Settings => "Settings",
+            Self::Log => "Log",
         }
     }
 }
@@ -458,6 +462,9 @@ struct App {
     gucs: gucs::GucView,
     /// Read only in the vacuum view, every `wraparound::EVERY`.
     wraparound: wraparound::Wraparound,
+    /// The server's log, read on each refresh when the server runs on this
+    /// host.
+    log: log::LogView,
     /// Local `/proc` metrics, present only when the server runs on this host.
     os: Option<OsState>,
     /// The selected row of the list, and where the list is scrolled.
@@ -560,6 +567,7 @@ pub fn run(params: &ConnectionParams, interval: Duration, verbose: bool) -> Resu
         app.apply(settings::load(path));
     }
     app.settings_path = settings_path;
+    app.log.open(&client);
     // The first fetch happens before raw mode, so a failure prints normally.
     app.refresh(&client, &sql)?;
 
@@ -669,6 +677,7 @@ impl App {
             vacuums: Vec::new(),
             gucs: gucs::GucView::default(),
             wraparound: wraparound::Wraparound::default(),
+            log: log::LogView::new(local),
             os: local.then(OsState::new),
             selected: 0,
             list,
@@ -794,6 +803,18 @@ impl App {
                         gucs::Pressed::Pass => {}
                     }
                 }
+                if self.view == View::Log {
+                    match self.log.key(key) {
+                        log::Pressed::Handled => continue,
+                        log::Pressed::Settings(name) => {
+                            self.view = View::Settings;
+                            self.gucs.find(name);
+                            self.load_gucs(client, terminal)?;
+                            continue;
+                        }
+                        log::Pressed::Pass => {}
+                    }
+                }
                 let view = self.view;
                 let before = self.settings();
                 match key.code {
@@ -817,6 +838,7 @@ impl App {
                     KeyCode::F(3) | KeyCode::Char('3') => self.view = View::Blocking,
                     KeyCode::F(4) | KeyCode::Char('4') => self.view = View::Vacuum,
                     KeyCode::F(5) | KeyCode::Char('5') => self.view = View::Settings,
+                    KeyCode::F(6) | KeyCode::Char('6') => self.view = View::Log,
                     KeyCode::Down | KeyCode::Char('j') => self.select_by(1),
                     KeyCode::Up | KeyCode::Char('k') => self.select_by(-1),
                     KeyCode::PageDown => self.select_by(PAGE as isize),
@@ -836,6 +858,10 @@ impl App {
                     self.select_first();
                     if self.view == View::Settings {
                         self.load_gucs(client, terminal)?;
+                    }
+                    if self.view == View::Log {
+                        // A setting may have changed since `top` started.
+                        self.log.open(client);
                     }
                     if !self.paused {
                         self.refresh(client, sql)?;
@@ -898,6 +924,7 @@ impl App {
                 .collect();
             os.refresh(&observed);
         }
+        self.log.tick();
         self.refresh_popup(client)?;
         self.refreshed = local_time();
         self.blocks = if self.view == View::Blocking {
@@ -1084,7 +1111,7 @@ impl App {
     /// The grouping in effect. The blocking tree and the vacuum view have
     /// their own order.
     fn shown_group(&self) -> Group {
-        if matches!(self.view, View::Vacuum | View::Settings)
+        if matches!(self.view, View::Vacuum | View::Settings | View::Log)
             || self.view == View::Blocking && self.tree
         {
             Group::None
@@ -1112,7 +1139,7 @@ impl App {
                 View::Running => backend.is_running(),
                 View::Waiting => backend.waits_on_lock(),
                 View::Blocking => self.blocks.contains_key(&backend.pid),
-                View::Vacuum | View::Settings => false,
+                View::Vacuum | View::Settings | View::Log => false,
             })
             .map(|backend| (String::new(), backend))
             .collect::<Vec<_>>();
@@ -1208,6 +1235,9 @@ impl App {
             if self.view == View::Settings {
                 let right = [HELP[1], SETTINGS_HELP[1]];
                 draw_help(buf, &self.theme, screen, &SETTINGS_HELP[..1], &right);
+            } else if self.view == View::Log {
+                let right = [HELP[1], LOG_HELP[1]];
+                draw_help(buf, &self.theme, screen, &LOG_HELP[..1], &right);
             } else {
                 draw_help(buf, &self.theme, screen, &HELP[..1], &HELP[1..]);
             }
@@ -1493,6 +1523,8 @@ impl App {
         let labels = View::ALL.map(|view| {
             let count = if view == View::Settings {
                 self.gucs.count()
+            } else if view == View::Log {
+                None
             } else if view == self.view {
                 Some(self.visible().len().to_string())
             } else {
@@ -1502,7 +1534,7 @@ impl App {
                 match view {
                     View::Running => count(Backend::is_running),
                     View::Waiting => count(Backend::waits_on_lock),
-                    View::Blocking | View::Vacuum | View::Settings => None,
+                    View::Blocking | View::Vacuum | View::Settings | View::Log => None,
                 }
             };
             let mut label = view.name().to_owned();
@@ -1579,6 +1611,16 @@ impl App {
                 ..area
             };
             self.gucs.draw(t, buf, rows, self.has_pending_restart());
+            return;
+        }
+        if self.view == View::Log {
+            let top = area.y.saturating_add(row + 1).min(area.bottom());
+            let rows = Rect {
+                y: top,
+                height: area.bottom() - top,
+                ..area
+            };
+            self.log.draw(t, buf, rows);
             return;
         }
         let top = area.y.saturating_add(row + 2).min(area.bottom());
@@ -2377,9 +2419,24 @@ impl App {
             fill_on(&self.theme, &mut spans, &hints);
             Line::from(spans).render(area, buf);
             return;
+        } else if self.view == View::Log {
+            let hints = self.log.hints();
+            let mut keys = KeyHints::new(&self.theme, hints.clone());
+            if self.log.search.is_active() {
+                let room = usize::from(area.width) / 2;
+                keys = keys.prefix(
+                    self.log
+                        .search
+                        .prompt(&self.theme, self.log.matches(), room),
+                );
+            }
+            let mut spans = keys.spans(usize::from(area.width));
+            fill_on(&self.theme, &mut spans, &hints);
+            Line::from(spans).render(area, buf);
+            return;
         } else {
             vec![
-                ("1-5", "view"),
+                ("1-6", "view"),
                 ("↑↓", "move"),
                 ("enter", "details"),
                 if self.preview {
@@ -2797,6 +2854,7 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
             ("F3 3", "Blocking queries"),
             ("F4 4", "Vacuums and freeze limits"),
             ("F5 5", "Server settings"),
+            ("F6 6", "Server log"),
         ],
     ),
     (
@@ -2812,7 +2870,7 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
     (
         "Query details",
         &[
-            ("f", "Functions the query calls"),
+            ("f", "Functions it calls"),
             ("e", "Estimated plan (EXPLAIN)"),
             ("↑ ↓ PgUp PgDn", "Scroll"),
             ("v q Esc Enter", "Back to the list"),
@@ -2846,6 +2904,36 @@ const SETTINGS_HELP: &HelpSections = &[
         &[
             ("●", "Differs from the built-in default"),
             ("!", "Waits for a restart"),
+        ],
+    ),
+];
+
+/// The keys and the filters of the log view.
+const LOG_HELP: &HelpSections = &[
+    (
+        "Log",
+        &[
+            ("↑ ↓ j k", "Move the selection"),
+            ("PgUp PgDn", "Move one page"),
+            ("Home End", "First line, or follow"),
+            ("v Enter", "Line details"),
+            ("/", "Search the lines"),
+            ("S", "Setting that is off"),
+            ("Esc", "Close the details, clear the search, the filter"),
+            ("Space", "Pause or resume refreshes"),
+            ("h", "Two-line header with session history"),
+            ("?", "This help"),
+            ("q", "Quit"),
+            ("Ctrl+C", "Quit from anywhere"),
+        ],
+    ),
+    (
+        "Filters",
+        &[
+            ("e", "Errors: an error SQLSTATE"),
+            ("t", "Temp files: log_temp_files"),
+            ("c", "Checkpoints: log_checkpoints"),
+            ("← →", "Resize the summary"),
         ],
     ),
 ];
@@ -3885,7 +3973,7 @@ mod tests {
         assert!(screen.contains("Settings"), "{screen}");
         assert!(screen.contains("Reading the settings…"), "{screen}");
         // 9.3 has no pending_restart, so the footer has no `p`.
-        assert!(rows[23].starts_with("1-5 view • ↑↓ move • / search • d changed • r reload"));
+        assert!(rows[23].starts_with("1-6 view • ↑↓ move • / search • d changed • r reload"));
         app.help = true;
         let screen = self::rows(&buffer(&mut app, 80, 24)).join("\n");
         assert!(screen.contains("Server settings"), "{screen}");
