@@ -21,6 +21,10 @@ pub const RANDOM_PAGE_COST: &str = "random_page_cost";
 pub const SEQ_PAGE_COST: &str = "seq_page_cost";
 pub const AUTOVACUUM: &str = "autovacuum";
 pub const AUTOVACUUM_MAX_WORKERS: &str = "autovacuum_max_workers";
+pub const AUTOVACUUM_FREEZE_MAX_AGE: &str = "autovacuum_freeze_max_age";
+pub const AUTOVACUUM_MULTIXACT_FREEZE_MAX_AGE: &str = "autovacuum_multixact_freeze_max_age";
+pub const VACUUM_FREEZE_TABLE_AGE: &str = "vacuum_freeze_table_age";
+pub const VACUUM_MULTIXACT_FREEZE_TABLE_AGE: &str = "vacuum_multixact_freeze_table_age";
 pub const DEFAULT_STATISTICS_TARGET: &str = "default_statistics_target";
 pub const CHECKPOINT_COMPLETION_TARGET: &str = "checkpoint_completion_target";
 pub const MAX_WAL_SIZE: &str = "max_wal_size";
@@ -47,6 +51,10 @@ pub const ALLOWLIST: &[&str] = &[
     SEQ_PAGE_COST,
     AUTOVACUUM,
     AUTOVACUUM_MAX_WORKERS,
+    AUTOVACUUM_FREEZE_MAX_AGE,
+    AUTOVACUUM_MULTIXACT_FREEZE_MAX_AGE,
+    VACUUM_FREEZE_TABLE_AGE,
+    VACUUM_MULTIXACT_FREEZE_TABLE_AGE,
     DEFAULT_STATISTICS_TARGET,
     CHECKPOINT_COMPLETION_TARGET,
     MAX_WAL_SIZE,
@@ -82,6 +90,6 @@ mod tests {
 
     #[test]
     fn allowlist_total_matches_known_entries() {
-        assert_eq!(ALLOWLIST.len(), 23);
+        assert_eq!(ALLOWLIST.len(), 27);
     }
 }

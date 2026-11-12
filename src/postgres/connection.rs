@@ -163,6 +163,22 @@ pub struct ConnectedClient {
     tls: TlsMode,
 }
 
+/// A database of an already resolved server, not yet connected.
+pub struct DatabaseTarget {
+    config: Config,
+    tls: TlsMode,
+}
+
+impl DatabaseTarget {
+    pub fn open(
+        self,
+        source: &'static str,
+        outcomes: &mut Vec<ComponentOutcome>,
+    ) -> Result<ConnectedClient, AdapterError> {
+        ConnectedClient::open_config(self.config, self.tls, source, outcomes)
+    }
+}
+
 impl ConnectedClient {
     /// Opens a PostgreSQL connection from explicit connection parameters, or
     /// from the supported `PG*` environment variables when parameters are unset.
@@ -213,6 +229,22 @@ impl ConnectedClient {
         let mut config = self.config.clone();
         config.dbname(database);
         Self::open_config(config, self.tls, source, outcomes)
+    }
+
+    /// What a bounded, read-only session on another database of this server
+    /// needs. It borrows nothing, so this client can close before it opens.
+    pub fn read_only_target(&self, database: &str, statement_timeout_ms: u64) -> DatabaseTarget {
+        let mut config = self.config.clone();
+        config.dbname(database);
+        let options = read_only_options(config.get_options(), statement_timeout_ms);
+        config.options(&options);
+        if config.get_connect_timeout().is_none() {
+            config.connect_timeout(Duration::from_millis(statement_timeout_ms));
+        }
+        DatabaseTarget {
+            config,
+            tls: self.tls,
+        }
     }
 
     fn open_config(

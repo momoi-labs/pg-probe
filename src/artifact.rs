@@ -534,6 +534,13 @@ impl crate::collector::Sink for PartialWriter {
             inventory,
             &collected_at,
         )?;
+        write_postgres_freeze(
+            &tx,
+            &self.snapshot_id,
+            self.sample_id,
+            inventory,
+            &collected_at,
+        )?;
         tx.commit().map_err(ArtifactError::Sqlite)?;
         self.fsync_partial()
     }
@@ -2269,6 +2276,110 @@ fn write_postgres_io_stats(
                 ])
                 .map_err(ArtifactError::Sqlite)?;
         }
+    }
+    Ok(())
+}
+
+fn write_postgres_freeze(
+    tx: &rusqlite::Transaction,
+    snapshot_id: &str,
+    sample_id: i64,
+    inventory: &TargetInventory,
+    collected_at: &str,
+) -> Result<(), ArtifactError> {
+    let freeze = &inventory.freeze;
+    if let Some(segment_files) = freeze.member_segment_files {
+        tx.execute(
+            "INSERT INTO postgres_multixact_members (
+                snapshot_id, sample_id, collected_at, segment_files
+            ) VALUES (?1, ?2, ?3, ?4)",
+            params![snapshot_id, sample_id, collected_at, segment_files],
+        )
+        .map_err(ArtifactError::Sqlite)?;
+    }
+    // Two names the sanitizer replaced are the same key, so the rest ignore
+    // a repeated row.
+    let mut statement = tx
+        .prepare(
+            "INSERT OR IGNORE INTO postgres_database_freeze (
+                snapshot_id, sample_id, collected_at, database_name, is_template,
+                allows_connections, frozenxid_age, minmxid, minmxid_age, minmxid_rank,
+                tables_status
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        )
+        .map_err(ArtifactError::Sqlite)?;
+    for database in &freeze.databases {
+        statement
+            .execute(params![
+                snapshot_id,
+                sample_id,
+                collected_at,
+                database.database_name.as_str(),
+                database.is_template,
+                database.allows_connections,
+                database.frozenxid_age,
+                database.minmxid,
+                database.minmxid_age,
+                database.minmxid_rank,
+                database.tables_status.as_str(),
+            ])
+            .map_err(ArtifactError::Sqlite)?;
+    }
+    let mut statement = tx
+        .prepare(
+            "INSERT OR IGNORE INTO postgres_table_freeze (
+                snapshot_id, sample_id, collected_at, database_name, schema_name,
+                relation_name, toast_of, frozenxid_age, minmxid, minmxid_age,
+                autovacuum_count, last_autovacuum, vacuum_count, last_vacuum
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+        )
+        .map_err(ArtifactError::Sqlite)?;
+    for table in &freeze.tables {
+        statement
+            .execute(params![
+                snapshot_id,
+                sample_id,
+                collected_at,
+                table.database_name.as_str(),
+                table.schema_name.as_str(),
+                table.relation_name.as_str(),
+                table.toast_of.as_deref(),
+                table.frozenxid_age,
+                table.minmxid,
+                table.minmxid_age,
+                table.autovacuum_count,
+                table.last_autovacuum.as_deref(),
+                table.vacuum_count,
+                table.last_vacuum.as_deref(),
+            ])
+            .map_err(ArtifactError::Sqlite)?;
+    }
+    let mut statement = tx
+        .prepare(
+            "INSERT OR IGNORE INTO postgres_vacuum_running (
+                snapshot_id, sample_id, collected_at, database_name, relation, kind,
+                wraparound, started_at, running_seconds
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        )
+        .map_err(ArtifactError::Sqlite)?;
+    for vacuum in &freeze.vacuums {
+        statement
+            .execute(params![
+                snapshot_id,
+                sample_id,
+                collected_at,
+                vacuum.database_name.as_str(),
+                vacuum.relation.as_deref(),
+                if vacuum.autovacuum {
+                    "autovacuum"
+                } else {
+                    "manual"
+                },
+                vacuum.wraparound,
+                vacuum.started_at.as_str(),
+                vacuum.running_seconds,
+            ])
+            .map_err(ArtifactError::Sqlite)?;
     }
     Ok(())
 }
