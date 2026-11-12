@@ -603,3 +603,59 @@ CREATE TABLE postgres_slot_aggregates (
     PRIMARY KEY (snapshot_id, sample_id, slot_type, active),
     FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
 );
+CREATE TABLE postgres_multixact_members (
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
+    collected_at TEXT NOT NULL,
+    segment_files INTEGER NOT NULL,
+    PRIMARY KEY (snapshot_id, sample_id),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
+) STRICT;
+CREATE TABLE postgres_database_freeze (
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
+    collected_at TEXT NOT NULL,
+    database_name TEXT NOT NULL,
+    is_template INTEGER NOT NULL CHECK (is_template IN (0, 1)),
+    allows_connections INTEGER NOT NULL CHECK (allows_connections IN (0, 1)),
+    frozenxid_age INTEGER NOT NULL,
+    minmxid INTEGER,
+    minmxid_age INTEGER,
+    minmxid_rank INTEGER,
+    tables_status TEXT NOT NULL CHECK (
+        tables_status IN ('read', 'not_due', 'not_selected', 'not_connectable', 'failed')
+    ),
+    PRIMARY KEY (snapshot_id, sample_id, database_name),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
+) STRICT;
+CREATE TABLE postgres_table_freeze (
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
+    collected_at TEXT NOT NULL,
+    database_name TEXT NOT NULL,
+    schema_name TEXT NOT NULL,
+    relation_name TEXT NOT NULL,
+    toast_of TEXT,
+    frozenxid_age INTEGER NOT NULL,
+    minmxid INTEGER,
+    minmxid_age INTEGER,
+    autovacuum_count INTEGER,
+    last_autovacuum TEXT,
+    vacuum_count INTEGER,
+    last_vacuum TEXT,
+    PRIMARY KEY (snapshot_id, sample_id, database_name, schema_name, relation_name),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
+) STRICT;
+CREATE TABLE postgres_vacuum_running (
+    snapshot_id TEXT NOT NULL REFERENCES snapshot(snapshot_id),
+    sample_id INTEGER NOT NULL,
+    collected_at TEXT NOT NULL,
+    database_name TEXT NOT NULL,
+    relation TEXT,
+    kind TEXT NOT NULL CHECK (kind IN ('autovacuum', 'manual')),
+    wraparound INTEGER NOT NULL CHECK (wraparound IN (0, 1)),
+    started_at TEXT NOT NULL,
+    running_seconds INTEGER NOT NULL,
+    PRIMARY KEY (snapshot_id, sample_id, database_name, started_at, relation),
+    FOREIGN KEY (snapshot_id, sample_id) REFERENCES sample(snapshot_id, sample_id)
+);

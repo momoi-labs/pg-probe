@@ -24,6 +24,10 @@ const VARIANT: &[&str] = &[
     "postgres_lock_aggregates",
     "postgres_replication_aggregates",
     "postgres_slot_aggregates",
+    "postgres_multixact_members",
+    "postgres_database_freeze",
+    "postgres_table_freeze",
+    "postgres_vacuum_running",
 ];
 
 const INVARIANT: &[&str] = &[

@@ -341,6 +341,12 @@ in the SQLite `user_version` pragma. The current schema contains:
   not succeed.
 - `linux_identity` — the collected host identity: kernel details, allowlisted
   `os-release` fields, clock parameters, and host uptime.
+- `postgres_multixact_members`, `postgres_database_freeze`,
+  `postgres_table_freeze` and `postgres_vacuum_running` — the wraparound state
+  in each sample: the size of the multixact member space, the databases ranked
+  by oldest xid and oldest multixact, the running vacuums, and the freeze age
+  and autovacuum counters of the oldest tables. The table read runs at most
+  once every 60 seconds. See `schema/catalog.md` for the columns.
 
 ## Data boundary
 

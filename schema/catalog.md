@@ -686,3 +686,61 @@ One row per group of replication slots in each sample. pg-probe reads `pg_replic
 - `active`: 1 when `pg_replication_slots.active` is true, else 0.
 - `count`: Slots in this group. Gauge.
 - `max_retained_bytes`: Largest `pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)` in the group, WAL kept for the slot. Bytes. Gauge. 0 when no slot in the group has a `restart_lsn`.
+
+## postgres_multixact_members
+
+One row per sample with the size of the multixact member space, counted as files in `pg_multixact/members` with `pg_ls_dir`. PostgreSQL 9.3 to 18. No row when the role may not list the directory: it needs a superuser, or from PostgreSQL 11 EXECUTE on `pg_ls_dir(text)`. Per sample. The count is a gauge.
+
+- `snapshot_id`: Snapshot this row belongs to.
+- `sample_id`: Sample this row belongs to.
+- `collected_at`: Time pg-probe wrote the batch that holds this row. UTC, RFC 3339.
+- `segment_files`: Segment files in the directory. One file holds 52,352 members, and the space is full at about 82,040 files.
+
+## postgres_database_freeze
+
+One row per database in each sample, from `pg_database`, including templates and databases that refuse connections. Per sample. Ages and ranks are gauges.
+
+- `snapshot_id`: Snapshot this row belongs to.
+- `sample_id`: Sample this row belongs to.
+- `collected_at`: Time pg-probe wrote the batch that holds this row. UTC, RFC 3339.
+- `database_name`: `pg_database.datname`, or `<invalid>` when it holds characters pg-probe does not allow.
+- `is_template`: `datistemplate`. 1 or 0.
+- `allows_connections`: `datallowconn`. 1 or 0.
+- `frozenxid_age`: `age(datfrozenxid)`, transactions since the oldest unfrozen xid in the database.
+- `minmxid`: `datminmxid`, the oldest multixact id in the database, as the raw 32-bit value. It wraps, so compare databases with `minmxid_rank`. NULL before PostgreSQL 9.3.
+- `minmxid_age`: `mxid_age(datminmxid)`. NULL before PostgreSQL 9.5, which has no `mxid_age`.
+- `minmxid_rank`: Position of the database by oldest multixact, 1 for the oldest. Computed from `minmxid` with the wrap taken into account, so it works on PostgreSQL 9.3 and 9.4. Databases with the same `minmxid` share a rank. NULL when `minmxid` is.
+- `tables_status`: What the table read did for this database in this sample. `read`: postgres_table_freeze has its tables. `not_due`: the read runs at most once every 60 seconds and was not due. `not_selected`: the read ran, on another database. `not_connectable`: the database refuses connections. `failed`: the read was tried and failed.
+
+## postgres_table_freeze
+
+One row per table read in each sample where the table read ran. pg-probe reads the tables of the connectable database with the oldest xid and of the one with the oldest multixact: the 20 tables with the oldest xid, the 20 with the oldest multixact, and every table a vacuum was seen on earlier in the capture. Catalogs, TOAST tables and materialized views count. The read runs on the first sample and then at most once every 60 seconds. Per sample. Ages are gauges and counts are cumulative since the last statistics reset.
+
+- `snapshot_id`: Snapshot this row belongs to.
+- `sample_id`: Sample this row belongs to.
+- `collected_at`: Time pg-probe wrote the batch that holds this row. UTC, RFC 3339.
+- `database_name`: Database the table is in.
+- `schema_name`: Schema of the table.
+- `relation_name`: `pg_class.relname`.
+- `toast_of`: For a TOAST table, the table that owns it, as `schema.table`. NULL otherwise.
+- `frozenxid_age`: `age(relfrozenxid)`.
+- `minmxid`: `relminmxid`, as the raw 32-bit value. NULL before PostgreSQL 9.3.
+- `minmxid_age`: `mxid_age(relminmxid)`. NULL before PostgreSQL 9.5.
+- `autovacuum_count`: `pg_stat_all_tables.autovacuum_count`. It rises only when an autovacuum finishes, so a table that appears in postgres_vacuum_running again and again while this stays the same has autovacuums that do not finish.
+- `last_autovacuum`: `last_autovacuum`, as PostgreSQL text. NULL when none finished.
+- `vacuum_count`: `vacuum_count`, manual vacuums that finished.
+- `last_vacuum`: `last_vacuum`, as PostgreSQL text. NULL when none finished.
+
+## postgres_vacuum_running
+
+One row per vacuum seen running in each sample, from `pg_stat_activity`. pg-probe keeps the table name out of the query text and nothing else: no PID, user, address or query text. A vacuum shorter than the sample interval may not appear. When the role may not see some sessions, the outcome `activity_not_visible` says so. Per sample.
+
+- `snapshot_id`: Snapshot this row belongs to.
+- `sample_id`: Sample this row belongs to.
+- `collected_at`: Time pg-probe wrote the batch that holds this row. UTC, RFC 3339.
+- `database_name`: Database the vacuum runs in.
+- `relation`: The table, as `schema.table`, or as typed for a manual vacuum. NULL when a manual vacuum names no table or more than one, or the name holds characters pg-probe does not allow.
+- `kind`: `autovacuum` for an autovacuum worker, `manual` for a `VACUUM` command.
+- `wraparound`: 1 when the autovacuum runs to prevent wraparound. Always 0 for a manual vacuum.
+- `started_at`: `query_start`, as PostgreSQL text. The same database, table and start time in two samples are one try, and a new start time is a new try.
+- `running_seconds`: Seconds since `started_at` when the sample was taken.

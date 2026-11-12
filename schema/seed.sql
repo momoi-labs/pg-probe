@@ -4,7 +4,7 @@ INSERT INTO snapshot (
     started_at_utc, finished_at_utc, status
 )
 SELECT
-    name, 3, 'pg-probe', 'dev-seed',
+    name, 4, 'pg-probe', 'dev-seed',
     '2026-08-19T12:00:00Z', '2026-08-19T12:00:05Z',
     CASE WHEN name IN ('partial-failures', 'null-heavy') THEN 'partial' ELSE 'complete' END
 FROM seed_scenario;
@@ -79,3 +79,38 @@ SELECT name, '2026-08-19T12:00:04Z', 'postgres', 0, 1, 1,
        CASE WHEN name = 'large-host' THEN 2199023255552 ELSE 134217728 END,
        'visited'
 FROM seed_scenario WHERE name NOT IN ('partial-failures', 'null-heavy');
+
+INSERT INTO postgres_multixact_members (snapshot_id, sample_id, collected_at, segment_files)
+SELECT name, 1, '2026-08-19T12:00:04Z',
+       CASE WHEN name = 'large-host' THEN 61912 ELSE 412 END
+FROM seed_scenario WHERE name NOT IN ('partial-failures', 'null-heavy');
+
+INSERT INTO postgres_database_freeze (
+    snapshot_id, sample_id, collected_at, database_name, is_template,
+    allows_connections, frozenxid_age, minmxid, minmxid_age, minmxid_rank,
+    tables_status
+)
+SELECT name, 1, '2026-08-19T12:00:04Z', 'postgres', 0, 1,
+       CASE WHEN name = 'large-host' THEN 1987450904 ELSE 98122114 END,
+       1, CASE WHEN name = 'large-host' THEN 1204118220 ELSE 20114 END, 1,
+       'read'
+FROM seed_scenario WHERE name NOT IN ('partial-failures', 'null-heavy');
+
+INSERT INTO postgres_table_freeze (
+    snapshot_id, sample_id, collected_at, database_name, schema_name,
+    relation_name, toast_of, frozenxid_age, minmxid, minmxid_age,
+    autovacuum_count, last_autovacuum, vacuum_count, last_vacuum
+)
+SELECT name, 1, '2026-08-19T12:00:04Z', 'postgres', 'public', 'events', NULL,
+       CASE WHEN name = 'large-host' THEN 1987450904 ELSE 98122114 END,
+       1, CASE WHEN name = 'large-host' THEN 1204118220 ELSE 20114 END,
+       12, '2026-08-19T11:40:00Z', 0, NULL
+FROM seed_scenario WHERE name NOT IN ('partial-failures', 'null-heavy');
+
+INSERT INTO postgres_vacuum_running (
+    snapshot_id, sample_id, collected_at, database_name, relation, kind,
+    wraparound, started_at, running_seconds
+)
+SELECT name, 1, '2026-08-19T12:00:04Z', 'postgres', 'public.events',
+       'autovacuum', 1, '2026-08-19T11:58:00Z', 124
+FROM seed_scenario WHERE name = 'large-host';

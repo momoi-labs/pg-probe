@@ -16,6 +16,7 @@
 mod connection;
 mod databases;
 mod extensions;
+mod freeze;
 mod relations;
 mod sanitize;
 mod settings;
@@ -29,6 +30,7 @@ pub use connection::{
 };
 pub use databases::{DatabaseEntry, ExtensionVisitStatus};
 pub use extensions::ExtensionEntry;
+pub use freeze::{DatabaseFreeze, FreezeObservation, RunningVacuum, TableFreeze, TablesStatus};
 pub use relations::RelationEntry;
 pub use settings::Setting;
 pub use stats::{
@@ -55,6 +57,7 @@ pub struct TargetInventory {
     pub extensions: Vec<ExtensionEntry>,
     pub relations: Vec<RelationEntry>,
     pub stats: PostgresStats,
+    pub freeze: FreezeObservation,
 }
 
 /// Collector for the PostgreSQL target, inventory, and statistics.
@@ -98,7 +101,8 @@ impl Collector for PostgresCollector {
 /// first open fails, the next sample tries again.
 pub struct PostgresSampler {
     params: ConnectionParams,
-    session: RefCell<Option<(ConnectedClient, i32)>>,
+    session: RefCell<Option<freeze::Session>>,
+    freeze: RefCell<freeze::FreezeState>,
 }
 
 impl PostgresSampler {
@@ -106,6 +110,7 @@ impl PostgresSampler {
         Self {
             params,
             session: RefCell::new(None),
+            freeze: RefCell::new(freeze::FreezeState::after_first_sample()),
         }
     }
 }
@@ -136,13 +141,22 @@ impl Collector for PostgresSampler {
             let Some(version) = version else {
                 return (inventory, outcomes);
             };
-            *session = Some((client, version));
+            let database = client.db().ok();
+            *session = Some(freeze::Session {
+                client,
+                version,
+                database,
+            });
         }
 
-        let (client, version) = session.as_ref().expect("session opened above");
-        let (pg_stats, stats_outcomes) = stats::collect_postgres_stats_isolated(client, *version);
+        let current = session.as_ref().expect("session opened above");
+        let (pg_stats, stats_outcomes) =
+            stats::collect_postgres_stats_isolated(&current.client, current.version);
         outcomes.extend(stats_outcomes);
         inventory.stats = pg_stats;
+        // Last: a table read may close the session.
+        inventory.freeze =
+            freeze::collect(&mut session, &mut self.freeze.borrow_mut(), &mut outcomes);
         (inventory, outcomes)
     }
 
@@ -287,6 +301,18 @@ fn collect_target_inventory(params: &ConnectionParams) -> (TargetInventory, Vec<
             stats::collect_postgres_stats_isolated(&client, server_version_num);
         outcomes.extend(stats_outcomes);
         inventory.stats = pg_stats;
+        // Last: a table read may close the session.
+        let database = client.db().ok();
+        let mut session = Some(freeze::Session {
+            client,
+            version: server_version_num,
+            database,
+        });
+        inventory.freeze = freeze::collect(
+            &mut session,
+            &mut freeze::FreezeState::default(),
+            &mut outcomes,
+        );
     }
 
     (inventory, outcomes)
