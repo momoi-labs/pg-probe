@@ -1,5 +1,47 @@
 # pg-probe
 
+## 0.6.0
+
+### Minor Changes
+
+- be36fee: A capture with `--duration` now records the wraparound state over time. Each
+  sample has the size of the multixact member space, the databases ranked by
+  oldest xid and oldest multixact, and the vacuums in progress. The tables with
+  the oldest xid and the oldest multixact, in the oldest databases you can
+  connect to, are read on the first sample and then at most once every 60
+  seconds, with their `autovacuum_count`. A table that shows a wraparound
+  autovacuum again and again while its count stays the same has autovacuums that
+  do not finish. This works from PostgreSQL 9.3, where the multixact order comes
+  from a rank because there is no multixact age. Reading the member space needs
+  a superuser, or from 11 EXECUTE on `pg_ls_dir`. The artifact schema is now
+  version 4, and it also records the four freeze age settings.
+- cee6197: The console and the printed report have a Wraparound section. "Vacuum tries
+  by table" counts the vacuums seen on each table during the capture, how many
+  ran to prevent wraparound and how many finished, with a line that shows the
+  samples in which a vacuum ran. A table with many tries and none finished has
+  an autovacuum that starts and stops before the end. "Multixact member space"
+  shows how full the space is and how fast it grew. "Oldest databases" lists
+  the databases by xid age, with their multixact age. The section needs a
+  capture made with this version.
+- 08d50e3: `pg-probe top` has a log view on `F6` or `6`. On the database host, it shows the lines of the server's csvlog as they arrive, like `tail -f`, and `e`, `t` and `c` keep only the errors, the temp files or the checkpoints. Each filter shows beside the list a summary since `top` started, which `←` and `→` resize: the errors with the most lines per user and database, with the count of the last 5 minutes; the statements that wrote the most temp file bytes; and what started the checkpoints, with p95 and p99 of buffers, write and sync time. `Enter` shows every field of the selected line with its statement, and `/` searches the lines. When `logging_collector`, `log_temp_files` or `log_checkpoints` is off, the view says what is missing and `S` opens the settings view at that setting. It reads the file from the local disk, at most 8 MiB per refresh, and writes none of it. It works from PostgreSQL 9.3.
+- 0f1596c: `pg-probe top` has a settings view on `F5` or `5`. It lists every row of `pg_settings` under its category, shows each value beside its default, marks the values that differ from the built-in default and the ones that wait for a restart, and shows beside the list the description of the selected setting, how many times a changed amount is more or less than the default, the source with its file and line, and the context. `/` searches names and categories, `d` keeps only what differs from the default, and `p` only what waits for a restart. It reads `pg_settings` once when the view opens and again on `r`. It works from PostgreSQL 9.3; the restart mark needs 9.5.
+- 1471bb2: `pg-probe top` shows the table that owns the TOAST table when you open the details of an autovacuum worker that is vacuuming one. It runs one catalog query in the backend's database, when the panel opens.
+- 5cb2053: The vacuum view of `pg-probe top` now shows what should be vacuumed against
+  wraparound and is not. It lists the tables past `autovacuum_freeze_max_age` or
+  `autovacuum_multixact_freeze_max_age`, worst first, with the TOAST tables shown
+  under their owner. Each row has the time since the last autovacuum, the workers
+  seen on the table and the autovacuums that finished. A failed autovacuum never
+  counts as finished. A head line shows how full the multixact member space is,
+  and the database that holds the oldest multixact. The view reads these every
+  30 seconds and only while it is open. Reading the member space needs a
+  superuser, or from 11 EXECUTE on `pg_ls_dir`.
+  Before 9.5 there is no multixact age, so only the xid age counts, and the view
+  says so.
+
+### Patch Changes
+
+- 0f1596c: `pg-probe top` fills the key hint of a switch that is on, so the footer says what is in effect: `tab preview` while the preview is open, `g by user` while the list is grouped, and `space paused` while the refresh is paused. The `space` hint no longer changes to `resume`.
+
 ## 0.5.0
 
 ### Minor Changes
