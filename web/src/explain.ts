@@ -199,4 +199,19 @@ export const explain: Record<string, Explain> = {
       'Rows per second over all databases. Read is rows returned by scans. Written is rows inserted, updated and deleted.',
     look: 'Read counts every row a scan returned, before filters, so a high read rate with few transactions points to sequential scans of large tables. A written rate that rises with WAL generated is normal. Compare the shape with Transactions per second.',
   },
+  'vacuum-tries-by-table': {
+    shows:
+      'The vacuums pg-probe saw running on each table during the capture, and how many vacuums the table finished in the same period. One try is one vacuum, known by the time it started. The line is high in the samples where a vacuum ran on the table.',
+    look: 'A table with several tries and zero finished. Its autovacuum starts and stops before the end, so the table is never frozen and its age keeps growing. PostgreSQL raises autovacuum_count only when a vacuum finishes. The server log has the reason each one stopped. A try that still ran in the last sample is not a failure: the capture ended first.',
+  },
+  'multixact-member-space': {
+    shows:
+      'How much of the multixact member space is in use, counted as segment files in pg_multixact/members, and how fast it grew during the capture. The space is full at 82,040 files.',
+    look: 'The share in use and the growth. When the space is full, PostgreSQL refuses every statement that needs a new multixact. Only a vacuum that finishes on the tables with the oldest multixact gives space back, so read this with Vacuum tries by table.',
+  },
+  'oldest-databases': {
+    shows:
+      'The databases at the last sample, ordered by the age of their oldest transaction id, with the age and the rank of their oldest multixact.',
+    look: 'The database at the top is where vacuum has to finish first. template0 can be the oldest and does not accept connections. PostgreSQL before 9.5 has no multixact age, so the rank gives the order: 1 is the oldest.',
+  },
 }

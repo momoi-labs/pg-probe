@@ -118,6 +118,23 @@ available sources. It groups the not available sources by their error code.
 The probe reads the 20 largest relations and the 20 with the most dead tuples
 in each database.
 
+## Wraparound
+
+| Panel | Source | How it is derived |
+| --- | --- | --- |
+| Vacuum tries by table | `pg_stat_activity` and, in the oldest databases, the freeze state and vacuum counters of the tables | One row per table, over the whole capture. The ten tables with the most tries, then by xid age. With one database in view, its name is the panel badge |
+| ↳ Tries seen | vacuums running in each sample | Count of distinct start times of the vacuums seen on the table. A vacuum that runs across many samples is one try. A vacuum that starts and ends between two samples is not seen. A manual vacuum that names its table without the schema is a row of its own, with no xid age: the capture does not know the `search_path` of that session, so it cannot tell which table the name means |
+| ↳ For wraparound | the same | Tries that ran to prevent wraparound |
+| ↳ Finished | `autovacuum_count + vacuum_count` | Last read of the table − first read. Unknown with one read, or when the count went down, which is a statistics reset. PostgreSQL adds to these counters only when a vacuum completes |
+| ↳ Vacuum running, per sample | vacuums running in each sample | High in the samples where a vacuum ran on the table |
+| ↳ xid age | `age(relfrozenxid)` | Last read of the table |
+| ↳ Since last autovacuum | `last_autovacuum` | Time of the last read − `last_autovacuum`, in days from 2 days, hours from 2 hours, else minutes. `NULL` when the table has none |
+| Multixact member space | files in `pg_multixact/members` | Segment files in the last sample ÷ 82,040, the count when the space is full: 2^32 members at 52,352 per file. The growth is the change in files between the first and the last sample ÷ minutes between them |
+| Oldest databases | `pg_database` | Last sample, by `age(datfrozenxid)`. Multixact age is `mxid_age(datminmxid)`, from 9.5. Multixact rank orders the databases by how old `datminmxid` is; 1 is the oldest |
+
+The probe reads the tables of the oldest databases at most once per minute
+(ADR-0012), so a short capture can have one read of a table.
+
 ## Queries
 
 | Panel | Source | How it is derived |

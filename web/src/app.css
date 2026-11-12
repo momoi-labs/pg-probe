@@ -340,3 +340,9 @@ p.report-notes {
 .brand-emblem .brand-probe {
   fill: light-dark(#9d7832, #cba65e);
 }
+
+/* A Sparkline in a table cell. It keeps one width, since a Sparkline does
+   not redraw when the columns of a printed table change width. */
+.table .trend {
+  width: 5rem;
+}
