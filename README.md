@@ -210,7 +210,7 @@ TLS handshake or the connection failed.
 | `F1` or `1` | Running queries |
 | `F2` or `2` | Queries waiting on a lock |
 | `F3` or `3` | Queries that block others |
-| `F4` or `4` | Vacuums in progress, manual and autovacuum |
+| `F4` or `4` | Vacuum: tables past a freeze limit, the multixact member space, and vacuums in progress |
 | `F5` or `5` | Server settings |
 | `↑` `↓`, `PgUp` `PgDn` | Select a query |
 | `v` or `Enter` | Open the query page |

@@ -17,6 +17,7 @@ mod function;
 mod gucs;
 mod os;
 mod settings;
+mod wraparound;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::{self, IsTerminal, Write};
@@ -455,6 +456,8 @@ struct App {
     vacuums: Vec<Vacuum>,
     /// The server's settings. Read when the settings view opens.
     gucs: gucs::GucView,
+    /// Read only in the vacuum view, every `wraparound::EVERY`.
+    wraparound: wraparound::Wraparound,
     /// Local `/proc` metrics, present only when the server runs on this host.
     os: Option<OsState>,
     /// The selected row of the list, and where the list is scrolled.
@@ -665,6 +668,7 @@ impl App {
             blocks: HashMap::new(),
             vacuums: Vec::new(),
             gucs: gucs::GucView::default(),
+            wraparound: wraparound::Wraparound::default(),
             os: local.then(OsState::new),
             selected: 0,
             list,
@@ -876,6 +880,13 @@ impl App {
         } else {
             Vec::new()
         };
+        if self.view == View::Vacuum {
+            if self.wraparound.due() {
+                self.wraparound
+                    .read(client, self.server.version_num, &self.server.database);
+            }
+            self.wraparound.observe(&self.vacuums);
+        }
         if let Some(os) = &mut self.os {
             // Autovacuum workers are not client backends, so they are not
             // in the backend list.
@@ -1731,9 +1742,170 @@ impl App {
         (layout.head(t, &spec), page)
     }
 
+    /// The member space as the head, then what is past a freeze limit and
+    /// the vacuums in progress. Only the vacuums can be selected.
+    fn vacuum_page(&self, width: usize) -> (Line<'static>, Page) {
+        let mut page = Page::default();
+        if self.wraparound.read_time.is_some() {
+            self.behind_rows(&mut page, width);
+            page.blank();
+        }
+        self.vacuum_rows(&mut page, width);
+        (self.members_line(), page)
+    }
+
+    /// How full the multixact member space is, and the database with the
+    /// oldest multixact. At 50% autovacuum freezes more eagerly; at 100%
+    /// writes that need a multixact fail.
+    fn members_line(&self) -> Line<'static> {
+        let t = &self.theme;
+        let state = &self.wraparound;
+        let mut spans = vec![Span::styled("Members   ", t.muted())];
+        match &state.members {
+            None | Some(wraparound::Members::Unknown) => {
+                spans.push(Span::styled("—", t.muted()));
+            }
+            Some(wraparound::Members::NeedsSuperuser) => spans.push(Span::styled(
+                "— listing pg_multixact/members needs superuser",
+                t.muted(),
+            )),
+            Some(wraparound::Members::NoLimit) => {
+                spans.push(Span::styled("no limit from PostgreSQL 19", t.muted()))
+            }
+            Some(wraparound::Members::Used { fraction }) => {
+                spans.extend([
+                    Span::styled(format!("{:.1}% used", fraction * 100.0), t.strong()),
+                    Span::styled(
+                        " · autovacuum aggressive from 50% · writes stop at 100%",
+                        t.muted(),
+                    ),
+                ]);
+            }
+        }
+        if let Some(database) = &state.oldest {
+            spans.extend([
+                Span::styled(" · oldest multixact in ", t.muted()),
+                Span::styled(database.clone(), t.strong()),
+            ]);
+        }
+        Line::from(spans)
+    }
+
+    /// The tables, or databases, past a freeze limit, worst first. Tries
+    /// counts the autovacuum workers seen on the table since `top` opened
+    /// the view, Finished those that ended well: a worker that fails never
+    /// moves `autovacuum_count`.
+    fn behind_rows(&self, page: &mut Page, width: usize) {
+        const SHOWN: usize = 10;
+        let t = &self.theme;
+        let state = &self.wraparound;
+        let meta = format!(
+            "{} · read {}, every {} s",
+            state.behind.len(),
+            state.read_time.as_deref().unwrap_or_default(),
+            wraparound::EVERY.as_secs()
+        );
+        page.section_meta(t, width, "Past a freeze limit", &meta);
+        if let Some(error) = &state.error {
+            page.line(Line::styled(format!("  Not read: {error}."), t.muted()));
+            return;
+        }
+        // Without mxid_age only the xid age can be compared with a limit.
+        let mxid = wraparound::has_mxid_age(self.server.version_num);
+        if !mxid {
+            page.line(Line::styled(
+                "  Multixact age not available before 9.5, so only the xid age counts.",
+                t.muted(),
+            ));
+        }
+        if state.behind.is_empty() {
+            page.line(Line::styled(
+                if mxid {
+                    "  No table is past autovacuum_freeze_max_age or \
+                    autovacuum_multixact_freeze_max_age."
+                } else {
+                    "  No table is past autovacuum_freeze_max_age."
+                },
+                t.muted(),
+            ));
+            return;
+        }
+        let spec = [
+            Column::text("Database", 16, 4),
+            Column::text("Table", 32, 8),
+            Column::number("Over limit", 10, 9),
+            Column::number("Last autovacuum", 15, 8),
+            Column::number("Tries seen", 10, 5),
+            Column::number("Finished", 8, 5),
+        ];
+        let layout = Layout::new(width, &spec);
+        page.line(layout.head_titled(t, &spec, "Running now"));
+        let right =
+            |text: String, width: usize| vec![Span::styled(format!("{text:>width$}"), t.text())];
+        for row in state.behind.iter().take(SHOWN) {
+            let table = if row.table.is_empty() {
+                if row.note.is_empty() {
+                    "—".to_owned()
+                } else {
+                    format!("not read, {}", row.note)
+                }
+            } else if row.toast {
+                format!("{} (TOAST)", row.table)
+            } else {
+                row.table.clone()
+            };
+            let last = match (row.table.is_empty(), row.since_autovacuum_s) {
+                (true, _) => "—".to_owned(),
+                (false, Some(seconds)) => format!("{} ago", wraparound::format_ago(seconds)),
+                (false, None) => "never".to_owned(),
+            };
+            let finished = state
+                .finished(row)
+                .map_or_else(|| "—".to_owned(), |count| count.to_string());
+            let running = self
+                .vacuums
+                .iter()
+                .find(|vacuum| {
+                    vacuum.backend.database == row.database
+                        && (row.table.is_empty()
+                            || vacuum.table == row.relation
+                            || autovacuum_table(&vacuum.backend.query).as_deref()
+                                == Some(row.relation.as_str()))
+                })
+                .map_or_else(
+                    || "—".to_owned(),
+                    |vacuum| {
+                        let time = vacuum
+                            .backend
+                            .duration_s
+                            .map(format_duration)
+                            .unwrap_or_default();
+                        format!("{} {time}", vacuum.kind)
+                    },
+                );
+            let cells = vec![
+                vec![Span::styled(row.database.clone(), t.text())],
+                vec![Span::styled(table, t.text())],
+                right(row.over(), layout.width(2)),
+                right(last, layout.width(3)),
+                right(state.tries(row).to_string(), layout.width(4)),
+                right(finished, layout.width(5)),
+            ];
+            for line in layout.lines(t, &spec, cells, &running, width) {
+                page.line(line);
+            }
+        }
+        if state.behind.len() > SHOWN {
+            page.line(Line::styled(
+                format!("  and {} more", state.behind.len() - SHOWN),
+                t.muted(),
+            ));
+        }
+    }
+
     /// The vacuums in progress. Before 9.6 there is no phase or progress,
     /// so those columns go and the query gets their room.
-    fn vacuum_page(&self, width: usize) -> (Line<'static>, Page) {
+    fn vacuum_rows(&self, page: &mut Page, width: usize) {
         let t = &self.theme;
         let progress = has_vacuum_progress(self.server.version_num);
         let mut spec = vec![Column::text("PID", 7, 7)];
@@ -1767,8 +1939,12 @@ impl App {
             Column::text("Waiting", 22, 4).on_second_row(),
         ]);
         let layout = Layout::new(width, &spec);
-
-        let mut page = Page::default();
+        page.section(t, width, "Running now", Some(self.vacuums.len()));
+        if self.vacuums.is_empty() {
+            page.line(Line::styled("  No vacuum running.", t.muted()));
+            return;
+        }
+        page.line(layout.head(t, &spec));
         for vacuum in &self.vacuums {
             let backend = &vacuum.backend;
             let right = |text: String, width: usize| {
@@ -1823,7 +1999,6 @@ impl App {
             cells.push(vec![Span::styled(backend.wait_label(), t.text())]);
             page.item(layout.lines(t, &spec, cells, &backend.query, width));
         }
-        (layout.head(t, &spec), page)
     }
 
     /// The selected query, formatted, as a section under the list.
@@ -2362,6 +2537,11 @@ impl Layout {
 
     /// The column titles in `subtle-foreground`.
     fn head(&self, t: &Theme, spec: &[Column]) -> Line<'static> {
+        self.head_titled(t, spec, "Query")
+    }
+
+    /// `head` with `last` as the title of the column that takes the rest.
+    fn head_titled(&self, t: &Theme, spec: &[Column], last: &str) -> Line<'static> {
         let mut titles: Vec<Vec<Span<'static>>> = spec
             .iter()
             .zip(&self.widths)
@@ -2376,7 +2556,7 @@ impl Layout {
             })
             .collect();
         if !self.query_row {
-            titles.push(vec![Span::styled("Query", t.subtle())]);
+            titles.push(vec![Span::styled(last.to_owned(), t.subtle())]);
         }
         self.columns.row(titles)
     }
@@ -2615,7 +2795,7 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
             ("F1 1", "Running queries"),
             ("F2 2", "Waiting queries"),
             ("F3 3", "Blocking queries"),
-            ("F4 4", "Vacuums, manual and autovacuum"),
+            ("F4 4", "Vacuums and freeze limits"),
             ("F5 5", "Server settings"),
         ],
     ),
@@ -3332,7 +3512,7 @@ mod tests {
 
     #[test]
     fn an_empty_list_says_so_in_the_middle() {
-        let mut app = app(View::Vacuum);
+        let mut app = app(View::Blocking);
         let rows = rows(&buffer(&mut app, 80, 24));
         let row = rows
             .iter()
@@ -3713,6 +3893,62 @@ mod tests {
         assert!(screen.contains("Quit from anywhere"), "{screen}");
         assert!(screen.contains("Waits for a restart"), "{screen}");
         assert!(screen.contains("╰─ any key close"), "{screen}");
+    }
+
+    #[test]
+    fn vacuum_view_lists_tables_past_a_freeze_limit() {
+        let mut app = app(View::Vacuum);
+        app.vacuums = vec![Vacuum {
+            backend: Backend {
+                pid: "900".to_owned(),
+                database: "app".to_owned(),
+                query: "autovacuum: VACUUM pg_toast.pg_toast_16384 (to prevent wraparound)"
+                    .to_owned(),
+                duration_s: Some(4.0),
+                ..Backend::default()
+            },
+            table: "pg_toast.pg_toast_16384".to_owned(),
+            kind: "wraparound".to_owned(),
+            ..Vacuum::default()
+        }];
+        app.wraparound.members = Some(wraparound::Members::Used { fraction: 0.499 });
+        app.wraparound.oldest = Some("template0".to_owned());
+        app.wraparound.read_time = Some("14:06:00".to_owned());
+        app.wraparound.behind = vec![
+            wraparound::Behind {
+                database: "app".to_owned(),
+                table: "public.documents".to_owned(),
+                relation: "pg_toast.pg_toast_16384".to_owned(),
+                toast: true,
+                xid_percent: Some(112.0),
+                mxid_percent: Some(40.0),
+                since_autovacuum_s: Some(20.0 * 86_400.0),
+                ..wraparound::Behind::default()
+            },
+            wraparound::Behind {
+                database: "template0".to_owned(),
+                note: "no connections".to_owned(),
+                mxid_percent: Some(101.0),
+                ..wraparound::Behind::default()
+            },
+        ];
+        app.wraparound.observe(&app.vacuums.clone());
+        let screen = rows(&buffer(&mut app, 160, 24)).join("\n");
+        assert!(screen.contains("49.9% used"), "{screen}");
+        assert!(screen.contains("oldest multixact in template0"), "{screen}");
+        assert!(screen.contains("Past a freeze limit"), "{screen}");
+        assert!(screen.contains("public.documents (TOAST)"), "{screen}");
+        assert!(screen.contains("xid 112%"), "{screen}");
+        assert!(screen.contains("20 d ago"), "{screen}");
+        assert!(screen.contains("wraparound 4.000"), "{screen}");
+        assert!(screen.contains("not read, no connections"), "{screen}");
+        assert!(screen.contains("Running now"), "{screen}");
+        assert!(
+            screen.contains("Multixact age not available before 9.5"),
+            "{screen}"
+        );
+        // Only the vacuum in progress can be selected.
+        assert_eq!(app.visible().len(), 1);
     }
 
     #[test]
