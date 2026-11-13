@@ -1325,7 +1325,7 @@ dependencies = [
 [[package]]
 name = "kiso-core"
 version = "0.1.0"
-source = "git+https://github.com/momoi-labs/blueprint?rev=49350a4f960501f3e4b2c86936586a295c9b7964#49350a4f960501f3e4b2c86936586a295c9b7964"
+source = "git+https://github.com/momoi-labs/blueprint?rev=427a255606d52518c97295346dee9921001b1703#427a255606d52518c97295346dee9921001b1703"
 dependencies = [
  "serde",
  "ts-rs",
@@ -1333,8 +1333,8 @@ dependencies = [
 
 [[package]]
 name = "kiso-tokens"
-version = "0.2.0"
-source = "git+https://github.com/momoi-labs/blueprint?rev=49350a4f960501f3e4b2c86936586a295c9b7964#49350a4f960501f3e4b2c86936586a295c9b7964"
+version = "0.5.0"
+source = "git+https://github.com/momoi-labs/blueprint?rev=427a255606d52518c97295346dee9921001b1703#427a255606d52518c97295346dee9921001b1703"
 
 [[package]]
 name = "lab"
@@ -3136,7 +3136,7 @@ dependencies = [
 [[package]]
 name = "tui-kiso"
 version = "0.1.0"
-source = "git+https://github.com/momoi-labs/blueprint?rev=49350a4f960501f3e4b2c86936586a295c9b7964#49350a4f960501f3e4b2c86936586a295c9b7964"
+source = "git+https://github.com/momoi-labs/blueprint?rev=427a255606d52518c97295346dee9921001b1703#427a255606d52518c97295346dee9921001b1703"
 dependencies = [
  "kiso-core",
  "kiso-tokens",

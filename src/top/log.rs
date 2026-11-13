@@ -23,7 +23,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
-use tui_kiso::{fit, Columns, Found, Page, Scroll, Search, Theme};
+use tui_kiso::{fit, Card, Columns, Found, Page, Scroll, Search, Theme};
 
 use super::{
     code_block, fact_lines, fit_page, format_bytes, local_time, put, single_line,
@@ -657,31 +657,32 @@ logging_collector on and csvlog in log_destination."
         let position = self.position(&shown);
         let summary = self.filter != Filter::All;
         self.pane_shown.set(0);
-        // The column of the rule between the lines and the summary.
-        let mut rule = None;
+        // Beside the lines, the summary is a card. The scrollbar of the
+        // lines takes the column after them, then one is free, and the
+        // card's rail takes the one before the card.
+        let mut beside = false;
         let mut list = body;
         if summary && area.width >= SIDE_MIN_WIDTH {
-            // The rule takes one column, with one free at each side.
             let widest = (body.width - 3 - LIST_MIN_WIDTH).max(PANE_MIN_WIDTH);
             let pane_width = self
                 .pane
                 .unwrap_or((body.width * 2 / 5).min(64))
                 .clamp(PANE_MIN_WIDTH, widest);
             self.pane_shown.set(pane_width);
-            list.width = body.width - pane_width - 3;
-            for y in body.y..body.bottom() {
-                buf.set_string(list.right() + 1, y, "│", t.border());
-            }
-            rule = Some(list.right() + 1);
-            let pane = Rect {
-                x: list.right() + 3,
+            list.width = body.width - pane_width - 4;
+            beside = true;
+            let card = Card::new(t);
+            let surface = Rect {
+                x: list.right() + 4,
                 width: pane_width,
                 ..body
             };
+            let pane = card.inner(surface);
             // The summary does not scroll: it shows what fits.
-            self.pane_page(t, usize::from(pane.width), usize::from(pane.height))
-                .view(t, &Scroll::default())
-                .render(pane, buf);
+            let page = self.pane_page(t, usize::from(pane.width), usize::from(pane.height));
+            card.render(surface, buf);
+            page.view(t, &Scroll::default())
+                .render(Card::new(t).inner(surface), buf);
         }
         if let (true, Some(position)) = (self.detail, position) {
             // Under the lines, and beside the summary on a wide screen. A
@@ -701,7 +702,7 @@ logging_collector on and csvlog in log_destination."
                 ..room
             };
             page.view(t, &self.detail_scroll).render(under, buf);
-        } else if summary && rule.is_none() {
+        } else if summary && !beside {
             let room = body.height / 2;
             let page = self.pane_page(t, width, usize::from(room));
             let height = (page.len() as u16).min(room);
@@ -755,10 +756,12 @@ logging_collector on and csvlog in log_destination."
             ..list
         };
         let build = |width| self.tail_page(t, &shown, width);
-        // Beside the summary, the scrollbar goes on the rule between them.
-        let (rows, (head, page)) = match rule {
-            Some(_) => (rows, build(usize::from(rows.width))),
-            None => fit_page(rows, build, |(_, page)| page.len()),
+        // Beside the summary, the lines keep their width and the scrollbar
+        // goes in the column after them.
+        let (rows, (head, page)) = if beside {
+            (rows, build(usize::from(rows.width)))
+        } else {
+            fit_page(rows, build, |(_, page)| page.len())
         };
         put(
             buf,
@@ -773,10 +776,7 @@ logging_collector on and csvlog in log_destination."
         // every draw scrolls the selection back into view.
         self.scroll.follow();
         let view = page.view(t, &self.scroll).selected(Some(position));
-        match rule {
-            Some(x) => view.on_border(x).render(rows, buf),
-            None => view.render(rows, buf),
-        }
+        view.render(rows, buf);
     }
 
     /// The column titles and the lines of the log. A wide list also has
@@ -842,7 +842,7 @@ logging_collector on and csvlog in log_destination."
         groups.sort_by(|a, b| b.1.count.cmp(&a.1.count).then_with(|| a.0.cmp(b.0)));
         let top = top_that_fits(groups.len(), height);
         let mut page = Page::default();
-        page.section_meta(
+        page.heading(
             t,
             width,
             "Errors by user, database and error",
@@ -875,7 +875,7 @@ logging_collector on and csvlog in log_destination."
         groups.sort_by(|a, b| b.1.bytes.cmp(&a.1.bytes).then_with(|| a.0.cmp(b.0)));
         let top = top_that_fits(groups.len(), height);
         let mut page = Page::default();
-        page.section_meta(
+        page.heading(
             t,
             width,
             "Temp files by statement",
@@ -912,7 +912,7 @@ logging_collector on and csvlog in log_destination."
     fn checkpoints_page(&self, t: &Theme, width: usize) -> Page {
         let checkpoints = &self.stats.checkpoints;
         let mut page = Page::default();
-        page.section_meta(
+        page.heading(
             t,
             width,
             "Checkpoints",
@@ -1196,7 +1196,7 @@ total=0.153 s; sync files=11, longest=0.001 s, average=0.000 s";
         press(&mut view, KeyCode::Char('e'));
         let screen = rows(&view, 120, 20);
         assert!(screen[1].starts_with("  3 errors since top started"));
-        assert!(screen[2].contains("│ Errors by user, database and error"));
+        assert!(screen[3].contains("      Errors by user, database and error"));
         let text = screen.join("\n");
         assert!(text.contains("3        3  14:06:32  app@shop"), "{text}");
         assert!(text.contains("unique_violation duplicate key"), "{text}");
@@ -1234,13 +1234,13 @@ total=0.153 s; sync files=11, longest=0.001 s, average=0.000 s";
         let rule = |view: &LogView, width| {
             rows(view, width, 20)[2]
                 .chars()
-                .position(|cell| cell == '│')
+                .position(|cell| cell == '▄')
         };
         // No summary beside the list, so nothing to resize.
         press(&mut view, KeyCode::Left);
         assert_eq!(view.pane, None);
         press(&mut view, KeyCode::Char('e'));
-        let start = rule(&view, 120).expect("the rule");
+        let start = rule(&view, 120).expect("the card");
         assert!(view.hints().contains(&("←→", "resize")));
         press(&mut view, KeyCode::Left);
         assert_eq!(rule(&view, 120), Some(start - usize::from(PANE_STEP)));
@@ -1249,20 +1249,17 @@ total=0.153 s; sync files=11, longest=0.001 s, average=0.000 s";
             press(&mut view, KeyCode::Left);
             rows(&view, 120, 20);
         }
-        assert_eq!(rule(&view, 120), Some(usize::from(LIST_MIN_WIDTH) + 1));
+        assert_eq!(rule(&view, 120), Some(usize::from(LIST_MIN_WIDTH) + 3));
         press(&mut view, KeyCode::Right);
         assert_eq!(
             rule(&view, 120),
-            Some(usize::from(LIST_MIN_WIDTH + PANE_STEP) + 1)
+            Some(usize::from(LIST_MIN_WIDTH + PANE_STEP) + 3)
         );
         for _ in 0..20 {
             press(&mut view, KeyCode::Right);
             rows(&view, 120, 20);
         }
-        assert_eq!(
-            rule(&view, 120),
-            Some(120 - usize::from(PANE_MIN_WIDTH) - 2)
-        );
+        assert_eq!(rule(&view, 120), Some(120 - usize::from(PANE_MIN_WIDTH)));
         // Under the list there is no rule to move.
         rows(&view, 80, 20);
         assert!(!view.hints().contains(&("←→", "resize")));

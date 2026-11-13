@@ -71,5 +71,9 @@ if (!screen) throw new Error(`no top screen named ${name}`);
   pre :global(i.lo) { background: var(--c) 0 100% / 100% 50% no-repeat; }
   pre :global(i.up) { background: var(--c) 0 0 / 100% 50% no-repeat; }
   pre :global(i.le) { background: var(--c) 0 0 / 50% 100% no-repeat; }
+  /* An inline background covers only the glyphs' height, which leaves a
+     gap between rows. As an inline block, a span with a background is as
+     tall as its row, so a fill on several rows has no seams. */
+  pre :global(span[style*="background"]) { display: inline-block; vertical-align: top; }
   .tui[data-rows] pre { max-height: calc(var(--rows) * 1.3em + 0.8em); }
 </style>
