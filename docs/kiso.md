@@ -91,7 +91,7 @@ file has a bug.
 
 `pg-probe top` and the capture progress screen are terminal views. They draw
 with `tui-kiso` and take their colors from `kiso-tokens`, both from blueprint
-at the rev pinned in `Cargo.toml` (`49350a4`). Move both revs together. The
+at the rev pinned in `Cargo.toml` (`427a255`). Move both revs together. The
 accent is gold: `top::theme()` is `Theme::new(kiso_tokens::GOLD_DARK)`, which
 sends 24-bit color only when `COLORTERM` is `truecolor` or `24bit`, and the
 nearest xterm-256 color otherwise.
@@ -104,6 +104,13 @@ end: on quit, when the capture is done or stopped, after an error, and from
 the panic hook. Off a terminal, or with `NO_COLOR`, neither view sends OSC.
 After the capture ends, the block left in the scrollback keeps only its text
 colors, on the terminal's own background.
+
+`top` draws with the look of the Kiso site: `Canvas::Dots` under the page,
+translucent cards with square ends and no border (`Border::None`). The
+accent already marks the selection, the active tab, the switch that is on
+and the scrollbar, so a rail on every card would compete with them. The
+`AppShell` margin is one column, since `top` is dense and a terminal is
+small.
 
 The product rules above apply here too. There are no health colors: states,
 durations and waits stay plain text. The session counts and the connection
@@ -150,8 +157,9 @@ each with its column title.
 - The brand in the header of `top` and the capture is two blocks: the name
   in bold `primary-foreground` on `primary`, then the version on
   `secondary`, where the Header contract puts both on `primary`. The version
-  reads as data, apart from the name. Both views start on the first
-  column, so the brand pads only its end.
+  reads as data, apart from the name. In `top` the name pads both ends,
+  as the version does. The capture block starts on the first column, so its
+  brand pads only its end.
 - The header shows the local time of the last refresh, which changes on
   each one, so `top` does not redraw between refreshes. Paused, it shows
   `‖ paused` and the time the data is from.

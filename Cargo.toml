@@ -29,8 +29,8 @@ webpki-roots = "1.0.6"
 rmcp = { version = "3.7.0", default-features = false, features = ["macros", "server", "transport-io"] }
 ratatui = "0.30.2"
 sqlformat = "0.5.0"
-tui-kiso = { git = "https://github.com/momoi-labs/blueprint", rev = "49350a4f960501f3e4b2c86936586a295c9b7964" }
-kiso-tokens = { git = "https://github.com/momoi-labs/blueprint", rev = "49350a4f960501f3e4b2c86936586a295c9b7964" }
+tui-kiso = { git = "https://github.com/momoi-labs/blueprint", rev = "427a255606d52518c97295346dee9921001b1703" }
+kiso-tokens = { git = "https://github.com/momoi-labs/blueprint", rev = "427a255606d52518c97295346dee9921001b1703" }
 
 [dev-dependencies]
 assert_cmd = "2.1.2"

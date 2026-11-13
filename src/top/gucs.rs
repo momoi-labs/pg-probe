@@ -11,7 +11,7 @@ use ratatui::layout::Rect;
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Widget;
-use tui_kiso::{fit, Columns, Found, Page, Scroll, Search, Theme};
+use tui_kiso::{fit, Card, Columns, Found, Page, Scroll, Search, Theme};
 
 use super::{fact_lines, fit_page, put, split_cells, text_of, PAGE, SOURCE};
 use crate::postgres::{AdapterError, ConnectedClient};
@@ -417,28 +417,34 @@ impl GucView {
             height: area.height.saturating_sub(1),
             ..area
         };
-        // The column of the rule between the list and the details.
-        let mut rule = None;
+        // Beside the list, the details are a card. The scrollbar of the list
+        // takes the column after it, then one is free, and the card's rail
+        // takes the one before the card.
+        let mut beside = false;
         let (list, pane) = match shown.get(selected) {
             None => (body, None),
             Some(guc) if area.width >= SIDE_MIN_WIDTH => {
-                // The rule takes one column, with one free at each side.
                 let width = (body.width * 2 / 5).min(56);
                 let list = Rect {
-                    width: body.width - width - 3,
+                    width: body.width - width - 4,
                     ..body
                 };
-                for y in area.y..area.bottom() {
-                    buf.set_string(list.right() + 1, y, "│", t.border());
-                }
-                rule = Some(list.right() + 1);
-                let pane = Rect {
-                    x: list.right() + 3,
+                beside = true;
+                let card = Card::new(t);
+                let surface = Rect {
+                    x: list.right() + 4,
                     width,
                     ..area
                 };
-                let lines = self.details(t, guc, usize::from(width), pending, true);
-                (list, Some((pane, lines)))
+                let lines = self.details(
+                    t,
+                    guc,
+                    usize::from(card.inner(surface).width),
+                    pending,
+                    true,
+                );
+                card.render(surface, buf);
+                (list, Some((Card::new(t).inner(surface), lines)))
             }
             Some(guc) => {
                 let mut lines = vec![Line::default()];
@@ -468,10 +474,12 @@ impl GucView {
             }
         }
         let build = |width| self.page(t, gucs, &shown, width, pending);
-        // Beside the details, the scrollbar goes on the rule between them.
-        let (rows, (head, page)) = match rule {
-            Some(_) => (list, build(usize::from(list.width))),
-            None => fit_page(list, build, |(_, page)| page.len()),
+        // Beside the details, the list keeps its width and the scrollbar
+        // goes in the column after it.
+        let (rows, (head, page)) = if beside {
+            (list, build(usize::from(list.width)))
+        } else {
+            fit_page(list, build, |(_, page)| page.len())
         };
         put(
             buf,
@@ -488,10 +496,7 @@ impl GucView {
         let view = page
             .view(t, &self.scroll)
             .selected((!shown.is_empty()).then_some(selected));
-        match rule {
-            Some(x) => view.on_border(x).render(rows, buf),
-            None => view.render(rows, buf),
-        }
+        view.render(rows, buf);
     }
 
     /// The column titles and the settings, each category a section. A
@@ -741,7 +746,9 @@ mod tests {
                 "Client Connection Defaults / Locale and Formatting of Every Session".to_owned();
         }
         let rows = screen(&long, 100, 12, true);
-        let list = |row: &str| row.split('│').next().unwrap().to_owned();
+        // The list ends where the top half row of the card starts.
+        let edge = rows[0].chars().position(|cell| cell == '▄').unwrap();
+        let list = |row: &str| row.chars().take(edge).collect::<String>();
         let head = list(&rows[0]);
         assert!(
             head.contains("Default") && !head.contains("Change"),
@@ -905,19 +912,16 @@ mod tests {
     fn a_wide_screen_has_the_details_beside_the_list() {
         let mut view = sample();
         press(&mut view, KeyCode::Down);
-        let rows = screen(&view, 120, 12, true);
+        let rows = screen(&view, 120, 14, true);
         let text = rows.join("\n");
         assert!(
-            rows[0].contains("Name") && rows[0].contains("│ shared_buffers"),
+            rows[0].contains("Name") && rows[1].contains(" 1      shared_buffers"),
             "{text}"
         );
-        assert!(
-            rows[1].starts_with("Connections ─") && rows[1].contains(" 1 │"),
-            "{text}"
-        );
+        assert!(rows[1].starts_with("Connections ─"), "{text}");
         assert!(rows[3].starts_with("    port "), "{text}");
         assert!(
-            rows[5].starts_with("Memory ─") && rows[5].contains(" 2 │"),
+            rows[5].starts_with("Memory ─") && rows[5].contains(" 2      Value"),
             "{text}"
         );
         assert!(rows[7].starts_with("▌ ! shared_buffers "), "{text}");
@@ -932,12 +936,9 @@ mod tests {
             rows[0].contains("Value") && rows[0].contains("Default"),
             "{text}"
         );
-        let cells: Vec<&str> = rows[8]
-            .split('│')
-            .next()
-            .unwrap()
-            .split_whitespace()
-            .collect();
+        let edge = rows[0].chars().position(|cell| cell == '▄').unwrap();
+        let list: String = rows[8].chars().take(edge).collect();
+        let cells: Vec<&str> = list.split_whitespace().collect();
         assert_eq!(cells, ["●", "work_mem", "65536", "4096"], "{text}");
         assert!(text.contains("Default  128MB  (16384 × 8kB)"), "{text}");
         assert!(text.contains("Source   configuration file"), "{text}");
@@ -945,7 +946,7 @@ mod tests {
         assert!(text.contains("Pending  waits for a restart"), "{text}");
         // A file set it, but the role may not see which.
         press(&mut view, KeyCode::Down);
-        let text = screen(&view, 120, 14, true).join("\n");
+        let text = screen(&view, 120, 16, true).join("\n");
         assert!(text.contains("Change   16× more"), "{text}");
         assert!(text.contains("File     not visible to this role"), "{text}");
     }
@@ -955,7 +956,7 @@ mod tests {
         let rows = screen(&sample(), 80, 19, true);
         let text = rows.join("\n");
         assert!(rows.iter().all(|row| row.chars().count() == 80), "{text}");
-        assert!(!rows[0].contains('│'), "{text}");
+        assert!(!rows[0].contains('▄'), "{text}");
         assert!(rows[3].starts_with("▌   port "), "{text}");
         assert!(text.contains("\nport "), "{text}");
         assert!(text.contains("\nPending  no"), "{text}");
@@ -963,13 +964,13 @@ mod tests {
 
     #[test]
     fn a_server_without_pending_restart_says_so_and_has_no_mark() {
-        let rows = screen(&sample(), 120, 12, false);
+        let rows = screen(&sample(), 120, 14, false);
         let text = rows.join("\n");
         assert!(text.contains("  ● shared_buffers "), "{text}");
         assert!(!text.contains("! shared_buffers"), "{text}");
         let mut view = sample();
         press(&mut view, KeyCode::Down);
-        let text = screen(&view, 120, 12, false).join("\n");
+        let text = screen(&view, 120, 14, false).join("\n");
         assert!(
             text.contains("Pending  not reported before PostgreSQL 9.5"),
             "{text}"
@@ -982,7 +983,7 @@ mod tests {
         press(&mut view, KeyCode::Char('d'));
         let text = screen(&view, 120, 12, true).join("\n");
         assert!(!text.contains("Connections"), "{text}");
-        assert!(text.contains(" 2 of 2 │"), "{text}");
+        assert!(text.contains(" 2 of 2 "), "{text}");
         press(&mut view, KeyCode::Char('/'));
         press(&mut view, KeyCode::Char('x'));
         let text = screen(&view, 120, 12, true).join("\n");

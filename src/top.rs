@@ -37,8 +37,8 @@ use serde::{Deserialize, Serialize};
 use sqlformat::{Dialect, FormatOptions, QueryParams};
 use thiserror::Error;
 use tui_kiso::{
-    fit, set_background, set_foreground, Columns, KeyHints, Mark, Modal, Page, Scroll, Tabs, Theme,
-    Title,
+    fit, set_background, set_foreground, AppShell, Backdrop, Border, Canvas, Card, Columns,
+    KeyHints, Look, Mark, Modal, Page, PanelFill, Scroll, Tabs, Theme, Title,
 };
 
 use settings::Settings;
@@ -605,8 +605,15 @@ fn connect(params: &ConnectionParams) -> Result<ConnectedClient, TopError> {
 /// The Kiso theme of the terminal views: the dark theme with the gold
 /// accent the console uses. It sends 24-bit color only when `COLORTERM`
 /// says the terminal takes it, and the nearest xterm-256 colors otherwise.
+/// The look is a translucent card with no border and square ends: the
+/// accent marks only what has a state, such as the selection.
 pub fn theme() -> Theme {
-    Theme::new(kiso_tokens::GOLD_DARK)
+    Theme::new(kiso_tokens::GOLD_DARK).with_look(Look {
+        fill: PanelFill::Translucent,
+        border: Border::None,
+        round: false,
+        ..Look::DEFAULT
+    })
 }
 
 /// Sets the terminal's background and text color to the theme's with OSC 11
@@ -1212,16 +1219,18 @@ impl App {
     fn draw(&mut self, frame: &mut Frame) {
         let screen = frame.area();
         let buf = frame.buffer_mut();
-        // Every row counts: the page starts on the first row and the keys
-        // take the last one, across the full width. Unused cells stay
-        // unpainted, so the terminal's background, set with OSC 11 in `run`,
-        // shows through.
+        // The dots go under the page. Cells stay unpainted, so the
+        // terminal's background, set with OSC 11 in `run`, shows through.
+        Backdrop::new(&self.theme, Canvas::Dots).render(screen, buf);
+        // The page starts on the first row and the keys take the last one,
+        // inside side margins of one column. The page is full width, and its
+        // scrollbar takes the last column of the body when it shows.
+        let foot = AppShell::new(screen).margin(1).areas().footer;
         let body = Rect {
+            y: screen.y,
             height: screen.height.saturating_sub(1),
-            ..screen
+            ..foot
         };
-        let foot = Rect::new(body.x, screen.bottom().saturating_sub(1), body.width, 1)
-            .intersection(screen);
         match &self.popup {
             Some(popup) => self.draw_details(buf, body, popup),
             None => self.draw_list(buf, body),
@@ -1284,9 +1293,8 @@ impl App {
             Line::default()
         };
         let mut spans = vec![
-            // The badge starts on the first column, so it pads only its end.
-            // The version takes the secondary fill, after the brand.
-            Span::styled("pg-probe ", t.brand()),
+            // The badge pads both ends, as the version does after it.
+            Span::styled(" pg-probe ", t.brand()),
             Span::styled(
                 concat!(" ", env!("CARGO_PKG_VERSION"), " "),
                 t.fill(t.tokens().secondary_foreground, t.tokens().secondary),
@@ -1519,7 +1527,7 @@ impl App {
     /// The views, with the session count of each one this refresh read.
     /// The blocking and vacuum views send their own query, so they have a
     /// count only while open.
-    fn tabs_line(&self, width: usize) -> Line<'static> {
+    fn tabs(&self) -> Tabs<'_> {
         let labels = View::ALL.map(|view| {
             let count = if view == View::Settings {
                 self.gucs.count()
@@ -1550,7 +1558,7 @@ impl App {
             .iter()
             .position(|view| *view == self.view)
             .unwrap_or(0);
-        Tabs::new(&self.theme, labels, current).line(width)
+        Tabs::new(&self.theme, labels, current)
     }
 
     /// The header, the views, the column titles, then the rows, with the
@@ -1580,29 +1588,58 @@ impl App {
                 1,
                 Line::from(fit(self.history_line().spans, width)),
             );
-            row = 2;
+            // One free row before the views.
+            row = 3;
         } else if area.height > 0 {
             self.server_row(buf, area, Vec::new(), true);
+            // The sessions and the host are one card under the server.
+            let facts = if cfg!(target_os = "linux") { 2 } else { 1 };
+            let card = Card::new(t);
+            let surface = Rect {
+                y: area.y.saturating_add(1).min(area.bottom()),
+                height: facts + 2,
+                ..area
+            }
+            .intersection(area);
+            let inner = card.inner(surface);
+            card.render(surface, buf);
+            let width = usize::from(inner.width);
             let sessions = self.sessions_line(width);
             // The meter takes what the counts leave of the row, if enough.
             let room = width.saturating_sub(sessions.width() + 3).min(30);
-            put(buf, area, 1, Line::from(fit(sessions.spans, width)));
+            put(buf, inner, 0, Line::from(fit(sessions.spans, width)));
             if room >= 10 {
-                let x = area.right() - room as u16;
-                put(buf, Rect { x, ..area }, 1, self.meter(room));
+                let x = inner.right() - room as u16;
+                put(buf, Rect { x, ..inner }, 0, self.meter(room));
             }
-            row = 2;
             if cfg!(target_os = "linux") {
                 put(
                     buf,
-                    area,
-                    2,
+                    inner,
+                    1,
                     Line::from(fit(self.host_line(width).spans, width)),
                 );
-                row = 3;
             }
+            row = facts + 3;
         }
-        put(buf, area, row, self.tabs_line(width));
+        // The views take two rows: the labels, then the rule.
+        let tabs = Rect {
+            y: area.y.saturating_add(row).min(area.bottom()),
+            height: 2,
+            ..area
+        }
+        .intersection(area);
+        // The whole screen rows, so no dot of the pattern touches a label.
+        Backdrop::clear(
+            Rect {
+                x: buf.area.x,
+                width: buf.area.width,
+                ..tabs
+            },
+            buf,
+        );
+        self.tabs().render(tabs, buf);
+        row += 1;
         if self.view == View::Settings {
             let top = area.y.saturating_add(row + 1).min(area.bottom());
             let rows = Rect {
@@ -2386,6 +2423,15 @@ impl App {
 
     /// The keys of the top layer, in the order the help screen gives them.
     fn draw_hints(&self, buf: &mut Buffer, area: Rect) {
+        // The whole screen row, so no dot of the pattern touches a key.
+        Backdrop::clear(
+            Rect {
+                x: buf.area.x,
+                width: buf.area.width,
+                ..area
+            },
+            buf,
+        );
         let pause = if self.paused {
             (" space", "paused ")
         } else {
@@ -2656,6 +2702,18 @@ impl Layout {
 fn put(buf: &mut Buffer, area: Rect, dy: u16, line: Line<'_>) {
     let area = area.intersection(buf.area);
     if dy < area.height {
+        // With the cell on each side, so no dot of the pattern touches the
+        // text. A line sits in the margin or in the gap before a card, never
+        // against its fill.
+        Backdrop::clear(
+            Rect {
+                x: area.x.saturating_sub(1),
+                y: area.y + dy,
+                width: area.width + 2,
+                height: 1,
+            },
+            buf,
+        );
         buf.set_line(area.x, area.y + dy, &line, area.width);
     }
 }
@@ -2871,7 +2929,7 @@ const HELP: &[(&str, &[(&str, &str)])] = &[
         "Query details",
         &[
             ("f", "Functions it calls"),
-            ("e", "Estimated plan (EXPLAIN)"),
+            ("e", "Plan from EXPLAIN"),
             ("↑ ↓ PgUp PgDn", "Scroll"),
             ("v q Esc Enter", "Back to the list"),
         ],
@@ -3409,7 +3467,7 @@ mod tests {
     }
 
     fn screen(app: &mut App) -> String {
-        let mut terminal = Terminal::new(TestBackend::new(160, 13)).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(160, 16)).unwrap();
         terminal.draw(|frame| app.draw(frame)).unwrap();
         let buffer = terminal.backend().buffer();
         buffer
@@ -3509,31 +3567,34 @@ mod tests {
             let rows = rows(&buffer(app, 80, 24));
             assert_eq!(rows.len(), 24, "{name}");
             assert!(rows.iter().all(|row| row.chars().count() == 80), "{name}");
-            // The page and the keys start on the first column.
+            // The page and the keys start after the shell's one column.
+            // The brand badge pads its start, so its first cell is blank.
             if name != "help" {
-                assert!(rows[2].starts_with(|c| c != ' '), "{name}: {:?}", rows[2]);
-                assert!(rows[23].starts_with(|c| c != ' '), "{name}: {:?}", rows[23]);
+                let brand: String = rows[0].chars().skip(1).take(10).collect();
+                assert_eq!(brand, " pg-probe ", "{name}: {:?}", rows[0]);
+                let start: Vec<char> = rows[23].chars().take(2).collect();
+                assert!(start[1] != ' ', "{name}: {:?}", rows[23]);
             }
-            // The refresh ends on the last column.
+            // The refresh ends one column before the edge.
             if name == "list" {
-                assert!(rows[0].ends_with("every 2 s"), "{name}: {:?}", rows[0]);
+                assert!(rows[0].ends_with("every 2 s "), "{name}: {:?}", rows[0]);
             }
-            // The scrollbar takes the last column.
+            // The scrollbar takes the last column of the page.
             if name == "details" {
-                assert!(rows[4].ends_with('│'), "{name}: {:?}", rows[4]);
+                assert!(rows[4].ends_with("│ "), "{name}: {:?}", rows[4]);
             }
             if name == "help" {
                 let screen = rows.join("\n");
                 assert!(screen.contains("Quit from anywhere"), "{screen}");
                 assert!(screen.contains("Back to the list"), "{screen}");
-                assert!(screen.contains("╰─ any key close"), "{screen}");
+                assert!(screen.contains("any key close"), "{screen}");
             }
         }
         // The query does not fit after the host's figures, so it moves under
         // them, with the wait and its title.
         let screen = rows(&buffer(&mut list, 80, 24)).join("\n");
-        assert!(screen.contains("\n▌   SELECT column_name,"), "{screen}");
-        assert!(screen.contains("\n    Waiting Lock · UPDATE t"), "{screen}");
+        assert!(screen.contains(" ▌   SELECT column_name,"), "{screen}");
+        assert!(screen.contains("     Waiting Lock · UPDATE t"), "{screen}");
     }
 
     #[test]
@@ -3551,18 +3612,18 @@ mod tests {
         });
         let session = |rows: &[String]| {
             rows.iter()
-                .find(|row| row.starts_with("Session "))
+                .find(|row| row.contains("Session ─"))
                 .cloned()
                 .expect("the session section")
         };
         // The page fits: its rule ends on the last column.
         let tall = rows(&buffer(&mut app, 80, 60));
-        assert!(session(&tall).ends_with('─'), "{tall:#?}");
+        assert!(session(&tall).ends_with("─ "), "{tall:#?}");
         // The page scrolls: it ends two columns before the edge, and the
         // scrollbar takes the last one.
         let rows = rows(&buffer(&mut app, 80, 24));
         let row = session(&rows);
-        assert!(row.ends_with("─ │"), "{row:?}");
+        assert!(row.ends_with("─ │ "), "{row:?}");
     }
 
     #[test]
@@ -3570,10 +3631,10 @@ mod tests {
         let mut app = app(View::Running);
         app.refreshed = Some("12:03:04".to_owned());
         let header = rows(&buffer(&mut app, 120, 24)).remove(0);
-        assert!(header.ends_with("12:03:04 · every 2 s"), "{header:?}");
+        assert!(header.ends_with("12:03:04 · every 2 s "), "{header:?}");
         app.paused = true;
         let header = rows(&buffer(&mut app, 120, 24)).remove(0);
-        assert!(header.ends_with("‖ paused · 12:03:04"), "{header:?}");
+        assert!(header.ends_with("‖ paused · 12:03:04 "), "{header:?}");
     }
 
     #[test]
@@ -3606,10 +3667,12 @@ mod tests {
             .iter()
             .position(|row| row.contains("Nothing here right now."))
             .expect("the empty message");
-        // The rows of the list run from 5 to 22.
-        assert_eq!(row, 14, "{rows:#?}");
-        let left = rows[row].len() - rows[row].trim_start().len();
-        let right = rows[row].len() - rows[row].trim_end().len();
+        // The rows of the list run from 8 to 22.
+        assert_eq!(row, 15, "{rows:#?}");
+        // The dots of the backdrop are not part of the message.
+        let text = rows[row].replace('·', " ");
+        let left = text.len() - text.trim_start().len();
+        let right = text.len() - text.trim_end().len();
         assert!(left.abs_diff(right) <= 1, "{:?}", rows[row]);
     }
 
@@ -3669,10 +3732,10 @@ mod tests {
         let buffer = buffer(&mut app, 160, 13);
         let rows = rows(&buffer);
         let row = |pid: &str| rows.iter().position(|row| row.contains(pid)).unwrap() as u16;
-        let selected = buffer[(0, row("102"))].clone();
+        let selected = buffer[(1, row("102"))].clone();
         assert_eq!(selected.symbol(), "▌");
         assert_eq!(selected.bg, app.theme.selected_color());
-        assert_eq!(buffer[(0, row("101"))].symbol(), " ");
+        assert_eq!(buffer[(1, row("101"))].symbol(), " ");
     }
 
     #[test]
@@ -3724,13 +3787,13 @@ mod tests {
         assert!(screen.contains("SELECT pg_sleep(5)"));
         assert!(!screen.contains("103"));
         assert!(screen.contains("Sessions  3/100"));
-        assert!(screen.starts_with(concat!("pg-probe  ", env!("CARGO_PKG_VERSION"), " ")));
+        assert!(screen.contains(concat!(" pg-probe  ", env!("CARGO_PKG_VERSION"), " ")));
     }
 
     #[test]
     fn waiting_view_lists_only_lock_waits() {
         let screen = screen(&mut app(View::Waiting));
-        assert!(screen.contains(" Waiting 1 ━"), "{screen}");
+        assert!(screen.contains(" 2 Waiting 1 "), "{screen}");
         assert!(screen.contains("UPDATE t SET id = 1"));
         assert!(!screen.contains("pg_sleep"));
     }
@@ -3801,7 +3864,10 @@ mod tests {
             .map(|line| line.iter().map(|cell| cell.symbol()).collect::<String>() + "\n")
             .collect();
         assert!(screen.contains("PID 101 ·"), "{screen}");
-        assert!(screen.lines().any(|l| l.trim() == "from"), "{screen}");
+        // The first column may hold a dot of the backdrop, and the last
+        // column of the page the scrollbar.
+        let from = |l: &str| l.trim_matches(['·', '│', ' ']) == "from";
+        assert!(screen.lines().any(from), "{screen}");
     }
 
     #[test]
@@ -3855,11 +3921,11 @@ mod tests {
         let section = |name: &str| {
             lines
                 .iter()
-                .position(|l| l.starts_with(&format!("{name} ─")) && l.trim_end().ends_with("─ 1"))
+                .position(|l| l.contains(&format!("{name} ─")) && l.trim_end().ends_with("─ 1"))
         };
         assert!(section("bench").is_some(), "{screen}");
         let reports = section("reports").expect("a section per group");
-        assert!(lines[reports + 2].starts_with("▌ 101"), "{screen}");
+        assert!(lines[reports + 2].contains(" ▌ 101"), "{screen}");
     }
 
     #[test]
@@ -3873,7 +3939,7 @@ mod tests {
         let lines: Vec<&str> = screen.lines().collect();
         assert!(lines[1].contains("active 2 ▄█"), "{screen}");
         assert!(lines[1].contains("waiting 1 ▁█"), "{screen}");
-        assert!(lines[2].contains(" Running 2 "), "{screen}");
+        assert!(lines[3].contains(" Running 2 "), "{screen}");
     }
 
     #[test]
@@ -3973,14 +4039,14 @@ mod tests {
         assert!(screen.contains("Settings"), "{screen}");
         assert!(screen.contains("Reading the settings…"), "{screen}");
         // 9.3 has no pending_restart, so the footer has no `p`.
-        assert!(rows[23].starts_with("1-6 view • ↑↓ move • / search • d changed • r reload"));
+        assert!(rows[23].starts_with(" 1-6 view • ↑↓ move • / search • d changed • r reload"));
         app.help = true;
         let screen = self::rows(&buffer(&mut app, 80, 24)).join("\n");
         assert!(screen.contains("Server settings"), "{screen}");
         assert!(screen.contains("Read the settings again"), "{screen}");
         assert!(screen.contains("Quit from anywhere"), "{screen}");
         assert!(screen.contains("Waits for a restart"), "{screen}");
-        assert!(screen.contains("╰─ any key close"), "{screen}");
+        assert!(screen.contains("any key close"), "{screen}");
     }
 
     #[test]
@@ -4052,7 +4118,7 @@ mod tests {
             .map(|line| line.iter().map(|cell| cell.symbol()).collect::<String>() + "\n")
             .collect();
         assert!(screen.contains("Blocking queries"), "{screen}");
-        assert!(screen.contains("Estimated plan (EXPLAIN)"), "{screen}");
+        assert!(screen.contains("Plan from EXPLAIN"), "{screen}");
     }
 
     #[test]
