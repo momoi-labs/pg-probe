@@ -99,11 +99,12 @@ key Enter
 shot query
 key e
 shot query-plan
-key Escape 1
+key e 1
 key f
 shot query-functions
-key Escape 1
-key Escape 1
+# The keys that opened each layer close it; a lone Escape can get lost.
+key f 1
+key v 1
 key Space 1
 
 echo "holding a lock on every branch for 30 s"
