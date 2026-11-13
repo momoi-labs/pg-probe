@@ -1325,7 +1325,8 @@ dependencies = [
 [[package]]
 name = "kiso-core"
 version = "0.1.0"
-source = "git+https://github.com/momoi-labs/blueprint?rev=427a255606d52518c97295346dee9921001b1703#427a255606d52518c97295346dee9921001b1703"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c98707f7b79d77e4cfa0b39703345009dca1e0a8a10a7f52b7530b6ad70a95a9"
 dependencies = [
  "serde",
  "ts-rs",
@@ -1334,7 +1335,8 @@ dependencies = [
 [[package]]
 name = "kiso-tokens"
 version = "0.5.0"
-source = "git+https://github.com/momoi-labs/blueprint?rev=427a255606d52518c97295346dee9921001b1703#427a255606d52518c97295346dee9921001b1703"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a74a7aeccad7a69a943dadef102467a5e80e94fe09696d4ea9e2c97f20e5a866"
 
 [[package]]
 name = "lab"
@@ -3136,7 +3138,8 @@ dependencies = [
 [[package]]
 name = "tui-kiso"
 version = "0.1.0"
-source = "git+https://github.com/momoi-labs/blueprint?rev=427a255606d52518c97295346dee9921001b1703#427a255606d52518c97295346dee9921001b1703"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7be8fbdeb7bb0c988401203c023d13282f1f4ccfa7d49e06e6ca076eab9d39d9"
 dependencies = [
  "kiso-core",
  "kiso-tokens",
