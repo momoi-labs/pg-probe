@@ -90,8 +90,8 @@ file has a bug.
 ## Terminal view
 
 `pg-probe top` and the capture progress screen are terminal views. They draw
-with `tui-kiso` and take their colors from `kiso-tokens`, both from blueprint
-at the rev pinned in `Cargo.toml` (`427a255`). Move both revs together. The
+with `tui-kiso` and take their colors from `kiso-tokens`, both from crates.io
+at the versions pinned in `Cargo.toml`. The
 accent is gold: `top::theme()` is `Theme::new(kiso_tokens::GOLD_DARK)`, which
 sends 24-bit color only when `COLORTERM` is `truecolor` or `24bit`, and the
 nearest xterm-256 color otherwise.
